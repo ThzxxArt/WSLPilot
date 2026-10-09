@@ -1,9 +1,14 @@
-import { app, shell } from 'electron'
-import { CH } from '@wslpilot/shared'
+import { app, dialog, shell } from 'electron'
+import { CH, createAppError, type FileFilter } from '@wslpilot/shared'
 import type { IpcContext } from '../router'
 
 type AddFn = (channel: string, // 参数经 parseIpcArgs 校验后按通道约定类型传入
   handler: (ctx: IpcContext, arg: never) => unknown) => void
+
+function toElectronFilters(filters?: FileFilter[]): Electron.FileFilter[] | undefined {
+  if (!filters || filters.length === 0) return undefined
+  return filters.map((f) => ({ name: f.name, extensions: f.extensions }))
+}
 
 export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
   add(CH.appGetVersion, () => app.getVersion())
@@ -32,5 +37,55 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
     const win = c.getMainWindow()
     if (!win) return
     win.close()
+  })
+
+  // ── 系统文件对话框（M4 备份迁移向导选路径）──
+  add(CH.appPickDirectory, async (c, arg: never): Promise<string | null> => {
+    const o = (arg ?? {}) as { defaultPath?: string }
+    const win = c.getMainWindow()
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: o.defaultPath,
+    }
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]!
+  })
+
+  add(CH.appPickSaveFile, async (c, arg: never): Promise<string | null> => {
+    const o = (arg ?? {}) as {
+      defaultPath?: string
+      suggestedName?: string
+      filters?: FileFilter[]
+    }
+    const win = c.getMainWindow()
+    const opts: Electron.SaveDialogOptions = {
+      title: '选择保存位置',
+      defaultPath: o.defaultPath ?? o.suggestedName,
+      filters: toElectronFilters(o.filters),
+    }
+    const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    return result.canceled || !result.filePath ? null : result.filePath
+  })
+
+  add(CH.appPickOpenFile, async (c, arg: never): Promise<string | null> => {
+    const o = (arg ?? {}) as { defaultPath?: string; filters?: FileFilter[] }
+    const win = c.getMainWindow()
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择文件',
+      properties: ['openFile'],
+      defaultPath: o.defaultPath,
+      filters: toElectronFilters(o.filters),
+    }
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]!
+  })
+
+  add(CH.appOpenPath, async (_c, target: never): Promise<void> => {
+    const p = String(target)
+    const err = await shell.openPath(p)
+    if (err) {
+      throw createAppError('IO_ERROR', { message: '无法打开路径', detail: err })
+    }
   })
 }

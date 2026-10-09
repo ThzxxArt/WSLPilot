@@ -11,11 +11,14 @@ import type { ConfigService, ConfigConflictAction } from '../services/config-ser
 import type { WslService } from '../services/wsl-service'
 import type { RegistryService } from '../services/registry-service'
 import type { PtyManager } from '../services/pty-manager'
+import type { IoService } from '../services/io-service'
+import type { TaskRunner } from '../services/task-runner'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
 import { registerDistroHandlers } from './handlers/distros'
 import { registerMetaHandlers } from './handlers/meta'
 import { registerPtyHandlers } from './handlers/pty'
+import { registerIoHandlers } from './handlers/io'
 
 export interface IpcContext {
   configService: ConfigService
@@ -24,6 +27,8 @@ export interface IpcContext {
   wsl?: WslService
   registry?: RegistryService
   pty?: PtyManager
+  io?: IoService
+  tasks?: TaskRunner
 }
 
 export { serializeIpcError, deserializeIpcError, toAppError } from '@wslpilot/shared'
@@ -33,7 +38,13 @@ type Handler = (ctx: IpcContext, arg: never) => unknown
 export function registerIpcHandlers(
   ipcMain: IpcMain,
   ctx: IpcContext,
-  deps: { wsl: WslService; registry: RegistryService; pty: PtyManager },
+  deps: {
+    wsl: WslService
+    registry: RegistryService
+    pty: PtyManager
+    io: IoService
+    tasks: TaskRunner
+  },
 ): void {
   const routes = new Map<string, Handler>()
 
@@ -44,6 +55,7 @@ export function registerIpcHandlers(
   registerDistroHandlers(add, ctx, deps)
   registerMetaHandlers(add)
   registerPtyHandlers(add, deps)
+  registerIoHandlers(add, deps)
 
   for (const [channel, handler] of routes) {
     ipcMain.handle(channel, async (_event, ...args) => {

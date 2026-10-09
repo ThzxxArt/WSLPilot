@@ -15,6 +15,7 @@ export const CH = {
   ioExport: 'io:export',
   ioImport: 'io:import',
   ioMove: 'io:move',
+  ioListBackups: 'io:listBackups',
 
   // meta
   metaGet: 'meta:get',
@@ -70,6 +71,10 @@ export const CH = {
   appWindowClose: 'app:windowClose',
   appNavigate: 'app:navigate',
   appGetWslVersion: 'app:getWslVersion',
+  appPickDirectory: 'app:pickDirectory',
+  appPickSaveFile: 'app:pickSaveFile',
+  appPickOpenFile: 'app:pickOpenFile',
+  appOpenPath: 'app:openPath',
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]
@@ -88,6 +93,7 @@ export const INVOKE_CHANNELS = [
   CH.ioExport,
   CH.ioImport,
   CH.ioMove,
+  CH.ioListBackups,
   CH.metaGet,
   CH.metaSet,
   CH.registryDetail,
@@ -114,6 +120,10 @@ export const INVOKE_CHANNELS = [
   CH.appGetVersion,
   CH.appOpenConfigDir,
   CH.appGetWslVersion,
+  CH.appPickDirectory,
+  CH.appPickSaveFile,
+  CH.appPickOpenFile,
+  CH.appOpenPath,
   CH.appWindowMinimize,
   CH.appWindowMaximize,
   CH.appWindowClose,

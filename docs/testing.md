@@ -83,12 +83,13 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（M1）**：Lines 93%+ / Branches 85%+ / Functions 90%+。
+**当前基线（M4）**：Lines 94%+ / Branches 85%+ / Functions 95%+。
 
 **覆盖范围**：
-- `packages/shared/src/**`（类型契约、schema、错误、令牌）
+- `packages/shared/src/**`（类型契约、schema、错误、令牌、备份命名/命令预览）
 - `packages/kit/src/**`（jsonc、atomic-write、exec-wsl、paths、logger）
-- `apps/desktop/src/main/**`（ConfigService、IPC、tray、window）
+- `apps/desktop/src/main/**`（ConfigService、TaskRunner、IoService、IPC、tray、window）
+- `apps/desktop/src/renderer/stores|composables|features/**`（含备份向导表单纯逻辑）
 
 **不在覆盖率门禁内**（有说明）：
 - `types.ts`（纯类型，无运行时逻辑）

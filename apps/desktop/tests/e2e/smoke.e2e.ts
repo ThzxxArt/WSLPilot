@@ -24,6 +24,13 @@ test.describe('WSLPilot 启动冒烟', () => {
     await window.locator('text=终端').first().click()
     await expect(window.locator('text=node-pty')).toBeVisible({ timeout: 15_000 })
 
+    // 打开备份迁移页（M4）：向导模式与最近备份面板可见
+    await window.locator('text=备份与迁移').first().click()
+    await expect(window.locator('text=导出备份').first()).toBeVisible({ timeout: 15_000 })
+    await expect(window.locator('text=导入恢复').first()).toBeVisible({ timeout: 15_000 })
+    await expect(window.locator('text=迁移磁盘').first()).toBeVisible({ timeout: 15_000 })
+    await expect(window.locator('text=最近备份')).toBeVisible({ timeout: 15_000 })
+
     await app.close()
   })
 })

@@ -5,6 +5,7 @@ import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, zhCN, dateZh
 import DefaultLayout from './layouts/DefaultLayout.vue'
 import { useSettingsStore } from './stores/settings'
 import { useTerminalStore } from './stores/terminal'
+import { attachTaskProgress } from './composables/useTaskProgress'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
 import type { ConfigKey } from '@wslpilot/shared'
@@ -35,6 +36,7 @@ let unsubNavigate: (() => void) | undefined
 let unsubConflict: (() => void) | undefined
 let unsubPtyData: (() => void) | undefined
 let unsubPtyExit: (() => void) | undefined
+let unsubTaskProgress: (() => void) | undefined
 
 onMounted(async () => {
   await settings.load()
@@ -59,6 +61,9 @@ onMounted(async () => {
     terminal.handleExit(p.ptyId, p.code)
   })
 
+  // ★ 长任务进度应用级常驻：离开备份页也不丢进度（M4）
+  unsubTaskProgress = attachTaskProgress()
+
   // 外部修改冲突
   unsubConflict = window.wslAPI?.config.onConflict((payload) => {
     const action = window.confirm(
@@ -79,6 +84,7 @@ onUnmounted(() => {
   unsubConflict?.()
   unsubPtyData?.()
   unsubPtyExit?.()
+  unsubTaskProgress?.()
 })
 </script>
 

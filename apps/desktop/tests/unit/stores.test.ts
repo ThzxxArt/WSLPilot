@@ -135,6 +135,12 @@ describe('useSettingsStore', () => {
         copyOnSelect: false,
         theme: 'auto',
       },
+      backup: {
+        defaultDir: 'D:\\MyBackups',
+        format: 'vhd',
+        keepRecent: 9,
+        autoBackupBeforeDestructive: false,
+      },
     })
     const { useSettingsStore } = await import('../../src/renderer/stores/settings')
     const s = useSettingsStore()
@@ -143,6 +149,10 @@ describe('useSettingsStore', () => {
     expect(s.pollIntervalMs).toBe(3000)
     expect(s.closeBehavior).toBe('quit')
     expect(s.showRawCommand).toBe(true)
+    expect(s.backupDefaultDir).toBe('D:\\MyBackups')
+    expect(s.backupFormat).toBe('vhd')
+    expect(s.backupKeepRecent).toBe(9)
+    expect(s.backupAutoBeforeDestructive).toBe(false)
   })
 
   it('setters write config patches', async () => {
@@ -178,6 +188,20 @@ describe('useSettingsStore', () => {
     // load 填充终端字段
     expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
       terminal: { fontSize: 18 },
+    })
+    await s.setBackupDefaultDir('D:\\Bk')
+    await s.setBackupFormat('vhd')
+    await s.setBackupKeepRecent(7)
+    await s.setBackupAutoBeforeDestructive(false)
+    expect(s.backupDefaultDir).toBe('D:\\Bk')
+    expect(s.backupFormat).toBe('vhd')
+    expect(s.backupKeepRecent).toBe(7)
+    expect(s.backupAutoBeforeDestructive).toBe(false)
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      backup: { keepRecent: 7 },
+    })
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      backup: { autoBackupBeforeDestructive: false },
     })
   })
 })

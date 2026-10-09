@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { AccentName, AppSettings, LogLevel } from '@wslpilot/shared'
+import type { AccentName, AppSettings, BackupFormat, LogLevel } from '@wslpilot/shared'
 
 const DEFAULTS = {
   accent: 'aurora',
@@ -16,6 +16,10 @@ const DEFAULTS = {
   terminalCursorStyle: 'block' as 'block' | 'underline' | 'bar',
   terminalCursorBlink: true,
   terminalScrollback: 5000,
+  backupDefaultDir: '%USERPROFILE%\\WSL-Backups',
+  backupFormat: 'tar' as BackupFormat,
+  backupKeepRecent: 5,
+  backupAutoBeforeDestructive: true,
 } as const
 
 export const useSettingsStore = defineStore('settings', {
@@ -35,6 +39,10 @@ export const useSettingsStore = defineStore('settings', {
     terminalCursorStyle: DEFAULTS.terminalCursorStyle as 'block' | 'underline' | 'bar',
     terminalCursorBlink: DEFAULTS.terminalCursorBlink as boolean,
     terminalScrollback: DEFAULTS.terminalScrollback as number,
+    backupDefaultDir: DEFAULTS.backupDefaultDir as string,
+    backupFormat: DEFAULTS.backupFormat as BackupFormat,
+    backupKeepRecent: DEFAULTS.backupKeepRecent as number,
+    backupAutoBeforeDestructive: DEFAULTS.backupAutoBeforeDestructive as boolean,
     version: '',
   }),
 
@@ -55,6 +63,10 @@ export const useSettingsStore = defineStore('settings', {
       this.terminalCursorStyle = s.terminal.cursorStyle
       this.terminalCursorBlink = s.terminal.cursorBlink
       this.terminalScrollback = s.terminal.scrollback
+      this.backupDefaultDir = s.backup.defaultDir
+      this.backupFormat = s.backup.format
+      this.backupKeepRecent = s.backup.keepRecent
+      this.backupAutoBeforeDestructive = s.backup.autoBackupBeforeDestructive
       this.version = await window.wslAPI.app.getVersion()
       this.loaded = true
     },
@@ -112,6 +124,26 @@ export const useSettingsStore = defineStore('settings', {
     async setTerminalScrollback(scrollback: number) {
       this.terminalScrollback = scrollback
       await window.wslAPI.config.set('settings', { terminal: { scrollback } })
+    },
+
+    async setBackupDefaultDir(defaultDir: string) {
+      this.backupDefaultDir = defaultDir
+      await window.wslAPI.config.set('settings', { backup: { defaultDir } })
+    },
+
+    async setBackupFormat(format: BackupFormat) {
+      this.backupFormat = format
+      await window.wslAPI.config.set('settings', { backup: { format } })
+    },
+
+    async setBackupKeepRecent(keepRecent: number) {
+      this.backupKeepRecent = keepRecent
+      await window.wslAPI.config.set('settings', { backup: { keepRecent } })
+    },
+
+    async setBackupAutoBeforeDestructive(autoBackupBeforeDestructive: boolean) {
+      this.backupAutoBeforeDestructive = autoBackupBeforeDestructive
+      await window.wslAPI.config.set('settings', { backup: { autoBackupBeforeDestructive } })
     },
   },
 })

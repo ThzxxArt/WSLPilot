@@ -25,6 +25,20 @@ export const patchSchema = z.custom<Record<string, unknown>>(
 
 export const configKeySchema = z.enum(['settings', 'distros', 'actions', 'network', 'uiState', 'state'])
 
+/** IO 路径：拒绝控制字符与 NUL，长度受限（设计书 §14.2 路径校验） */
+export const ioPathSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+  .refine((s) => !/[\u0000-\u001f\u007f]/.test(s), { message: '路径包含非法控制字符' })
+  .refine((s) => s.trim().length > 0, { message: '路径不能为空' })
+
+export const fileFilterSchema = z.object({
+  name: z.string().min(1).max(100),
+  extensions: z.array(z.string().min(1).max(20)).min(1).max(20),
+})
+
 export const metaPayloadSchema = z.object({
   name: nameSchema,
   alias: z.string().default(''),
@@ -77,6 +91,54 @@ export const IPC_SCHEMAS: Record<string, z.ZodTypeAny> = {
     rows: z.number().int().min(1).max(200),
   }),
   [CH.ptyKill]: z.string().min(1),
+
+  // IO（M4 备份迁移）
+  [CH.ioExport]: z.object({
+    name: nameSchema,
+    path: ioPathSchema,
+    format: z.enum(['tar', 'vhd']),
+  }),
+  [CH.ioImport]: z.object({
+    name: nameSchema,
+    // 就地导入（inPlace）时允许为空；归档导入由 IoService 再校验非空
+    installPath: ioPathSchema.or(z.literal('')),
+    archivePath: ioPathSchema,
+    format: z.enum(['tar', 'vhd']),
+    version: z.union([z.literal(1), z.literal(2)]).default(2),
+    inPlace: z.boolean().default(false),
+  }),
+  [CH.ioMove]: z.object({
+    name: nameSchema,
+    path: ioPathSchema,
+    terminateFirst: z.boolean().default(false),
+  }),
+  [CH.ioListBackups]: z
+    .object({
+      dir: ioPathSchema.optional(),
+    })
+    .default({}),
+  [CH.taskCancel]: z.string().min(1).max(200),
+
+  // 系统文件对话框
+  [CH.appPickDirectory]: z
+    .object({
+      defaultPath: ioPathSchema.optional(),
+    })
+    .default({}),
+  [CH.appPickSaveFile]: z
+    .object({
+      defaultPath: ioPathSchema.optional(),
+      suggestedName: z.string().max(255).optional(),
+      filters: z.array(fileFilterSchema).max(10).optional(),
+    })
+    .default({}),
+  [CH.appPickOpenFile]: z
+    .object({
+      defaultPath: ioPathSchema.optional(),
+      filters: z.array(fileFilterSchema).max(10).optional(),
+    })
+    .default({}),
+  [CH.appOpenPath]: ioPathSchema,
 }
 
 /** 校验入参；通道约定：invoke 只传一个参数（对象或原始值） */

@@ -31,6 +31,20 @@
 - 冲突：单写者队列 + 写前重读 + chokidar 监听 + 备份轮转
 - 迁移：`$schemaVersion` + 注册迁移链 + 迁移前自动备份
 
+## 长任务（M4 备份迁移）
+
+```
+Renderer ── io:export/import/move ──▶ TaskRunner.start(lockKey=发行版名)
+                                          │  spawn wsl.exe（流式日志）
+                                          ├─ task:progress 事件（percent 可为 null）
+                                          ├─ task:cancel → kill 子进程
+                                          └─ 终态 → state.jsonc.lastTaskResult
+```
+
+- **TaskRunner**：任务生命周期、同发行版写任务串行锁、取消（含排队中任务）、日志上限 2000 行。
+- **IoService**：`--export`（tar / `--vhd`）、`--import`（`--version` / `--vhd`）、`--import-in-place`、`--manage --move`；
+  进度按「源体量 vs 目标文件增长」估算；迁移前自动备份（安全兜底）；归档导入失败自动回滚注册。
+
 ## 安全
 
 | 层 | 措施 |

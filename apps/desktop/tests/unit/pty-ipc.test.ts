@@ -63,6 +63,22 @@ function makeDeps() {
     } as any,
     registry: { detail: vi.fn(async () => ({})), listGuids: vi.fn(async () => []) } as any,
     pty: pty as any,
+    io: {
+      runExport: vi.fn(async () => ({})),
+      runImport: vi.fn(async () => {}),
+      runMove: vi.fn(async () => {}),
+      listBackups: vi.fn(async () => []),
+      resolveBackupDir: vi.fn(() => '/tmp/backups'),
+      rotateBackups: vi.fn(async () => 0),
+    } as any,
+    tasks: {
+      start: vi.fn(() => ({ taskId: 't1' })),
+      cancel: vi.fn(() => true),
+      get: vi.fn(() => null),
+      list: vi.fn(() => []),
+      waitFor: vi.fn(async () => ({})),
+      dispose: vi.fn(),
+    } as any,
   }
 }
 

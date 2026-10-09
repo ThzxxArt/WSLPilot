@@ -13,3 +13,16 @@ export function formatKbPair(usedKB: number, totalKB: number): string {
   if (!totalKB) return '—'
   return `${formatKb(usedKB)} / ${formatKb(totalKB)}`
 }
+
+/** 字节 → 人类可读（备份文件体积） */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let v = bytes
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${i === 0 ? v : v.toFixed(1)}${units[i]}`
+}

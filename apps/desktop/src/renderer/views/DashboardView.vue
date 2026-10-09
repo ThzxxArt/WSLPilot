@@ -215,7 +215,7 @@ function onMore(name: string) {
         </n-popconfirm>
         <n-button
           secondary
-          disabled
+          @click="router.push('/backup')"
         >
           📦 备份
         </n-button>

@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { formatCommand } from '@wslpilot/shared'
 
 const execFileAsync = promisify(execFile)
 
@@ -83,8 +84,7 @@ export function parseDistroList(raw: string): ParsedDistro[] {
 
 /** 生成等价命令行（仅用于界面展示，绝不用于执行） */
 export function getRawCommand(program: string, args: string[]): string {
-  const quote = (s: string) => (/[\s"'$`\\]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)
-  return [program, ...args.map(quote)].join(' ')
+  return formatCommand(program, args)
 }
 
 export interface SpawnWslOptions {
@@ -100,25 +100,43 @@ export function spawnWsl(args: string[], opts: SpawnWslOptions): { kill: () => v
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-  // stdout / stderr 各自缓冲，避免交错时把半行拼接
+  // stdout / stderr 各自缓冲，避免交错时把半行拼接；
+  // UTF-16LE 按 2 字节对解码，残缺字节留到下一块，防长输出劈字。
   const makeHandler = () => {
-    let buf = ''
-    return (chunk: Buffer) => {
-      const text = chunk.toString('utf16le').replace(/\0/g, '')
-      buf += text
-      const lines = buf.split(/\r?\n/)
-      buf = lines.pop() ?? ''
-      for (const line of lines) opts.onLine(line)
+    let pending = Buffer.alloc(0)
+    let lineBuf = ''
+    return {
+      push(chunk: Buffer) {
+        pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk])
+        const usable = pending.length - (pending.length % 2)
+        if (usable <= 0) return
+        const text = pending.subarray(0, usable).toString('utf16le').replace(/\0/g, '')
+        pending = pending.subarray(usable)
+        lineBuf += text
+        const lines = lineBuf.split(/\r?\n/)
+        lineBuf = lines.pop() ?? ''
+        for (const line of lines) opts.onLine(line)
+      },
+      flush() {
+        if (pending.length > 0) {
+          lineBuf += pending.toString('utf16le').replace(/\0/g, '')
+          pending = Buffer.alloc(0)
+        }
+        if (lineBuf.trim() !== '') opts.onLine(lineBuf)
+        lineBuf = ''
+      },
     }
   }
 
   const onStdout = makeHandler()
   const onStderr = makeHandler()
 
-  child.stdout?.on('data', onStdout)
-  child.stderr?.on('data', onStderr)
+  child.stdout?.on('data', (c: Buffer) => onStdout.push(c))
+  child.stderr?.on('data', (c: Buffer) => onStderr.push(c))
   child.on('error', opts.onError)
   child.on('close', (code) => {
+    onStdout.flush()
+    onStderr.flush()
     opts.onExit(code ?? -1)
   })
 

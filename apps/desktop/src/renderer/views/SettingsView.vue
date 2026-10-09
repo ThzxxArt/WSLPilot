@@ -50,6 +50,11 @@ async function onAccentChange(name: AccentName) {
 function openConfigDir() {
   void window.wslAPI.app.openConfigDir()
 }
+
+async function browseBackupDir() {
+  const picked = await window.wslAPI.app.pickDirectory()
+  if (picked) await settings.setBackupDefaultDir(picked)
+}
 </script>
 
 <template>
@@ -205,6 +210,86 @@ function openConfigDir() {
           :max="100000"
           :step="500"
           @update:value="(v: number | null) => { if (v) settings.setTerminalScrollback(v) }"
+        />
+      </div>
+    </n-card>
+
+    <n-card
+      title="备份"
+      class="block"
+    >
+      <div class="setting-line">
+        <div style="flex: 1">
+          <div class="label">
+            默认备份目录
+          </div>
+          <div class="hint">
+            支持 %USERPROFILE% 等环境变量
+          </div>
+          <n-input
+            :value="settings.backupDefaultDir"
+            size="small"
+            style="max-width: 360px; margin-top: 6px"
+            @update:value="(v: string) => settings.setBackupDefaultDir(v)"
+          />
+        </div>
+        <n-button
+          size="small"
+          secondary
+          @click="browseBackupDir"
+        >
+          浏览…
+        </n-button>
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            默认格式
+          </div>
+          <div class="hint">
+            tar 通用；vhd 仅 WSL2 但导入更快
+          </div>
+        </div>
+        <n-select
+          :value="settings.backupFormat"
+          size="small"
+          style="width: 200px"
+          :options="[
+            { label: 'tar 归档', value: 'tar' },
+            { label: 'vhd 虚拟磁盘', value: 'vhd' },
+          ]"
+          @update:value="(v: 'tar' | 'vhd') => settings.setBackupFormat(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            备份保留份数
+          </div>
+          <div class="hint">
+            同名发行版自动轮转，超出的旧备份被清理
+          </div>
+        </div>
+        <n-input-number
+          :value="settings.backupKeepRecent"
+          size="small"
+          :min="1"
+          :max="50"
+          @update:value="(v: number | null) => { if (v) settings.setBackupKeepRecent(v) }"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            破坏性操作前自动备份
+          </div>
+          <div class="hint">
+            迁移磁盘前先导出一份备份（安全兜底）
+          </div>
+        </div>
+        <n-switch
+          :value="settings.backupAutoBeforeDestructive"
+          @update:value="(v: boolean) => settings.setBackupAutoBeforeDestructive(v)"
         />
       </div>
     </n-card>

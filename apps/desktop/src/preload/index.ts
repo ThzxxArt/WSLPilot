@@ -2,12 +2,18 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   CH,
   type AppSettings,
+  type BackupFileInfo,
   type ConfigKey,
   type ConfigMap,
   type DistroMeta,
   type DistroView,
+  type FileFilter,
+  type IoExportRequest,
+  type IoImportRequest,
+  type IoMoveRequest,
   type Metrics,
   type OverviewMetrics,
+  type TaskHandle,
   type TaskProgress,
 } from '@wslpilot/shared'
 
@@ -93,9 +99,38 @@ const api = {
     },
   },
 
+  io: {
+    export: (req: IoExportRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioExport, req),
+    import: (req: IoImportRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioImport, req),
+    move: (req: IoMoveRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioMove, req),
+    listBackups: (dir?: string): Promise<BackupFileInfo[]> =>
+      ipcRenderer.invoke(CH.ioListBackups, dir ? { dir } : {}),
+  },
+
+  task: {
+    cancel: (taskId: string): Promise<boolean> => ipcRenderer.invoke(CH.taskCancel, taskId),
+    onProgress: (cb: (p: TaskProgress) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: TaskProgress) => cb(p)
+      ipcRenderer.on(CH.taskProgress, h)
+      return () => ipcRenderer.removeListener(CH.taskProgress, h)
+    },
+  },
+
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(CH.appGetVersion),
     openConfigDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenConfigDir),
+    openPath: (target: string): Promise<void> => ipcRenderer.invoke(CH.appOpenPath, target),
+    pickDirectory: (defaultPath?: string): Promise<string | null> =>
+      ipcRenderer.invoke(CH.appPickDirectory, defaultPath ? { defaultPath } : {}),
+    pickSaveFile: (opts: {
+      defaultPath?: string
+      suggestedName?: string
+      filters?: FileFilter[]
+    }): Promise<string | null> => ipcRenderer.invoke(CH.appPickSaveFile, opts ?? {}),
+    pickOpenFile: (opts: {
+      defaultPath?: string
+      filters?: FileFilter[]
+    }): Promise<string | null> => ipcRenderer.invoke(CH.appPickOpenFile, opts ?? {}),
     getWslVersion: (): Promise<{ wslVersion: string; kernelVersion: string; raw: string }> =>
       ipcRenderer.invoke(CH.appGetWslVersion),
     minimize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMinimize),
@@ -112,4 +147,15 @@ const api = {
 contextBridge.exposeInMainWorld('wslAPI', api)
 
 export type WslApi = typeof api
-export type { AppSettings, ConfigKey, ConfigMap, DistroView, DistroMeta, Metrics, OverviewMetrics }
+export type {
+  AppSettings,
+  ConfigKey,
+  ConfigMap,
+  DistroView,
+  DistroMeta,
+  Metrics,
+  OverviewMetrics,
+  TaskHandle,
+  TaskProgress,
+  BackupFileInfo,
+}

@@ -3,13 +3,15 @@ import { join } from 'node:path'
 import { registerIpcHandlers } from './ipc/router'
 import { createConfigService } from './services/config-service'
 import { createLogger } from '@wslpilot/kit'
-import { APP_NAME } from '@wslpilot/shared'
+import { APP_NAME, CH, type TaskProgress } from '@wslpilot/shared'
 import { createMainWindow } from './window/main-window'
 import { decideClose } from './window/close-policy'
 import { createTray } from './tray/tray'
 import { createWslService } from './services/wsl-service'
 import { createRegistryService } from './services/registry-service'
 import { createPtyManager } from './services/pty-manager'
+import { createTaskRunner, type TaskRecord } from './services/task-runner'
+import { createIoService } from './services/io-service'
 import { isQuitting, markQuitting } from './app-state'
 
 // 单实例锁 —— 败者直接退出，不注册任何 bootstrap（M10）
@@ -85,6 +87,31 @@ async function bootstrap() {
     },
   })
 
+  // M4：长任务调度（导出/导入/迁移）→ task:progress 事件 + lastTaskResult 落盘
+  const tasks = createTaskRunner({
+    logger,
+    onProgress: (p: TaskProgress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CH.taskProgress, p)
+      }
+    },
+    onFinish: (rec: TaskRecord) => {
+      void configService
+        .update('state', (s) => ({
+          ...s,
+          lastTaskResult: {
+            type: rec.type,
+            distro: rec.distro ?? '',
+            status: rec.status,
+            finishedAt: new Date().toISOString(),
+          },
+        }))
+        .catch((e: unknown) => logger.warn('persist lastTaskResult failed', { error: String(e) }))
+    },
+  })
+
+  const io = createIoService({ logger, wsl, registry, configService })
+
   registerIpcHandlers(
     ipcMain,
     {
@@ -94,8 +121,10 @@ async function bootstrap() {
       wsl,
       registry,
       pty,
+      io,
+      tasks,
     },
-    { wsl, registry, pty },
+    { wsl, registry, pty, io, tasks },
   )
 
   createTray({
@@ -124,6 +153,7 @@ async function bootstrap() {
   })
 
   app.on('will-quit', () => {
+    tasks.dispose()
     pty.killAll()
     configService.dispose()
   })

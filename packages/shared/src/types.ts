@@ -181,6 +181,51 @@ export interface TaskProgress {
 
 export type TaskHandle = { taskId: string }
 
+/** 备份文件信息（io:listBackups 返回） */
+export interface BackupFileInfo {
+  /** 文件名（不含目录） */
+  name: string
+  path: string
+  sizeBytes: number
+  modifiedAt: string
+  format: BackupFormat
+}
+
+/** io:export 入参 */
+export interface IoExportRequest {
+  name: string
+  path: string
+  format: BackupFormat
+}
+
+/** io:import 入参 */
+export interface IoImportRequest {
+  /** 新发行版名称 */
+  name: string
+  /** 安装位置（就地导入时忽略） */
+  installPath: string
+  /** 归档 / vhdx 路径 */
+  archivePath: string
+  format: BackupFormat
+  version: 1 | 2
+  /** 就地导入（wsl --import-in-place，仅 vhd） */
+  inPlace: boolean
+}
+
+/** io:move 入参 */
+export interface IoMoveRequest {
+  name: string
+  path: string
+  /** 运行中时先 terminate（DISTRO_RUNNING 安全兜底） */
+  terminateFirst: boolean
+}
+
+/** 系统文件对话框过滤器 */
+export interface FileFilter {
+  name: string
+  extensions: string[]
+}
+
 export interface DirEntry {
   name: string
   path: string

@@ -1,5 +1,6 @@
 export * from './types'
 export * from './format'
+export * from './commands'
 export * from './channels'
 export * from './errors'
 export * from './config-schema'
