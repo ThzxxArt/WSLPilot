@@ -1,0 +1,24 @@
+{
+  "name": "@wslpilot/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WSLPilot 跨进程共享类型、IPC 通道、schema 与错误码",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./channels": "./src/channels.ts",
+    "./errors": "./src/errors.ts",
+    "./config-schema": "./src/config-schema.ts",
+    "./constants": "./src/constants.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

@@ -1,0 +1,22 @@
+// WSLPilot network.jsonc 示例（文档用）
+{
+  "$schemaVersion": 1,
+  "portForwarding": [
+    {
+      "id": "dev-3000",
+      "distro": "Ubuntu-22.04",
+      "listenAddress": "0.0.0.0",
+      "listenPort": 3000,
+      "connectAddress": "127.0.0.1",
+      "connectPort": 3000,
+      "enabled": true,
+      "protocol": "tcp"
+    }
+  ],
+  "proxy": {
+    "useWindowsProxy": false,
+    "httpProxy": "",
+    "httpsProxy": "",
+    "noProxy": "localhost,127.0.0.1"
+  }
+}

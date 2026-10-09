@@ -1,0 +1,25 @@
+{
+  "name": "@wslpilot/kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WSLPilot 主进程工具集：exec、原子写、JSONC、路径、日志",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./atomic-write": "./src/atomic-write.ts",
+    "./jsonc": "./src/jsonc.ts",
+    "./paths": "./src/paths.ts",
+    "./logger": "./src/logger.ts",
+    "./exec-wsl": "./src/exec-wsl.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wslpilot/shared": "*",
+    "jsonc-parser": "^3.3.1"
+  }
+}

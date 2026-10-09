@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build outputs
+dist/
+out/
+release/
+*.tsbuildinfo
+
+# Electron
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/
+
+# Generated
+packages/ui/src/styles/tokens.generated.scss
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+*.swp
+*~
+
+# Test
+coverage/
+playwright-report/
+test-results/
+
+# Env
+.env
+.env.local
+
+# Packaging artifacts
+*.exe
+*.zip
+*.blockmap

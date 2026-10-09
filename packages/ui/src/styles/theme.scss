@@ -1,0 +1,52 @@
+@use './tokens.generated.scss' as tokens;
+
+@include tokens.pilot-css-vars;
+
+// 强调色由 JS 在 :root 上覆盖 --color-accent 系列变量
+
+// ── 玻璃拟态 ───────────────────────────────────────────────
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: var(--glass-border);
+}
+
+// ── 布局骨架 ───────────────────────────────────────────────
+.pilot-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-bg-canvas);
+}
+
+.pilot-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.pilot-content {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-6);
+}
+
+// ── 过渡 ───────────────────────────────────────────────────
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition:
+    opacity var(--dur-base) var(--ease-standard),
+    transform var(--dur-base) var(--ease-standard);
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}

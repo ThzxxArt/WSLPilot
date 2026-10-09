@@ -1,0 +1,17 @@
+// WSLPilot distros.jsonc 示例（文档用）
+{
+  "$schemaVersion": 1,
+  "distros": [
+    {
+      "name": "Ubuntu-22.04",
+      "alias": "主力开发",
+      "tags": ["work", "node", "python"],
+      "color": "#E95420",
+      "icon": "ubuntu",
+      "note": "日常开发使用，勿随意迁移",
+      "startupCwd": "/home/me/project",
+      "pinned": true,
+      "quickActions": ["update-all", "open-code"]
+    }
+  ]
+}

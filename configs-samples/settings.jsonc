@@ -1,0 +1,41 @@
+// WSLPilot settings.jsonc 示例（文档用）
+{
+  "$schemaVersion": 2,
+  "general": {
+    "autoRefreshOnStart": true,
+    "pollIntervalMs": 5000,
+    "locale": "system",
+    "theme": "light",
+    "accent": "aurora",
+    "closeBehavior": "minimizeToTray",
+    "launchAtLogin": false,
+    "reduceMotion": false
+  },
+  "wsl": {
+    "defaultShell": "",
+    "autoShutdownAfterConfigChange": false,
+    "installSource": "store"
+  },
+  "terminal": {
+    "fontFamily": "Cascadia Mono, Consolas, monospace",
+    "fontSize": 14,
+    "lineHeight": 1.2,
+    "cursorStyle": "block",
+    "cursorBlink": true,
+    "scrollback": 5000,
+    "copyOnSelect": false,
+    "theme": "auto"
+  },
+  "backup": {
+    "defaultDir": "%USERPROFILE%\\WSL-Backups",
+    "format": "tar",
+    "keepRecent": 5,
+    "autoBackupBeforeDestructive": true
+  },
+  "advanced": {
+    "showRawCommand": false,
+    "confirmDestructive": true,
+    "logLevel": "info",
+    "hardwareAcceleration": true
+  }
+}

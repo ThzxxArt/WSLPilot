@@ -1,0 +1,42 @@
+{
+  "name": "wslpilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WSLPilot — WSL 的驾驶舱。现代化 Windows Subsystem for Linux 图形化控制中枢。",
+  "license": "MIT",
+  "packageManager": "npm@12.0.2",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @wslpilot/desktop",
+    "build": "npm run build --workspaces --if-present && npm run package --workspace @wslpilot/desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint . --ext .ts,.vue && stylelint \"**/*.{scss,css,vue}\"",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "tokens": "tsx scripts/gen-tokens.ts",
+    "postinstall": "npm run tokens"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-vue": "^9.32.0",
+    "prettier": "^3.4.2",
+    "stylelint": "^16.12.0",
+    "stylelint-config-standard-scss": "^14.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true,
+    "esbuild@0.28.2": true,
+    "vue-demi@0.14.10": true,
+    "@parcel/watcher@2.6.0": true
+  }
+}

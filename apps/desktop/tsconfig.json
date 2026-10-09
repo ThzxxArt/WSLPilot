@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/renderer/*"],
+      "@ui/*": ["../../packages/ui/src/*"],
+      "@shared/*": ["../../packages/shared/src/*"],
+      "@kit/*": ["../../packages/kit/src/*"]
+    }
+  },
+  "include": ["src", "tests", "electron.vite.config.ts"]
+}

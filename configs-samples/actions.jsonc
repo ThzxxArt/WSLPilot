@@ -1,0 +1,19 @@
+// WSLPilot actions.jsonc 示例（文档用）
+{
+  "$schemaVersion": 1,
+  "actions": [
+    {
+      "id": "update-all",
+      "label": "全量更新",
+      "description": "apt update && apt upgrade",
+      "icon": "refresh",
+      "scope": "distro",
+      "program": "/usr/bin/bash",
+      "args": ["-lc", "sudo apt update && sudo apt upgrade -y"],
+      "user": "root",
+      "cwd": "/",
+      "terminal": true,
+      "confirm": true
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+/** 结构化应用错误 — 面向用户可读，附带建议操作 */
+export interface AppError {
+  code: ErrorCode
+  message: string
+  detail?: string
+  rawCommand?: string
+  recoverable: boolean
+  suggestion?: string
+}
+
+export type ErrorCode =
+  | 'WSL_NOT_INSTALLED'
+  | 'WSL_NOT_FOUND'
+  | 'DISTRO_RUNNING'
+  | 'DISTRO_NOT_FOUND'
+  | 'PERMISSION_DENIED'
+  | 'CONFIG_INVALID'
+  | 'CONFIG_CONFLICT'
+  | 'IO_ERROR'
+  | 'TASK_CANCELED'
+  | 'TASK_FAILED'
+  | 'UNKNOWN'
+
+export class WslPilotError extends Error implements AppError {
+  readonly code: ErrorCode
+  readonly detail?: string
+  readonly rawCommand?: string
+  readonly recoverable: boolean
+  readonly suggestion?: string
+
+  constructor(init: AppError) {
+    super(init.message)
+    this.name = 'WslPilotError'
+    this.code = init.code
+    this.detail = init.detail
+    this.rawCommand = init.rawCommand
+    this.recoverable = init.recoverable
+    this.suggestion = init.suggestion
+  }
+
+  toJSON(): AppError {
+    return {
+      code: this.code,
+      message: this.message,
+      detail: this.detail,
+      rawCommand: this.rawCommand,
+      recoverable: this.recoverable,
+      suggestion: this.suggestion,
+    }
+  }
+}
+
+export function isAppError(e: unknown): e is AppError {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'code' in e &&
+    'message' in e &&
+    'recoverable' in e
+  )
+}
+
+/** 错误码 → 默认中文文案与建议 */
+export const ERROR_CATALOG: Record<ErrorCode, { message: string; suggestion?: string; recoverable: boolean }> = {
+  WSL_NOT_INSTALLED: {
+    message: '系统未启用 WSL',
+    suggestion: '点击「一键安装 WSL」或运行 wsl --install',
+    recoverable: true,
+  },
+  WSL_NOT_FOUND: {
+    message: '找不到 wsl.exe',
+    suggestion: '请检查 PATH 环境变量中是否包含 WSL 安装路径',
+    recoverable: true,
+  },
+  DISTRO_RUNNING: {
+    message: '该发行版正在运行',
+    suggestion: '请先终止（terminate）该发行版后再操作',
+    recoverable: true,
+  },
+  DISTRO_NOT_FOUND: {
+    message: '找不到指定的发行版',
+    suggestion: '请刷新发行版列表后重试',
+    recoverable: true,
+  },
+  PERMISSION_DENIED: {
+    message: '需要管理员权限',
+    suggestion: '将通过提权助手完成此操作，请在 UAC 弹窗中确认',
+    recoverable: true,
+  },
+  CONFIG_INVALID: {
+    message: '配置文件格式有误',
+    suggestion: '请根据行号提示修正配置后重试',
+    recoverable: true,
+  },
+  CONFIG_CONFLICT: {
+    message: '配置文件已被外部修改',
+    suggestion: '请选择「重载」「覆盖」或「对比」以解决冲突',
+    recoverable: true,
+  },
+  IO_ERROR: {
+    message: '文件读写失败',
+    recoverable: true,
+  },
+  TASK_CANCELED: {
+    message: '任务已取消',
+    recoverable: true,
+  },
+  TASK_FAILED: {
+    message: '任务执行失败',
+    recoverable: true,
+  },
+  UNKNOWN: {
+    message: '发生未知错误',
+    recoverable: true,
+  },
+}
+
+export function createAppError(code: ErrorCode, overrides: Partial<AppError> = {}): WslPilotError {
+  const base = ERROR_CATALOG[code]
+  return new WslPilotError({
+    code,
+    message: overrides.message ?? base.message,
+    detail: overrides.detail,
+    rawCommand: overrides.rawCommand,
+    recoverable: overrides.recoverable ?? base.recoverable,
+    suggestion: overrides.suggestion ?? base.suggestion,
+  })
+}
