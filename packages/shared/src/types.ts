@@ -180,7 +180,31 @@ export interface TaskProgress {
   status: TaskStatus
 }
 
-export type TaskHandle = { taskId: string }
+/** 任务句柄；terminal 动作附带临时 PTY 会话 id 与目标发行版 */
+export type TaskHandle = { taskId: string; ptyId?: string; distro?: string }
+
+/** Lxss 注册表详情（registry:detail 返回 — M5 注册表详情） */
+export interface RegistryDetail {
+  guid: string
+  distributionName: string
+  basePath?: string
+  version?: 1 | 2
+  defaultUid?: number
+  /** REG_DWORD Flags（发行版标志位） */
+  flags?: number
+  /** reg query 原始键值（字符串形态，展示用） */
+  values: Record<string, string>
+}
+
+/** 发行版内文件读取结果（fs:read — 文本优先，二进制/超限截断） */
+export interface FsReadResult {
+  text: string
+  sizeBytes: number
+  /** 超过读取上限被截断（编辑器只读展示） */
+  truncated: boolean
+  /** 非 UTF-8 文本（二进制），text 为空 */
+  binary: boolean
+}
 
 /** 备份文件信息（io:listBackups 返回） */
 export interface BackupFileInfo {

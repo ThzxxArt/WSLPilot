@@ -21,6 +21,8 @@ const DEFAULTS = {
   backupFormat: 'tar' as BackupFormat,
   backupKeepRecent: 5,
   backupAutoBeforeDestructive: true,
+  wslDefaultShell: '',
+  wslAutoShutdownAfterConfigChange: false,
 } as const
 
 export const useSettingsStore = defineStore('settings', {
@@ -44,6 +46,8 @@ export const useSettingsStore = defineStore('settings', {
     backupFormat: DEFAULTS.backupFormat as BackupFormat,
     backupKeepRecent: DEFAULTS.backupKeepRecent as number,
     backupAutoBeforeDestructive: DEFAULTS.backupAutoBeforeDestructive as boolean,
+    wslDefaultShell: DEFAULTS.wslDefaultShell as string,
+    wslAutoShutdownAfterConfigChange: DEFAULTS.wslAutoShutdownAfterConfigChange as boolean,
     lastError: null as AppError | null,
     version: '',
   }),
@@ -74,6 +78,8 @@ export const useSettingsStore = defineStore('settings', {
         this.backupFormat = s.backup.format
         this.backupKeepRecent = s.backup.keepRecent
         this.backupAutoBeforeDestructive = s.backup.autoBackupBeforeDestructive
+        this.wslDefaultShell = s.wsl.defaultShell
+        this.wslAutoShutdownAfterConfigChange = s.wsl.autoShutdownAfterConfigChange
       } catch (e) {
         this.lastError = toAppError(e)
       }
@@ -158,6 +164,16 @@ export const useSettingsStore = defineStore('settings', {
     async setBackupAutoBeforeDestructive(autoBackupBeforeDestructive: boolean) {
       this.backupAutoBeforeDestructive = autoBackupBeforeDestructive
       await window.wslAPI.config.set('settings', { backup: { autoBackupBeforeDestructive } })
+    },
+
+    async setWslDefaultShell(defaultShell: string) {
+      this.wslDefaultShell = defaultShell
+      await window.wslAPI.config.set('settings', { wsl: { defaultShell } })
+    },
+
+    async setWslAutoShutdownAfterConfigChange(autoShutdownAfterConfigChange: boolean) {
+      this.wslAutoShutdownAfterConfigChange = autoShutdownAfterConfigChange
+      await window.wslAPI.config.set('settings', { wsl: { autoShutdownAfterConfigChange } })
     },
   },
 })

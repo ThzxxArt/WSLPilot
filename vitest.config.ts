@@ -20,6 +20,7 @@ export default defineConfig({
         'apps/desktop/src/renderer/composables/**/*.ts',
         'apps/desktop/src/renderer/features/terminal/**/*.ts',
         'apps/desktop/src/renderer/features/backup/**/*.ts',
+        'apps/desktop/src/renderer/features/command/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',

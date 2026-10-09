@@ -15,16 +15,3 @@ export function useCommandPalette() {
   }
   return { open, openPalette, closePalette, togglePalette }
 }
-
-/** Ctrl/⌘ + K 全局快捷键（设计书 §11.5 / §13.3） */
-export function bindCommandPaletteHotkey(): () => void {
-  const { togglePalette } = useCommandPalette()
-  const onKey = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault()
-      togglePalette()
-    }
-  }
-  window.addEventListener('keydown', onKey)
-  return () => window.removeEventListener('keydown', onKey)
-}

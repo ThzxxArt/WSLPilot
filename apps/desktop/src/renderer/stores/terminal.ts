@@ -93,6 +93,30 @@ export const useTerminalStore = defineStore('terminal', {
       if (this.sessions.some((s) => s.ptyId === id)) this.activeId = id
     },
 
+    /**
+     * 收编已存在的主进程 PTY 会话（M5 terminal 动作的临时 PTY）。
+     * 不发 pty:create，只登记标签与输出缓冲。
+     */
+    adopt(
+      ptyId: string,
+      opts: { title?: string; distro: string; shell?: string },
+    ): TerminalSession | null {
+      const existing = this.sessions.find((s) => s.ptyId === ptyId)
+      if (existing) return existing
+      const session: TerminalSession = {
+        ptyId,
+        title: opts.title?.trim() || opts.distro,
+        distro: opts.distro,
+        shell: opts.shell ?? '',
+        createdAt: Date.now(),
+        alive: true,
+      }
+      buffers.set(ptyId, '')
+      this.sessions.push(session)
+      this.activeId = ptyId
+      return session
+    },
+
     rename(id: string, title: string) {
       const s = this.sessions.find((x) => x.ptyId === id)
       if (s && title.trim()) s.title = title.trim().slice(0, 80)

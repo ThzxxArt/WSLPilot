@@ -47,7 +47,8 @@ export function registerDistroHandlers(
   })
 
   add(CH.registryDetail, async (_c, name: string) => {
-    return registry.detail(assertName(name))
+    // M5 注册表详情：完整 Lxss 信息（GUID / BasePath / Flags / 原始键值）
+    return registry.detailFull(assertName(name))
   })
 
   add(CH.metricsSample, async (c, name: string) => {

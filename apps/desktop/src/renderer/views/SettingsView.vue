@@ -16,9 +16,10 @@ import {
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
 import { errorLine } from '../composables/useAppError'
+import { HOTKEY_TABLE } from '../composables/useHotkeys'
 import { ACCENT_GRADIENTS, ACCENT_PRIMARY } from '@shared/constants'
 import type { AccentName } from '@shared/types'
-import { applyAccentToDom } from '@wslpilot/ui'
+import { applyAccentToDom, Kbd } from '@wslpilot/ui'
 
 const settings = useSettingsStore()
 const message = useMessage()
@@ -82,6 +83,10 @@ const setFontFamilyDebounced = makeDebouncedSetter(
 const setBackupDirDebounced = makeDebouncedSetter(
   () => settings.backupDefaultDir,
   (v: string) => settings.setBackupDefaultDir(v),
+)
+const setDefaultShellDebounced = makeDebouncedSetter(
+  () => settings.wslDefaultShell,
+  (v: string) => settings.setWslDefaultShell(v),
 )
 
 /** 配置文件逐个打开（§12.7） */
@@ -162,6 +167,34 @@ function setKeepRecent(v: number | null) {
         <n-switch
           :value="settings.reduceMotion"
           @update:value="(v: boolean) => settings.setReduceMotion(v)"
+        />
+      </div>
+    </n-card>
+
+    <n-card title="WSL" class="block">
+      <div class="setting-line">
+        <div style="flex: 1">
+          <div class="label">默认 Shell</div>
+          <div class="hint">空 = /bin/bash · 新终端以此启动</div>
+          <n-input
+            :value="settings.wslDefaultShell"
+            size="small"
+            style="max-width: 320px; margin-top: 6px"
+            placeholder="/bin/bash"
+            @update:value="(v: string) => setDefaultShellDebounced(v)"
+          />
+        </div>
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">wsl.conf 变更后自动终止发行版</div>
+          <div class="hint">
+            保存 /etc/wsl.conf 后自动 terminate 该发行版（完全停止后约 8 秒配置生效）
+          </div>
+        </div>
+        <n-switch
+          :value="settings.wslAutoShutdownAfterConfigChange"
+          @update:value="(v: boolean) => settings.setWslAutoShutdownAfterConfigChange(v)"
         />
       </div>
     </n-card>
@@ -309,6 +342,16 @@ function setKeepRecent(v: number | null) {
       </div>
     </n-card>
 
+    <n-card title="快捷键" class="block">
+      <p class="hint">全局可用 · macOS 上 Ctrl 对应 ⌘</p>
+      <div class="hotkey-list">
+        <div v-for="h in HOTKEY_TABLE" :key="h.id" class="hotkey-row">
+          <span class="hotkey-label">{{ h.label }}</span>
+          <Kbd :keys="h.keys" />
+        </div>
+      </div>
+    </n-card>
+
     <n-card title="配置目录" class="block">
       <p class="hint">所有持久化状态为人类可读 JSONC，路径可见、内容可改、可纳入 Git。</p>
       <n-space style="margin-top: 12px" align="center">
@@ -444,5 +487,30 @@ function setKeepRecent(v: number | null) {
 
 .config-tag:hover {
   opacity: 0.85;
+}
+
+.hotkey-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hotkey-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.hotkey-row:first-child {
+  border-top: none;
+}
+
+.hotkey-label {
+  font-size: 13px;
+  color: var(--color-text-primary);
 }
 </style>

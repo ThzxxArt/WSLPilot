@@ -115,6 +115,36 @@ function makeDeps() {
       waitFor: vi.fn(async () => ({})),
       dispose: vi.fn(),
     } as any,
+    wslconf: {
+      read: vi.fn(async () => ''),
+      write: vi.fn(async () => ({ terminated: false })),
+    } as any,
+    runner: {
+      prepare: vi.fn(async () => ({
+        action: {
+          id: 'a1',
+          label: 'A',
+          scope: 'distro',
+          program: '/bin/true',
+          args: [],
+          terminal: false,
+          confirm: false,
+        },
+        distro: 'Ubuntu',
+        program: '/bin/true',
+        args: [],
+        rawCommand: 'wsl.exe -d Ubuntu -e /bin/true',
+      })),
+      spawnTerminal: vi.fn(() => ({ ptyId: 'ap1', distro: 'U', shell: 'p', createdAt: 0 })),
+      run: vi.fn(async () => {}),
+      killSession: vi.fn(),
+    } as any,
+    fsBridge: {
+      readDir: vi.fn(async () => []),
+      read: vi.fn(async () => ({ text: '', sizeBytes: 0, truncated: false, binary: false })),
+      write: vi.fn(async () => {}),
+      revealInExplorer: vi.fn(async () => {}),
+    } as any,
   }
 }
 
@@ -148,6 +178,19 @@ describe('IPC router + handlers', () => {
     expect(channels).toContain(CH.appWindowMinimize)
     expect(channels).toContain(CH.appWindowMaximize)
     expect(channels).toContain(CH.appWindowClose)
+  })
+
+  it('registers M5 channels（wslconf / actions / fs）', () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    const channels = [...wrapped.keys()]
+    expect(channels).toContain(CH.wslconfRead)
+    expect(channels).toContain(CH.wslconfWrite)
+    expect(channels).toContain(CH.actionRun)
+    expect(channels).toContain(CH.fsReadDir)
+    expect(channels).toContain(CH.fsRead)
+    expect(channels).toContain(CH.fsWrite)
+    expect(channels).toContain(CH.fsRevealInExplorer)
   })
 
   it('config:get loads by fileKey', async () => {

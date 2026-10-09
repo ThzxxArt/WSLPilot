@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { runWsl, parseDistroList, getRawCommand, spawnWsl } from '../src/exec-wsl'
+import { runWsl, runWslWithStdin, parseDistroList, getRawCommand, spawnWsl } from '../src/exec-wsl'
 
 const { mockExecFile, mockSpawn } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
@@ -244,5 +244,67 @@ describe('runWsl 错误消息透传（review M6 回归）', () => {
     const r = await runWsl(['--list'])
     expect(r.stderr).toContain('ENOENT')
     expect(r.code).toBe(-1)
+  })
+})
+
+describe('runWslWithStdin', () => {
+  beforeEach(() => {
+    mockSpawn.mockReset()
+  })
+
+  function fakeChild() {
+    const fake: any = new EventEmitter()
+    fake.stdout = new EventEmitter()
+    fake.stderr = new EventEmitter()
+    fake.stdin = new EventEmitter()
+    fake.stdin.end = vi.fn()
+    fake.kill = vi.fn()
+    return fake
+  }
+
+  it('写入 UTF-8 stdin 并解码 UTF-16LE 输出', async () => {
+    const fake = fakeChild()
+    mockSpawn.mockReturnValue(fake)
+
+    const p = runWslWithStdin(['-d', 'U', '-e', 'tee', '/etc/wsl.conf'], '[boot]\nsystemd = true')
+    // stdin.end 必须收到 UTF-8 缓冲
+    expect(fake.stdin.end).toHaveBeenCalled()
+    const written = fake.stdin.end.mock.calls[0]![0] as Buffer
+    expect(written.toString('utf8')).toBe('[boot]\nsystemd = true')
+
+    fake.stdout.emit('data', Buffer.from('[boot]\nsystemd = true', 'utf16le'))
+    fake.emit('close', 0)
+    const r = await p
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('systemd = true')
+    expect(mockSpawn.mock.calls[0]![1]).toEqual(['-d', 'U', '-e', 'tee', '/etc/wsl.conf'])
+  })
+
+  it('透传退出码与 stderr', async () => {
+    const fake = fakeChild()
+    mockSpawn.mockReturnValue(fake)
+    const p = runWslWithStdin(['x'], 'body')
+    fake.stderr.emit('data', Buffer.from('permission denied', 'utf16le'))
+    fake.emit('close', 1)
+    const r = await p
+    expect(r.code).toBe(1)
+    expect(r.stderr).toBe('permission denied')
+  })
+
+  it('spawn 错误返回 code -1 并保留 message', async () => {
+    const fake = fakeChild()
+    mockSpawn.mockReturnValue(fake)
+    const p = runWslWithStdin(['x'], 'body')
+    fake.emit('error', new Error('spawn wsl.exe ENOENT'))
+    const r = await p
+    expect(r.code).toBe(-1)
+    expect(r.stderr).toContain('ENOENT')
+  })
+
+  it('拒绝超过 4MB 的输入', async () => {
+    const r = await runWslWithStdin(['x'], 'x'.repeat(4 * 1024 * 1024 + 1))
+    expect(r.code).toBe(-1)
+    expect(r.stderr).toContain('4MB')
+    expect(mockSpawn).not.toHaveBeenCalled()
   })
 })

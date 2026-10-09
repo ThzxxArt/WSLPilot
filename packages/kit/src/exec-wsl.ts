@@ -52,6 +52,79 @@ export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise
   }
 }
 
+/**
+ * 执行 wsl.exe 并向 stdin 写入内容（UTF-8，Linux 侧语义）。
+ * 用于 `wsl -d <name> -u root -e tee /etc/wsl.conf` 这类「内容走 stdin、不经 shell 拼接」的写入（M5）。
+ * 约束：input ≤ 4MB；输出仍按 UTF-16LE 解码。
+ */
+export async function runWslWithStdin(
+  args: string[],
+  input: string,
+  opts: WslExecOptions = {},
+): Promise<WslExecResult> {
+  const MAX_INPUT = 4 * 1024 * 1024
+  const body = String(input ?? '')
+  if (Buffer.byteLength(body, 'utf8') > MAX_INPUT) {
+    return { stdout: '', stderr: 'stdin 超过 4MB 上限\n', code: -1 }
+  }
+  const decode = (b?: Buffer | string | null): string => {
+    if (!b) return ''
+    const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
+    if (opts.encoding === 'utf8') return buf.toString('utf8')
+    return buf.toString('utf16le').replace(/\0/g, '')
+  }
+
+  return new Promise<WslExecResult>((resolve) => {
+    const child = spawn('wsl.exe', args, {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    const out: Buffer[] = []
+    const errBuf: Buffer[] = []
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.kill()
+      resolve({ stdout: '', stderr: '命令超时\n', code: -1 })
+    }, opts.timeoutMs ?? 30_000)
+    ;(timer as unknown as { unref?: () => void }).unref?.()
+
+    child.stdout?.on('data', (c: Buffer) => out.push(c))
+    child.stderr?.on('data', (c: Buffer) => errBuf.push(c))
+    child.on('error', (e: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ stdout: '', stderr: `${e.message}\n`, code: -1 })
+    })
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({
+        stdout: decode(Buffer.concat(out)),
+        stderr: decode(Buffer.concat(errBuf)),
+        code: code ?? -1,
+      })
+    })
+
+    const stdin = child.stdin
+    if (!stdin) {
+      if (!settled) {
+        settled = true
+        clearTimeout(timer)
+        resolve({ stdout: '', stderr: 'stdin 不可用\n', code: -1 })
+      }
+      return
+    }
+    stdin.on('error', () => {
+      /* EPIPE：进程提前退出，由 close 收尾 */
+    })
+    stdin.end(Buffer.from(body, 'utf8'))
+  })
+}
+
 export interface ParsedDistro {
   isDefault: boolean
   name: string

@@ -192,4 +192,78 @@ describe('PtyManager', () => {
     expect(() => pty.create({ distro: 'U', shell: '--evil', cols: 80, rows: 24 })).toThrow()
     expect(() => pty.create({ distro: 'U', shell: 'a\u0000b', cols: 80, rows: 24 })).toThrow()
   })
+
+  // ── M5：createCommand（自定义动作临时 PTY）与 waitExit ──
+
+  it('createCommand 以 -e 分界传程序与参数数组', () => {
+    const info = pty.createCommand({
+      distro: 'Ubuntu',
+      program: '/usr/bin/bash',
+      args: ['-lc', 'sudo apt update && sudo apt upgrade -y'],
+      user: 'root',
+      cwd: '/',
+      cols: 90,
+      rows: 30,
+    })
+    expect(info.distro).toBe('Ubuntu')
+    expect(info.shell).toBe('/usr/bin/bash')
+    expect(spawned[0]!.args).toEqual([
+      '-d',
+      'Ubuntu',
+      '-u',
+      'root',
+      '--cd',
+      '/',
+      '-e',
+      '/usr/bin/bash',
+      '-lc',
+      'sudo apt update && sudo apt upgrade -y',
+    ])
+  })
+
+  it('createCommand 省略 user / ~ cwd', () => {
+    pty.createCommand({ distro: 'U', program: '/bin/true', args: [], cwd: '~' })
+    expect(spawned[0]!.args).toEqual(['-d', 'U', '-e', '/bin/true'])
+  })
+
+  it('createCommand 拒绝伪参数程序 / 非法用户 / 超长参数', () => {
+    expect(() => pty.createCommand({ distro: 'U', program: '--evil', args: [] })).toThrow()
+    expect(() =>
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: [], user: '-root' }),
+    ).toThrow()
+    expect(() =>
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: ['x'.repeat(10000)] }),
+    ).toThrow()
+    expect(() =>
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: Array(201).fill('a') }),
+    ).toThrow()
+    expect(() =>
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: ['a\u0000b'] }),
+    ).toThrow()
+  })
+
+  it('createCommand 拒绝非法工作目录', () => {
+    expect(() =>
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: [], cwd: '-evil' }),
+    ).toThrow()
+    expect(() =>
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: [], cwd: 'a\u0000b' }),
+    ).toThrow()
+  })
+
+  it('createCommand 遵守会话上限', () => {
+    for (let i = 0; i < MAX_PTY_SESSIONS; i++) {
+      pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    }
+    expect(() => pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })).toThrow(/上限/)
+  })
+
+  it('waitExit 解析退出码；未知会话 reject', async () => {
+    const info = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    const p = pty.waitExit(info.ptyId)
+    procs[0]!.emitExit(7)
+    await expect(p).resolves.toBe(7)
+    expect(events.onExit).toHaveBeenCalledWith(info.ptyId, 7)
+    await expect(pty.waitExit('missing')).rejects.toMatchObject({ code: 'TASK_FAILED' })
+  })
 })

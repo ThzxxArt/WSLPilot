@@ -84,6 +84,22 @@ function makeDeps() {
       waitFor: vi.fn(async () => ({})),
       dispose: vi.fn(),
     } as any,
+    wslconf: {
+      read: vi.fn(async () => ''),
+      write: vi.fn(async () => ({ terminated: false })),
+    } as any,
+    runner: {
+      prepare: vi.fn(async () => ({})),
+      spawnTerminal: vi.fn(() => null),
+      run: vi.fn(async () => {}),
+      killSession: vi.fn(),
+    } as any,
+    fsBridge: {
+      readDir: vi.fn(async () => []),
+      read: vi.fn(async () => ({ text: '', sizeBytes: 0, truncated: false, binary: false })),
+      write: vi.fn(async () => {}),
+      revealInExplorer: vi.fn(async () => {}),
+    } as any,
   }
 }
 

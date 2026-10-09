@@ -45,6 +45,27 @@ Renderer ── io:export/import/move ──▶ TaskRunner.start(lockKey=发行�
 - **IoService**：`--export`（tar / `--vhd`）、`--import`（`--version` / `--vhd`）、`--import-in-place`、`--manage --move`；
   进度按「源体量 vs 目标文件增长」估算；迁移前自动备份（安全兜底）；归档导入失败自动回滚注册。
 
+## 配置与动作（M5）
+
+```
+Renderer ── wslconf:read/write ──▶ WslConfService（cat / root tee + stdin）
+         ── action:run ─────────▶ ActionRunner（白名单 + 变量替换）
+         │                          ├─ headless → spawnWslTask（流式日志）
+         │                          └─ terminal → PtyManager.createCommand（临时 PTY）
+         └─ fs:readDir/read/write ─▶ FsBridge（\\wsl.localhost\<distro> 9p）
+```
+
+- **wsl.conf**：INI 行级模型（`shared/wslconf.ts`）逐键最小编辑，保留注释与未知键；写入前 LCS Diff 预览；
+  写入走 `wsl -d <name> -u root -e tee /etc/wsl.conf`，内容经 stdin，绝不拼接进命令行。
+  变更在发行版完全停止后约 8 秒生效（`wsl.autoShutdownAfterConfigChange` 可自动 terminate）。
+- **ActionRunner**：只执行 `actions.jsonc` 声明的 id（执行白名单）；`${distroName}/${startupCwd}/${home}/${user}`
+  主进程纯字符串替换（`${home}/${user}` 运行前以常量脚本探测）；等价命令与真实执行同源构建（`previewActionCommand`）。
+  `terminal: true` 复用临时 PTY，`ptyId` 随 `TaskHandle` 返回并由渲染层终端仓 `adopt()` 收编为标签。
+- **FsBridge**：UNC `\\wsl.localhost\<distro>\<linuxPath>`；路径解析拒绝控制字符、`..`、Windows 非法字符，
+  并校验结果仍在发行版根内；文本读取 2MB 截断保护、写入 4MB 上限。
+- **命令面板**：`shared/fuzzy.ts` 模糊打分 + `renderer/features/command/palette.ts` 前缀/分组/最近使用；
+  最近使用持久化到 `ui-state.recentCommands`。
+
 ## 安全
 
 | 层       | 措施                                                                                                                                      |

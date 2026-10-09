@@ -8,7 +8,9 @@ import CommandPalette from './features/command/CommandPalette.vue'
 import { useSettingsStore } from './stores/settings'
 import { useTerminalStore } from './stores/terminal'
 import { attachTaskProgress } from './composables/useTaskProgress'
-import { bindCommandPaletteHotkey } from './composables/useCommandPalette'
+import { bindGlobalHotkeys } from './composables/useHotkeys'
+import { useCommandPalette } from './composables/useCommandPalette'
+import { useDistrosStore } from './stores/distros'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
 
@@ -70,8 +72,27 @@ onMounted(async () => {
   // ★ 长任务进度应用级常驻：离开备份页也不丢进度（M4）
   unsubTaskProgress = attachTaskProgress()
 
-  // ★ Ctrl/⌘+K 全局命令面板（§13.3）
-  unsubHotkey = bindCommandPaletteHotkey()
+  // ★ 全局快捷键（§11.5）：⌘K 命令面板 / ⌘N 新终端 / ⌘, 设置 / ⌘R 刷新 / ⌘⇧P 命令可见 / ⌘1..9 切标签
+  const { togglePalette } = useCommandPalette()
+  const distros = useDistrosStore()
+  unsubHotkey = bindGlobalHotkeys({
+    openPalette: togglePalette,
+    newTerminal: () => {
+      const name = distros.defaultDistro?.name ?? distros.items[0]?.name
+      if (name) void terminal.open(name)
+      void router.push('/terminal')
+    },
+    openSettings: () => void router.push('/settings'),
+    refresh: () => void distros.refresh(),
+    toggleRawCommand: () => void settings.setShowRawCommand(!settings.showRawCommand),
+    switchTab: (index) => {
+      const session = terminal.sessions[index]
+      if (session) {
+        terminal.setActive(session.ptyId)
+        void router.push('/terminal')
+      }
+    },
+  })
 
   // 外部配置冲突由 ConflictResolver（NDialog）处理，语义见该组件（review C3）
 })

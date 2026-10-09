@@ -13,6 +13,26 @@
 
 ### Added
 
+- **M5 配置与动作**：wsl.conf 编辑、注册表详情、自定义动作、命令面板（配置中心化 + ⌘K）
+  - **wsl.conf 编辑**：`/etc/wsl.conf` 可视化表单 + 原始文本双模式，逐键最小编辑保留注释
+    - 表单覆盖 automount / network / interop / user / boot 全部常见键；未知键只展示不吞掉
+    - 写入前 Diff 预览（LCS 行级差异）；写入走 `wsl -d <name> -u root -e tee /etc/wsl.conf` + stdin（内容不经 shell）
+    - 8 秒规则提示；`wsl.autoShutdownAfterConfigChange` 开启时保存后自动 terminate 使配置生效
+  - **注册表详情**：Lxss 完整信息（GUID / BasePath / DefaultUid / Flags / 原始键值），GUID 与安装位置一键复制
+  - **自定义动作**（actions.jsonc 白名单执行）：
+    - 动作卡片一键运行 + 等价命令展示；`confirm` 动作执行前二次确认（含等价命令）
+    - 动作 CRUD（新建 / 编辑 / 删除）+ 删除 Toast「撤销」
+    - 变量占位符 `${distroName} ${startupCwd} ${home} ${user}` 主进程安全替换（${home}/${user} 运行前探测）
+    - `terminal: true` 动作复用临时 PTY（会话自动收编进终端工作区，可交互、可取消）；headless 动作流式日志进任务抽屉
+  - **命令面板 ⌘K 全量升级**：模糊匹配（自研打分：连续/词首/前缀/缺口）、前缀模式（`> ` 命令 · `@ ` 发行版 · `# ` 设置）、
+    分组（动作 / 发行版 / 导航 / 设置项）、快捷键提示（Kbd）、最近使用（持久化 ui-state.recentCommands）
+  - **发行版内文件**：`\\wsl.localhost` 桥（readDir / read / write / revealInExplorer）+ 详情页「文件」标签
+    （面包屑、目录列表、文本在线编辑保存、资源管理器定位）；路径校验拒绝 `..` 逃逸与非法字符
+  - 发行版详情弹窗标签页化：概览（注册表详情）/ 配置 / 动作 / 文件
+  - 全局快捷键补齐（§11.5）：`Ctrl/⌘+K` 面板 · `Ctrl/⌘+N` 新终端 · `Ctrl/⌘+,` 设置 · `Ctrl/⌘+R` 刷新 ·
+    `Ctrl/⌘+Shift+P` 等价命令行开关 · `Ctrl/⌘+1…9` 切换终端标签；设置页新增「快捷键」一览
+  - 设置 → WSL：默认 Shell、wsl.conf 变更后自动终止策略
+  - UI 组件：CodeEditor（行号 + Tab 缩进）、Kbd（快捷键提示）
 - **质量根治（全量 review 清零）**
   - 全站错误提示修复：统一 `describeError/errorLine`，AppError（纯对象）不再被 `instanceof Error` 误判吞掉
   - 配置安全：损坏 JSONC 拒绝写回、`patch({})` 不清空文件、嵌套 `__proto__` 拒绝、`z.record` 逐键清洗、版本戳不再"说谎"
@@ -66,4 +86,4 @@
 - NSIS 安装包（支持自定义安装路径）与 portable 免安装版
 - 单元测试（解析 / schema / 迁移 / 错误码）与 CI 工作流
 
-> 完整应用尚未完成（M5–M7 未交付），首个正式版本待功能完整后再打标签。
+> 完整应用尚未完成（M6–M7 未交付），首个正式版本待功能完整后再打标签。

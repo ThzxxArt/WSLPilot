@@ -1,4 +1,4 @@
-import type { DistroRuntime } from '@wslpilot/shared'
+import type { DistroRuntime, RegistryDetail } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
 
 /**
@@ -8,6 +8,8 @@ import type { Logger } from '@wslpilot/kit'
  */
 export interface RegistryService {
   detail(name: string): Promise<Partial<DistroRuntime>>
+  /** 完整 Lxss 详情（M5 注册表详情：GUID / BasePath / Flags / 原始键值） */
+  detailFull(name: string): Promise<RegistryDetail | null>
   listGuids(): Promise<Array<{ guid: string; distributionName: string }>>
 }
 
@@ -55,6 +57,34 @@ export function parseGuidDetail(guid: string, out: string): Partial<DistroRuntim
   }
 }
 
+/** 收集 reg query 输出的全部键值（字符串形态，展示用） */
+export function collectRegValues(out: string): Record<string, string> {
+  const values: Record<string, string> = {}
+  const re = /^\s*(\S+)\s+REG_\w+\s+(.+)$/gm
+  let m: RegExpExecArray | null
+  while ((m = re.exec(out))) {
+    const key = m[1]!
+    const raw = m[2]!.trim()
+    values[key] = raw.replace(/^"(.*)"$/, '$1')
+  }
+  return values
+}
+
+/** 完整详情解析（M5）：Runtime 字段 + Flags + 原始键值 */
+export function parseGuidFull(guid: string, out: string): RegistryDetail | null {
+  const base = parseGuidDetail(guid, out)
+  if (!base.name) return null
+  return {
+    guid,
+    distributionName: base.name,
+    basePath: base.basePath,
+    version: base.version,
+    defaultUid: base.defaultUid,
+    flags: parseRegDword(pickRegValue(out, 'Flags')),
+    values: collectRegValues(out),
+  }
+}
+
 /** 默认实现：调用 reg.exe */
 export async function defaultRegQuery(args: string[]): Promise<string> {
   const { execFile } = await import('node:child_process')
@@ -89,6 +119,11 @@ export function createRegistryService(
     return parseGuidDetail(guid, out)
   }
 
+  async function readGuidFull(guid: string): Promise<RegistryDetail | null> {
+    const out = await query(['query', `${LXSS}\\${guid}`, '/s'])
+    return parseGuidFull(guid, out)
+  }
+
   async function listGuids(): Promise<Array<{ guid: string; distributionName: string }>> {
     const out = await query(['query', LXSS])
     const ids = extractGuids(out)
@@ -113,6 +148,17 @@ export function createRegistryService(
         }
       }
       return {}
+    },
+
+    async detailFull(name) {
+      const guids = await listGuids()
+      const lower = name.toLowerCase()
+      for (const g of guids) {
+        if (g.distributionName.toLowerCase() === lower) {
+          return readGuidFull(g.guid)
+        }
+      }
+      return null
     },
 
     listGuids,

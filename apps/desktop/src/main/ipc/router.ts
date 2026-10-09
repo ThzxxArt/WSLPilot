@@ -13,12 +13,18 @@ import type { RegistryService } from '../services/registry-service'
 import type { PtyManager } from '../services/pty-manager'
 import type { IoService } from '../services/io-service'
 import type { TaskRunner } from '../services/task-runner'
+import type { WslConfService } from '../services/wslconf-service'
+import type { ActionRunner } from '../services/action-runner'
+import type { FsBridge } from '../services/fs-bridge'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
 import { registerDistroHandlers } from './handlers/distros'
 import { registerMetaHandlers } from './handlers/meta'
 import { registerPtyHandlers } from './handlers/pty'
 import { registerIoHandlers } from './handlers/io'
+import { registerWslConfHandlers } from './handlers/wslconf'
+import { registerActionHandlers } from './handlers/actions'
+import { registerFsHandlers } from './handlers/fs'
 
 export interface IpcContext {
   configService: ConfigService
@@ -44,6 +50,9 @@ export function registerIpcHandlers(
     pty: PtyManager
     io: IoService
     tasks: TaskRunner
+    wslconf: WslConfService
+    runner: ActionRunner
+    fsBridge: FsBridge
   },
 ): void {
   const routes = new Map<string, Handler>()
@@ -56,6 +65,9 @@ export function registerIpcHandlers(
   registerMetaHandlers(add)
   registerPtyHandlers(add, deps)
   registerIoHandlers(add, deps)
+  registerWslConfHandlers(add, deps)
+  registerActionHandlers(add, deps)
+  registerFsHandlers(add, deps)
 
   for (const [channel, handler] of routes) {
     ipcMain.handle(channel, async (_event, ...args) => {

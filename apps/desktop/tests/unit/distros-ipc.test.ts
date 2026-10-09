@@ -115,6 +115,11 @@ function makeDeps() {
     pty,
     registry: {
       detail: vi.fn(async () => ({ name: 'Ubuntu', guid: '{x}' })),
+      detailFull: vi.fn(async () => ({
+        guid: '{x}',
+        distributionName: 'Ubuntu',
+        values: { DistributionName: 'Ubuntu' },
+      })),
       listGuids: vi.fn(async () => []),
     } as any,
     io: {
@@ -132,6 +137,22 @@ function makeDeps() {
       list: vi.fn(() => []),
       waitFor: vi.fn(async () => ({})),
       dispose: vi.fn(),
+    } as any,
+    wslconf: {
+      read: vi.fn(async () => ''),
+      write: vi.fn(async () => ({ terminated: false })),
+    } as any,
+    runner: {
+      prepare: vi.fn(async () => ({})),
+      spawnTerminal: vi.fn(() => null),
+      run: vi.fn(async () => {}),
+      killSession: vi.fn(),
+    } as any,
+    fsBridge: {
+      readDir: vi.fn(async () => []),
+      read: vi.fn(async () => ({ text: '', sizeBytes: 0, truncated: false, binary: false })),
+      write: vi.fn(async () => {}),
+      revealInExplorer: vi.fn(async () => {}),
     } as any,
   }
 }
@@ -186,7 +207,7 @@ describe('distros + meta IPC handlers', () => {
     const ctx = makeCtx()
     const { wrapped, deps } = register(ctx)
     const d = await wrapped.get(CH.registryDetail)({}, 'Ubuntu')
-    expect(deps.registry.detail).toHaveBeenCalledWith('Ubuntu')
+    expect(deps.registry.detailFull).toHaveBeenCalledWith('Ubuntu')
     expect(d.guid).toBe('{x}')
   })
 

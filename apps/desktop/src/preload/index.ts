@@ -5,16 +5,20 @@ import {
   type BackupFileInfo,
   type ConfigKey,
   type ConfigMap,
+  type DirEntry,
   type DistroMeta,
   type DistroView,
   type FileFilter,
+  type FsReadResult,
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
   type Metrics,
   type OverviewMetrics,
+  type RegistryDetail,
   type TaskHandle,
   type TaskProgress,
+  type WslAction,
 } from '@wslpilot/shared'
 
 /** 类型化窄接口 — 渲染进程唯一外部边界 */
@@ -49,7 +53,7 @@ const api = {
     terminate: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosTerminate, name),
     shutdown: (): Promise<void> => ipcRenderer.invoke(CH.distrosShutdown),
     setDefault: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosSetDefault, name),
-    registryDetail: (name: string): Promise<Partial<DistroView>> =>
+    registryDetail: (name: string): Promise<RegistryDetail | null> =>
       ipcRenderer.invoke(CH.registryDetail, name),
     listOnline: (): Promise<string[]> => ipcRenderer.invoke(CH.distrosListOnline),
     install: (name?: string): Promise<TaskHandle> =>
@@ -108,6 +112,37 @@ const api = {
       ipcRenderer.invoke(CH.ioCleanupBackups, opts ?? { keep: 5 }),
   },
 
+  wslconf: {
+    /** 读 /etc/wsl.conf 原文（文件不存在返回空串） */
+    read: (name: string): Promise<string> => ipcRenderer.invoke(CH.wslconfRead, name),
+    /** 写 /etc/wsl.conf（发行版内 root）；返回是否按设置自动终止了发行版 */
+    write: (name: string, content: string): Promise<{ terminated: boolean }> =>
+      ipcRenderer.invoke(CH.wslconfWrite, { name, content }),
+  },
+
+  actions: {
+    /** 执行 actions.jsonc 白名单动作；terminal 动作附带 ptyId */
+    run: (actionId: string, distro?: string): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.actionRun, distro ? { actionId, distro } : { actionId }),
+    /** 动作清单（读 actions.jsonc） */
+    list: (): Promise<WslAction[]> =>
+      ipcRenderer.invoke(CH.configGet, 'actions').then((f: { actions: WslAction[] }) => f.actions),
+    /** 写回动作清单（整表替换） */
+    save: (actions: WslAction[]): Promise<unknown> =>
+      ipcRenderer.invoke(CH.configSet, { fileKey: 'actions', patch: { actions } }),
+  },
+
+  fs: {
+    readDir: (distro: string, path: string): Promise<DirEntry[]> =>
+      ipcRenderer.invoke(CH.fsReadDir, { distro, path }),
+    read: (distro: string, path: string): Promise<FsReadResult> =>
+      ipcRenderer.invoke(CH.fsRead, { distro, path }),
+    write: (distro: string, path: string, data: string): Promise<void> =>
+      ipcRenderer.invoke(CH.fsWrite, { distro, path, data }),
+    revealInExplorer: (distro: string, path: string): Promise<void> =>
+      ipcRenderer.invoke(CH.fsRevealInExplorer, { distro, path }),
+  },
+
   task: {
     cancel: (taskId: string): Promise<boolean> => ipcRenderer.invoke(CH.taskCancel, taskId),
     onProgress: (cb: (p: TaskProgress) => void): (() => void) => {
@@ -159,4 +194,8 @@ export type {
   TaskHandle,
   TaskProgress,
   BackupFileInfo,
+  RegistryDetail,
+  WslAction,
+  DirEntry,
+  FsReadResult,
 }

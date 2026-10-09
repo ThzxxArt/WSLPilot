@@ -16,6 +16,17 @@ export interface PtyCreateOptions {
   rows: number
 }
 
+/** 直接以程序+参数启动会话（自定义动作 terminal:true 复用临时 PTY — M5） */
+export interface PtyCommandOptions {
+  distro: string
+  program: string
+  args: string[]
+  user?: string
+  cwd?: string
+  cols?: number
+  rows?: number
+}
+
 export interface PtySessionInfo {
   ptyId: string
   distro: string
@@ -59,6 +70,8 @@ export interface PtyManagerOptions {
 
 export interface PtyManager {
   create(opts: PtyCreateOptions): PtySessionInfo
+  /** 以程序+参数创建会话（动作 runner 用）；参数数组传入，不经 shell */
+  createCommand(opts: PtyCommandOptions): PtySessionInfo
   input(ptyId: string, data: string): void
   resize(ptyId: string, cols: number, rows: number): void
   kill(ptyId: string): void
@@ -66,6 +79,8 @@ export interface PtyManager {
   list(): PtySessionInfo[]
   get(ptyId: string): PtySessionInfo | null
   count(): number
+  /** 等待会话退出并返回退出码（会话不存在立即 reject） */
+  waitExit(ptyId: string): Promise<number>
 }
 
 function getOrThrow(
@@ -110,6 +125,64 @@ export function createPtyManager(
     return s || '/bin/bash'
   }
 
+  /** 会话退出等待者（动作 runner 监控临时 PTY 退出 — M5） */
+  const exitWaiters = new Map<string, Set<(code: number) => void>>()
+
+  function spawnSession(
+    args: string[],
+    meta: { distro: string; shell: string; cwd?: string; cols: number; rows: number },
+  ): PtySessionInfo {
+    const cols = Math.max(2, Math.min(500, Math.floor(meta.cols) || 80))
+    const rows = Math.max(1, Math.min(200, Math.floor(meta.rows) || 24))
+
+    const proc = spawn('wsl.exe', args, {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd: process.env.USERPROFILE ?? process.env.HOME ?? '.',
+      env: process.env,
+      useConpty: true,
+    })
+
+    const id = randomUUID()
+    const info: PtySessionInfo = {
+      ptyId: id,
+      distro: meta.distro,
+      shell: meta.shell,
+      cwd: meta.cwd,
+      createdAt: Date.now(),
+    }
+    sessions.set(id, { proc, info })
+
+    proc.onData((chunk) => {
+      events.onData(id, chunk)
+    })
+    proc.onExit(({ exitCode }) => {
+      sessions.delete(id)
+      try {
+        proc.kill()
+      } catch {
+        /* 已退出 */
+      }
+      const code = exitCode ?? 0
+      const waiters = exitWaiters.get(id)
+      if (waiters) {
+        exitWaiters.delete(id)
+        for (const fn of waiters) {
+          try {
+            fn(code)
+          } catch {
+            /* 等待者异常不阻断 */
+          }
+        }
+      }
+      events.onExit(id, code)
+    })
+
+    logger.info('pty created', { ptyId: id, distro: meta.distro, shell: meta.shell, pid: proc.pid })
+    return info
+  }
+
   return {
     create(opts) {
       if (sessions.size >= MAX_PTY_SESSIONS) {
@@ -136,43 +209,66 @@ export function createPtyManager(
       }
       args.push('-e', shell)
 
-      const cols = Math.max(2, Math.min(500, Math.floor(opts.cols) || 80))
-      const rows = Math.max(1, Math.min(200, Math.floor(opts.rows) || 24))
-
-      const proc = spawn('wsl.exe', args, {
-        name: 'xterm-256color',
-        cols,
-        rows,
-        cwd: process.env.USERPROFILE ?? process.env.HOME ?? '.',
-        env: process.env,
-        useConpty: true,
-      })
-
-      const id = randomUUID()
-      const info: PtySessionInfo = {
-        ptyId: id,
+      return spawnSession(args, {
         distro,
         shell,
         cwd: opts.cwd,
-        createdAt: Date.now(),
+        cols: opts.cols,
+        rows: opts.rows,
+      })
+    },
+
+    createCommand(opts) {
+      if (sessions.size >= MAX_PTY_SESSIONS) {
+        throw createAppError('TASK_FAILED', {
+          message: `终端会话数已达上限 ${MAX_PTY_SESSIONS}，请先关闭部分终端`,
+        })
       }
-      sessions.set(id, { proc, info })
-
-      proc.onData((chunk) => {
-        events.onData(id, chunk)
-      })
-      proc.onExit(({ exitCode }) => {
-        sessions.delete(id)
-        try {
-          proc.kill()
-        } catch {
-          /* 已退出 */
+      const distro = assertSafeDistroName(opts.distro)
+      const program = opts.program?.trim() ?? ''
+      // 程序路径走 -e 分界；拒绝伪参数 / 控制字符 / 目录穿越（M5 动作白名单执行边界）
+      if (
+        !program ||
+        program.includes('..') ||
+        program.startsWith('-') ||
+        SHELL_CONTROL_CHARS.test(program)
+      ) {
+        throw createAppError('TASK_FAILED', { message: `非法的程序路径：${program}` })
+      }
+      const args = opts.args ?? []
+      if (args.length > 200) {
+        throw createAppError('TASK_FAILED', { message: '动作参数过多（>200）' })
+      }
+      for (const a of args) {
+        if (typeof a !== 'string' || a.length > 8192 || a.includes('\u0000')) {
+          throw createAppError('TASK_FAILED', { message: '动作参数非法' })
         }
-        events.onExit(id, exitCode ?? 0)
-      })
+      }
 
-      logger.info('pty created', { ptyId: id, distro, shell, pid: proc.pid })
-      return info
+      const argv = ['-d', distro]
+      const user = opts.user?.trim()
+      if (user) {
+        if (user.startsWith('-') || SHELL_CONTROL_CHARS.test(user) || user.includes('..')) {
+          throw createAppError('TASK_FAILED', { message: `非法的执行用户：${user}` })
+        }
+        argv.push('-u', user)
+      }
+      const cwd = opts.cwd?.trim()
+      if (cwd && cwd !== '~') {
+        if (cwd.includes('\u0000') || cwd.startsWith('-')) {
+          throw createAppError('TASK_FAILED', { message: `非法的工作目录：${cwd}` })
+        }
+        argv.push('--cd', cwd)
+      }
+      argv.push('-e', program, ...args)
+
+      return spawnSession(argv, {
+        distro,
+        shell: program,
+        cwd: opts.cwd,
+        cols: opts.cols ?? 80,
+        rows: opts.rows ?? 24,
+      })
     },
 
     input(ptyId, data) {
@@ -222,6 +318,23 @@ export function createPtyManager(
 
     count() {
       return sessions.size
+    },
+
+    waitExit(ptyId) {
+      const s = sessions.get(ptyId)
+      if (!s) {
+        return Promise.reject(
+          createAppError('TASK_FAILED', { message: `终端会话不存在或已关闭：${ptyId}` }),
+        )
+      }
+      return new Promise<number>((resolve) => {
+        let set = exitWaiters.get(ptyId)
+        if (!set) {
+          set = new Set()
+          exitWaiters.set(ptyId, set)
+        }
+        set.add(resolve)
+      })
     },
   }
 }

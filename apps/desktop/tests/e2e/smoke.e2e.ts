@@ -31,6 +31,23 @@ test.describe('WSLPilot 启动冒烟', () => {
     await expect(window.locator('text=迁移磁盘').first()).toBeVisible({ timeout: 15_000 })
     await expect(window.locator('text=最近备份')).toBeVisible({ timeout: 15_000 })
 
+    // 设置页（M5）：快捷键一览与 wsl.conf 自动终止策略可见
+    await window.locator('text=设置').first().click()
+    await expect(window.locator('text=快捷键').first()).toBeVisible({ timeout: 15_000 })
+    await expect(window.locator('text=打开命令面板')).toBeVisible({ timeout: 15_000 })
+    await expect(window.locator('text=wsl.conf 变更后自动终止发行版')).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // 命令面板（M5 ⌘K）：全局快捷键唤起，Esc 关闭
+    await window.keyboard.press('Control+KeyK')
+    await expect(window.locator('input[aria-label="命令面板搜索"]')).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(window.locator('text=前往：驾驶舱').first()).toBeVisible({ timeout: 15_000 })
+    await window.keyboard.press('Escape')
+    await expect(window.locator('input[aria-label="命令面板搜索"]')).toBeHidden({ timeout: 15_000 })
+
     await app.close()
   })
 })

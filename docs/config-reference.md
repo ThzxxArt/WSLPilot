@@ -70,6 +70,24 @@
 
 变量占位符：`${distroName}`、`${startupCwd}`、`${home}`、`${user}`
 
+- `${distroName}` / `${startupCwd}`：来自当前目标发行版与 `distros.jsonc` 的 `startupCwd`
+- `${home}` / `${user}`：动作运行前由主进程在发行版内探测（`printf "$HOME" "$USER"`），展示等价命令时保持占位符
+- 变量替换是纯字符串拼接，结果以参数数组执行，**不经过 shell**；未知占位符原样保留
+- 等价命令形态：`wsl.exe -d <distro> [-u user] [--cd cwd] -e <program> <args...]`
+- `terminal: true` 在临时 PTY 中运行（会话出现在终端工作区，可交互）；`false` 为无头执行（日志进任务抽屉）
+- `id` 禁止控制字符与 `\ / : * ? " < > |`；执行入口只接受声明过的 id（白名单）
+
+## wsl.conf（发行版内配置）
+
+路径 `/etc/wsl.conf`（发行版级，非 `%UserProfile%\.wslconfig`）。应用内「发行版详情 → 配置」提供
+**可视化表单 + 原始文本**双模式，写入前展示行级 Diff 预览：
+
+- 表单覆盖 `[automount]` `[network]` `[interop]` `[user]` `[boot]` 常见键；其余键在「其他设置」中原样保留
+- 逐键最小编辑（保留注释）；字符串清空 / 清除按钮 = 删除该键
+- 保存需要发行版内 root（`wsl -d <name> -u root -e tee /etc/wsl.conf`，内容经 stdin）
+- **8 秒规则**：变更在发行版完全停止后约 8 秒才生效。开启
+  `settings.wsl.autoShutdownAfterConfigChange` 后，保存时自动 `wsl --terminate <name>`
+
 ## network.jsonc — 端口转发与代理
 
 端口转发应用时生成 `netsh interface portproxy` 命令并需用户确认（提权）。

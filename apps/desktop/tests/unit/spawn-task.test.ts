@@ -103,11 +103,13 @@ describe('spawnWslTask', () => {
         },
       })) as unknown as SpawnWslFn
       const promise = spawnWslTask(['x'], makeCtl(), logger(), spawn)
-      await vi.advanceTimersByTimeAsync(11 * 60 * 1000)
-      await expect(promise).rejects.toMatchObject({
+      // 先挂断言再推进计时器：拒绝发生在 advance 期间，晚挂载会被判 unhandled（核验修复）
+      const assertion = expect(promise).rejects.toMatchObject({
         code: 'TASK_FAILED',
         message: expect.stringContaining('无响应'),
       })
+      await vi.advanceTimersByTimeAsync(11 * 60 * 1000)
+      await assertion
       expect(killed).toBe(true)
     } finally {
       vi.useRealTimers()

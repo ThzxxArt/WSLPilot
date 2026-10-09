@@ -3,6 +3,8 @@ import {
   createRegistryService,
   extractGuids,
   parseGuidDetail,
+  parseGuidFull,
+  collectRegValues,
   parseRegDword,
   pickRegValue,
   type RegQuery,
@@ -103,5 +105,47 @@ describe('createRegistryService', () => {
     await expect(svc.listGuids()).resolves.toEqual([])
     await expect(svc.detail('X')).resolves.toEqual({})
     expect(log.debug).toHaveBeenCalled()
+  })
+})
+
+const UBUNTU_FULL =
+  '    DistributionName    REG_SZ    Ubuntu\n' +
+  '    BasePath    REG_SZ    C:\\WSL\\Ubuntu\n' +
+  '    Version    REG_DWORD    0x2\n' +
+  '    DefaultUid    REG_DWORD    0x3e8\n' +
+  '    Flags    REG_DWORD    0x7\n' +
+  '    State    REG_DWORD    0x1'
+
+describe('M5 注册表详情解析', () => {
+  it('collectRegValues 收集全部键值并去引号', () => {
+    const values = collectRegValues(`${UBUNTU_FULL}\n    Name    REG_SZ    "quoted"`)
+    expect(values.DistributionName).toBe('Ubuntu')
+    expect(values.BasePath).toBe('C:\\WSL\\Ubuntu')
+    expect(values.Flags).toBe('0x7')
+    expect(values.Name).toBe('quoted')
+    expect(collectRegValues('nothing')).toEqual({})
+  })
+
+  it('parseGuidFull 提取 Flags 与原始键值', () => {
+    const d = parseGuidFull('{AAAA}', UBUNTU_FULL)
+    expect(d).toMatchObject({
+      guid: '{AAAA}',
+      distributionName: 'Ubuntu',
+      basePath: 'C:\\WSL\\Ubuntu',
+      version: 2,
+      defaultUid: 1000,
+      flags: 7,
+    })
+    expect(d!.values.State).toBe('0x1')
+    expect(parseGuidFull('{X}', 'no name here')).toBeNull()
+  })
+
+  it('detailFull 返回完整详情；未找到返回 null', async () => {
+    const svc = createRegistryService(logger(), makeQuery())
+    const d = await svc.detailFull('Ubuntu')
+    expect(d?.distributionName).toBe('Ubuntu')
+    expect(d?.guid).toContain('AAAA')
+    expect(d?.values.DistributionName).toBe('Ubuntu')
+    await expect(svc.detailFull('Nope')).resolves.toBeNull()
   })
 })

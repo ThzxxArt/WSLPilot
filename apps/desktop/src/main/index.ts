@@ -12,6 +12,9 @@ import { createRegistryService } from './services/registry-service'
 import { createPtyManager } from './services/pty-manager'
 import { createTaskRunner, type TaskRecord } from './services/task-runner'
 import { createIoService } from './services/io-service'
+import { createWslConfService } from './services/wslconf-service'
+import { createActionRunner } from './services/action-runner'
+import { createFsBridge } from './services/fs-bridge'
 import { isQuitting, markQuitting } from './app-state'
 
 let bootstrapLogger: Logger | null = null
@@ -173,6 +176,11 @@ async function bootstrap() {
 
   const io = createIoService({ logger, wsl, registry, configService })
 
+  // M5：wsl.conf 编辑 / 自定义动作 / 发行版内文件桥
+  const wslconf = createWslConfService({ logger })
+  const runner = createActionRunner({ logger, configService, wsl, pty })
+  const fsBridge = createFsBridge({ logger })
+
   registerIpcHandlers(
     ipcMain,
     {
@@ -185,7 +193,7 @@ async function bootstrap() {
       io,
       tasks,
     },
-    { wsl, registry, pty, io, tasks },
+    { wsl, registry, pty, io, tasks, wslconf, runner, fsBridge },
   )
 
   createTray({

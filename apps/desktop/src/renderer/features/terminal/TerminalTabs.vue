@@ -144,6 +144,7 @@ function submitNew() {
   color: var(--color-text-secondary);
   font-size: 12px;
   white-space: nowrap;
+
   /* 双击改名不被文本选择干扰（核验修复） */
   user-select: none;
   transition: background var(--dur-fast) var(--ease-standard);
