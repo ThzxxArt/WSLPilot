@@ -76,6 +76,9 @@ jobs:
         run: npm install-scripts approve electron esbuild vue-demi @parcel/watcher
         continue-on-error: true
 
+      - name: Build before E2E
+        run: npm run build --workspace @wslpilot/desktop
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 

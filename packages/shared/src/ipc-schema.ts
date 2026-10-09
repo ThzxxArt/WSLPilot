@@ -47,13 +47,10 @@ export const IPC_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [CH.metaSet]: metaPayloadSchema,
 }
 
-/** 校验入参；单参通道传单值，多参通道传对象 */
+/** 校验入参；通道约定：invoke 只传一个参数（对象或原始值） */
 export function parseIpcArgs<T = unknown>(channel: string, args: unknown[]): T {
   const schema = IPC_SCHEMAS[channel]
-  if (!schema) {
-    // 无 schema 的通道（如 void invoke）直接透传第一个参
-    return args[0] as T
-  }
-  const value = args.length === 1 ? args[0] : args[0]
+  const value = args[0]
+  if (!schema) return value as T
   return schema.parse(value) as T
 }

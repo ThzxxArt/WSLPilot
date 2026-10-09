@@ -24,5 +24,14 @@ module.exports = {
     '@typescript-eslint/no-explicit-any': 'warn',
     'no-console': ['warn', { allow: ['warn', 'error'] }],
   },
-  ignorePatterns: ['dist', 'out', 'release', 'node_modules', 'coverage', '*.generated.*'],
+  ignorePatterns: [
+    'dist',
+    'out',
+    'release',
+    'node_modules',
+    'coverage',
+    'playwright-report',
+    'test-results',
+    '*.generated.*',
+  ],
 }
