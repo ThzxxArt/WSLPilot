@@ -25,7 +25,7 @@ export interface IpcContext {
 
 export { serializeIpcError, deserializeIpcError, toAppError } from '@wslpilot/shared'
 
-type Handler = (ctx: IpcContext, ...args: any[]) => Promise<unknown> | unknown
+type Handler = (ctx: IpcContext, arg: never) => unknown
 
 export function registerIpcHandlers(
   ipcMain: IpcMain,
@@ -55,7 +55,7 @@ export function registerIpcHandlers(
             detail: e?.message ? String(e.message) : String(e),
           })
         }
-        return await handler(ctx, validated)
+        return await handler(ctx, validated as never)
       } catch (e) {
         const err = serializeIpcError(e)
         ctx.logger.error('ipc error', { channel, message: err.message.slice(0, 200) })

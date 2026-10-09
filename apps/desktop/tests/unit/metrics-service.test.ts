@@ -105,4 +105,29 @@ describe('sampleOverview', () => {
     expect(EMPTY_OVERVIEW.runningCount).toBe(0)
     expect(EMPTY_OVERVIEW.totalCount).toBe(0)
   })
+
+  it('CPU average uses only successful samples as denominator', async () => {
+    const wsl: any = {
+      sampleMetrics: vi.fn(async (name: string) => {
+        if (name === 'bad') throw new Error('fail')
+        return {
+          memUsedKB: 10,
+          memTotalKB: 100,
+          diskUsedKB: 1,
+          diskTotalKB: 2,
+          cpuPercent: name === 'a' ? 10 : 30,
+          sampledAt: 'T',
+        }
+      }),
+    }
+    // 3 running, 1 fails → mean of 10 and 30 = 20 (not 40/3)
+    const result = await sampleOverview(
+      wsl,
+      [distro('a', 'Running'), distro('b', 'Running'), distro('bad', 'Running')],
+      logger(),
+    )
+    expect(result.cpuPercent).toBe(20)
+    expect(result.runningCount).toBe(3)
+    expect(Object.keys(result.perDistro)).toHaveLength(2)
+  })
 })

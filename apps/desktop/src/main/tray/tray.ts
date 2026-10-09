@@ -7,7 +7,6 @@ import { markQuitting } from '../app-state'
 export interface TrayOptions {
   getMainWindow: () => BrowserWindow | null
   logger: Logger
-  closeBehavior: 'minimizeToTray' | 'quit'
 }
 
 let tray: Tray | null = null

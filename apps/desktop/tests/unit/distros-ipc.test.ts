@@ -37,11 +37,19 @@ function makeCtx() {
   })
   const replace = vi.fn(async () => {})
   const patch = vi.fn(async (_k: string, p: unknown) => ({ patched: p }))
+  const update = vi.fn(async (_k: string, fn: any) => {
+    const current = {
+      $schemaVersion: 1,
+      distros: [] as any[],
+    }
+    return fn(current)
+  })
   return {
     configService: {
       load,
       patch,
       replace,
+      update,
       openInEditor: vi.fn(async () => {}),
       resolveConflict: vi.fn(async () => ({})),
       getConflict: vi.fn(() => null),
@@ -176,7 +184,7 @@ describe('distros + meta IPC handlers', () => {
     expect(none).toBeNull()
   })
 
-  it('meta:set inserts or updates', async () => {
+  it('meta:set inserts or updates via write queue', async () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
     await wrapped.get(CH.metaSet)({}, {
@@ -190,10 +198,7 @@ describe('distros + meta IPC handlers', () => {
       pinned: false,
       quickActions: [],
     })
-    expect(ctx.patch).toHaveBeenCalled()
-    const call = (ctx.patch as any).mock.calls[0] as any[]
-    const arg = call[1] as { distros: unknown[] }
-    expect(arg.distros).toHaveLength(2)
+    expect(ctx.configService.update).toHaveBeenCalled()
   })
 
   it('meta:set rejects invalid payload', async () => {

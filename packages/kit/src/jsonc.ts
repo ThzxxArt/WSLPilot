@@ -61,8 +61,8 @@ export function collectLeafPaths(obj: unknown, prefix: (string | number)[] = [])
 }
 
 /**
- * 对 JSONC 原文做嵌套补丁，逐叶子 modify，**完整保留用户注释与格式**。
- * 遵循设计书 §9.3 注释策略。
+ * 对 JSONC 原文做嵌套补丁，逐叶子 modify，**保留叶子之外的用户注释**。
+ * 注意：被替换的数组/对象整体作为叶子时，其内部注释会随整块替换丢失（设计书 §9.3「尽量」）。
  */
 export function applyPatchJsonc(text: string, patch: Record<string, unknown>): string {
   const leaves = collectLeafPaths(patch)

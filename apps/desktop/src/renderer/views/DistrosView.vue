@@ -17,7 +17,7 @@ import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { DistroCard, StatusDot } from '@ui/components'
-import { stateLabel } from '../composables/useDistroState'
+import { stateLabel } from '../composables/state-label'
 
 const route = useRoute()
 const distros = useDistrosStore()

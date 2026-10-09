@@ -39,10 +39,12 @@ export async function sampleOverview(
   let diskUsedKB = 0
   let diskTotalKB = 0
   let cpuSum = 0
+  let successCount = 0
   let sampledAt = ''
 
   for (const r of results) {
     if (!r.m) continue
+    successCount++
     perDistro[r.name] = r.m
     memUsedKB += r.m.memUsedKB
     memTotalKB += r.m.memTotalKB
@@ -59,7 +61,8 @@ export async function sampleOverview(
     memTotalKB,
     diskUsedKB,
     diskTotalKB,
-    cpuPercent: running.length ? Math.round((cpuSum / running.length) * 10) / 10 : 0,
+    // 按成功样本平均，失败样本不占分母（M3）
+    cpuPercent: successCount ? Math.round((cpuSum / successCount) * 10) / 10 : 0,
     sampledAt: sampledAt || new Date().toISOString(),
     perDistro,
   }

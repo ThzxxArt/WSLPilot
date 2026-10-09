@@ -11,6 +11,18 @@ export const nameSchema = z
   .max(200)
   .refine((s) => !s.trim().includes('..'), { message: '名称不能包含 ..' })
 
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** 嵌套 patch：拒绝原型污染键（z.custom 原样校验，避免 z.record 复制时丢掉 __proto__） */
+export const patchSchema = z.custom<Record<string, unknown>>(
+  (obj) => {
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return false
+    const keys = Object.getOwnPropertyNames(obj)
+    return !keys.some((k) => FORBIDDEN_KEYS.has(k))
+  },
+  { message: 'patch 包含非法键' },
+)
+
 export const configKeySchema = z.enum(['settings', 'distros', 'actions', 'network', 'uiState', 'state'])
 
 export const metaPayloadSchema = z.object({
@@ -36,7 +48,7 @@ export const IPC_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [CH.configGet]: configKeySchema,
   [CH.configSet]: z.object({
     fileKey: configKeySchema,
-    patch: z.record(z.unknown()).or(z.object({}).passthrough()),
+    patch: patchSchema,
   }),
   [CH.configOpenExternal]: configKeySchema,
   [CH.configResolveConflict]: z.object({

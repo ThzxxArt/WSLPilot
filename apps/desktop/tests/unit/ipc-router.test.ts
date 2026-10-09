@@ -224,4 +224,22 @@ describe('IPC router + handlers', () => {
     expect(deserializeIpcError(err)?.code).toBe('CONFIG_INVALID')
     expect(toAppError(new Error('x')).code).toBe('UNKNOWN')
   })
+
+  it('★ parseIpcArgs rejects illegal args before handler (schema layer)', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    // configGet 非法 key —— 由 zod 拦下，错误信息含「参数校验失败」
+    await expect(wrapped.get(CH.configGet)({}, 'evil-not-a-key')).rejects.toThrow(
+      /参数校验失败/,
+    )
+    // distrosStart 空名
+    await expect(wrapped.get(CH.distrosStart)({}, '')).rejects.toThrow(/参数校验失败/)
+    // metaSet 缺 name
+    await expect(wrapped.get(CH.metaSet)({}, { alias: 'x' })).rejects.toThrow(/参数校验失败/)
+    // configSet 原型污染键（用 JSON.parse 构造真实 __proto__ own key）
+    const evil = JSON.parse('{"fileKey":"settings","patch":{"__proto__":{"polluted":true}}}')
+    await expect(wrapped.get(CH.configSet)({}, evil)).rejects.toThrow(/参数校验失败/)
+    // 合法调用不抛
+    await expect(wrapped.get(CH.configGet)({}, 'settings')).resolves.toBeTruthy()
+  })
 })

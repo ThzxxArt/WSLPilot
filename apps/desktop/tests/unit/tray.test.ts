@@ -85,7 +85,6 @@ describe('tray', () => {
     const tray = createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
-      closeBehavior: 'minimizeToTray',
     })
 
     expect((tray as any).tooltip).toContain('WSLPilot')
@@ -101,7 +100,6 @@ describe('tray', () => {
     const opts = {
       getMainWindow: () => null,
       logger: makeLogger(),
-      closeBehavior: 'quit' as const,
     }
     const t1 = createTray(opts)
     const t2 = createTray(opts)
@@ -114,7 +112,6 @@ describe('tray', () => {
     const tray = createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
-      closeBehavior: 'quit',
     })
 
     ;(tray as any).handlers.get('double-click')!()
@@ -128,7 +125,6 @@ describe('tray', () => {
     createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
-      closeBehavior: 'quit',
     })
 
     const settingsItem = trayMenu.items.find((i: any) => i.label === '设置')
@@ -141,7 +137,6 @@ describe('tray', () => {
     createTray({
       getMainWindow: () => null,
       logger: makeLogger(),
-      closeBehavior: 'quit',
     })
     const quitItem = trayMenu.items.find((i: any) => i.label === '退出')
     quitItem.click()
@@ -152,7 +147,6 @@ describe('tray', () => {
     const t = createTray({
       getMainWindow: () => null,
       logger: makeLogger(),
-      closeBehavior: 'quit',
     })
     destroyTray()
     expect((t as any).destroyed).toBe(true)

@@ -26,7 +26,7 @@ const wslLabel = computed(() => {
 })
 
 const pollInterval = computed(() => {
-  const ms = (settings as any).pollIntervalMs
+  const ms = settings.pollIntervalMs
   return typeof ms === 'number' && ms >= 1000 ? ms : 5000
 })
 

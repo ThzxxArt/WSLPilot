@@ -129,6 +129,15 @@ describe('parseDistroList', () => {
     expect(parseDistroList(raw)).toHaveLength(1)
   })
 
+  it('keeps * inside name, only strips default marker', () => {
+    const raw = 'NAME STATE VERSION\n* my*distro  Running  2\n  other*name  Stopped  1'
+    const list = parseDistroList(raw)
+    expect(list[0]!.name).toBe('my*distro')
+    expect(list[0]!.isDefault).toBe(true)
+    expect(list[1]!.name).toBe('other*name')
+    expect(list[1]!.isDefault).toBe(false)
+  })
+
   it('defaults version to 2 when missing', () => {
     const list = parseDistroList('NAME STATE VERSION\n  A  Running')
     expect(list[0]?.version).toBe(2)

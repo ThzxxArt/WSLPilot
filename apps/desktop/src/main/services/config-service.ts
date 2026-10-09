@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { watch, type FSWatcher } from 'chokidar'
 import {
   CONFIG_FILE_NAMES,
@@ -29,31 +30,39 @@ export type ConfigConflictAction = 'reload' | 'overwrite' | 'ignore'
 
 export interface ConfigService {
   load<K extends ConfigKey>(key: K): Promise<ConfigMap[K]>
+  /** 同步读缓存（close 等事件必须同步决策） */
+  loadSync<K extends ConfigKey>(key: K): ConfigMap[K]
   patch<K extends ConfigKey>(key: K, patch: DeepPartial<ConfigMap[K]>): Promise<ConfigMap[K]>
   replace<K extends ConfigKey>(key: K, value: ConfigMap[K]): Promise<void>
+  /** 在写队列内执行读-改-写，避免并发丢更新 */
+  update<K extends ConfigKey>(
+    key: K,
+    fn: (current: ConfigMap[K]) => ConfigMap[K] | Promise<ConfigMap[K]>,
+  ): Promise<ConfigMap[K]>
   openInEditor(key: ConfigKey): Promise<void>
   onChange(key: ConfigKey, cb: () => void): () => void
-  /** 外部修改冲突时的处理 */
   resolveConflict(key: ConfigKey, action: ConfigConflictAction): Promise<ConfigMap[ConfigKey]>
-  /** 当前是否有外部冲突未处理 */
   getConflict(key: ConfigKey): { fileKey: ConfigKey; detail: string } | null
   readonly userDataDir: string
   dispose(): void
 }
 
-function deepMerge<T extends Record<string, any>>(base: T, patch: DeepPartial<T>): T {
-  const out = { ...base } as Record<string, any>
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/** 防原型污染的深度合并 */
+export function deepMerge<T extends Record<string, unknown>>(base: T, patch: unknown): T {
+  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) }
+  if (!isPlainObject(patch)) return out as T
   for (const [k, v] of Object.entries(patch)) {
+    if (FORBIDDEN_KEYS.has(k)) continue
     if (v === undefined) continue
-    if (
-      v !== null &&
-      typeof v === 'object' &&
-      !Array.isArray(v) &&
-      typeof out[k] === 'object' &&
-      out[k] !== null &&
-      !Array.isArray(out[k])
-    ) {
-      out[k] = deepMerge(out[k], v as any)
+    const current = out[k]
+    if (isPlainObject(v) && isPlainObject(current)) {
+      out[k] = deepMerge(current, v)
     } else {
       out[k] = v
     }
@@ -71,23 +80,17 @@ const TARGET_VERSIONS: Record<ConfigKey, number> = {
   state: 1,
 }
 
+function hashText(s: string): string {
+  return createHash('sha256').update(s).digest('hex')
+}
+
 export async function createConfigService(userDataDir: string, logger: Logger): Promise<ConfigService> {
   const cache = new Map<ConfigKey, ConfigMap[ConfigKey]>()
   const listeners = new Map<ConfigKey, Set<() => void>>()
   const conflicts = new Map<ConfigKey, { fileKey: ConfigKey; detail: string }>()
-  /** 单写者原则：Promise 队列串行化写操作 */
   let writeQueue: Promise<unknown> = Promise.resolve()
-  /** 自写标记时间窗：写入后 500ms 内的 chokidar 事件视为自写 */
-  let selfWriteUntil = 0
-  const SELF_WRITE_MS = 500
-
-  function markSelfWriting(): void {
-    selfWriteUntil = Date.now() + SELF_WRITE_MS
-  }
-
-  function isSelfWriting(): boolean {
-    return Date.now() < selfWriteUntil
-  }
+  /** 最近一次自写内容哈希 —— 用内容识别 chokidar 事件是否为自写（比时间窗可靠） */
+  const lastSelfWriteHash = new Map<ConfigKey, string>()
   const watchers: FSWatcher[] = []
 
   const filePath = (key: ConfigKey) => join(userDataDir, CONFIG_FILE_NAMES[key])
@@ -99,19 +102,20 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     } catch {
       const defaults = defaultConfig(key as any)
       const header = `WSLPilot ${CONFIG_FILE_NAMES[key]} — 可手工编辑；写回时尽量保留注释`
-      markSelfWriting()
-      try {
-        await atomicWrite(path, stringifyJsonc(defaults, header))
-      } finally {
-        // markSelfWriting 时间窗自动覆盖
-      }
+      const content = stringifyJsonc(defaults, header)
+      await atomicWrite(path, content)
+      lastSelfWriteHash.set(key, hashText(content))
       logger.info('config created', { key, path })
     }
   }
 
-  async function readFromDisk<K extends ConfigKey>(key: K): Promise<ConfigMap[K]> {
+  async function readRaw(key: ConfigKey): Promise<string> {
     await ensureFile(key)
-    const originalText = await fs.readFile(filePath(key), 'utf8')
+    return fs.readFile(filePath(key), 'utf8')
+  }
+
+  async function readFromDisk<K extends ConfigKey>(key: K): Promise<ConfigMap[K]> {
+    const originalText = await readRaw(key)
     const parsed = parseJsoncSafe(originalText)
     if (parsed.errors.length > 0 || parsed.data === undefined) {
       throw createAppError('CONFIG_INVALID', {
@@ -126,29 +130,23 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     if (currentVersion < target) {
       logger.info('config migrating', { key, from: currentVersion, to: target })
       await backupFile(key, `v${currentVersion}`)
-      const before = parsed.data as Record<string, unknown>
+      const before = data
       const migrated = migrateConfig(key, before, target)
       data = migrated
-      // ★ 只最小编辑版本号及迁移新增键，保留用户注释
       let nextText = modifyJsonc(originalText, ['$schemaVersion'], target)
       for (const [k, v] of Object.entries(migrated)) {
         if (k === '$schemaVersion') continue
-        if (!(k in before)) {
+        if (!(k in before) && !FORBIDDEN_KEYS.has(k)) {
           nextText = modifyJsonc(nextText, [k], v)
         }
       }
-      markSelfWriting()
-      try {
-        await atomicWrite(filePath(key), nextText)
-      } finally {
-        // markSelfWriting 时间窗自动覆盖
-      }
+      await atomicWrite(filePath(key), nextText)
+      lastSelfWriteHash.set(key, hashText(nextText))
     }
 
     const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
     const result = schema.safeParse(data)
     if (!result.success) {
-      // 逐字段清洗：非法字段回退默认，合法字段全部保留
       logger.warn('config schema mismatch, sanitizing fields', {
         key,
         issues: result.error.issues.slice(0, 3),
@@ -192,6 +190,25 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     return next
   }
 
+  async function writeContent(key: ConfigKey, content: string): Promise<void> {
+    await backupFile(key)
+    await atomicWrite(filePath(key), content)
+    lastSelfWriteHash.set(key, hashText(content))
+    cache.set(key, await parseAndSanitize(key, content))
+    conflicts.delete(key)
+    notify(key)
+  }
+
+  async function parseAndSanitize<K extends ConfigKey>(key: K, text: string): Promise<ConfigMap[K]> {
+    const parsed = parseJsoncSafe(text)
+    const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
+    const defaults = defaultConfig(key as any) as Record<string, unknown>
+    const data = (parsed.data ?? defaults) as Record<string, unknown>
+    const result = schema.safeParse(data)
+    if (result.success) return result.data as ConfigMap[K]
+    return sanitizeWithSchema(schema as any, data, defaults as any) as ConfigMap[K]
+  }
+
   // 启动时加载全部配置到内存
   await fs.mkdir(userDataDir, { recursive: true })
   for (const key of FILE_KEYS) {
@@ -214,13 +231,16 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
   watchers.push(configWatcher)
 
   configWatcher.on('change', (changedPath: string) => {
-    if (isSelfWriting()) return
     const key = FILE_KEYS.find((k) => filePath(k) === changedPath)
     if (!key) return
 
     void (async () => {
       try {
         const text = await fs.readFile(filePath(key), 'utf8')
+        const h = hashText(text)
+        // 内容哈希等于最近一次自写 → 自写回环，忽略
+        if (h === lastSelfWriteHash.get(key)) return
+
         const parsed = parseJsoncSafe(text)
         if (parsed.errors.length > 0) {
           conflicts.set(key, {
@@ -230,22 +250,15 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
           notify(key)
           return
         }
-        const incoming = parsed.data as Record<string, unknown>
-        const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
-        const sanitized = sanitizeWithSchema(
-          schema as any,
-          incoming,
-          defaultConfig(key as any) as any,
-        ) as ConfigMap[ConfigKey]
+        const sanitized = await parseAndSanitize(key, text)
         const current = cache.get(key)
         if (JSON.stringify(sanitized) === JSON.stringify(current)) {
-          // 仅注释/格式变化，重载即可
           cache.set(key, sanitized)
+          lastSelfWriteHash.set(key, h)
           conflicts.delete(key)
           notify(key)
           return
         }
-        // 内容有差异 → 标记冲突，等待用户选择
         conflicts.set(key, {
           fileKey: key,
           detail: '配置文件已被外部修改，与应用内状态不一致',
@@ -265,66 +278,81 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
       return cache.get(key) as ConfigMap[K]
     },
 
+    loadSync<K extends ConfigKey>(key: K): ConfigMap[K] {
+      return cache.get(key) as ConfigMap[K]
+    },
+
     /**
-     * 合并写回。对原文做最小叶子编辑（modifyJsonc），**完整保留用户注释**。
+     * 合并写回。对原文做最小叶子编辑（modifyJsonc），保留用户注释。
+     * 磁盘上非法字段先 sanitize，与读路径一致，避免 ZodError 锁死写回。
      */
     async patch<K extends ConfigKey>(key: K, patch: DeepPartial<ConfigMap[K]>): Promise<ConfigMap[K]> {
       return enqueueWrite(async () => {
-        // 写前重读原文与磁盘数据，避免覆盖外部编辑
-        await ensureFile(key)
-        const originalText = await fs.readFile(filePath(key), 'utf8')
-        const parsed = parseJsoncSafe(originalText)
-        if (parsed.errors.length > 0 || parsed.data === undefined) {
+        const originalText = await readRaw(key)
+        const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
+
+        // 读磁盘 → 清洗非法字段 → 再合并 patch（I3）
+        const onDisk = await parseAndSanitize(key, originalText)
+        const merged = deepMerge(onDisk as Record<string, unknown>, patch as Record<string, unknown>)
+
+        const validated = schema.safeParse(merged)
+        if (!validated.success) {
           throw createAppError('CONFIG_INVALID', {
-            message: `${CONFIG_FILE_NAMES[key]} 解析失败`,
-            detail: parsed.errorMessage,
+            message: `${CONFIG_FILE_NAMES[key]} 校验失败`,
+            detail: validated.error.issues
+              .slice(0, 5)
+              .map((i) => `${i.path.join('.')}: ${i.message}`)
+              .join('; '),
           })
         }
 
-        const onDisk = parsed.data as Record<string, unknown>
-        const merged = deepMerge(onDisk as any, patch as any)
-
-        const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
-        // 校验合并结果；非法字段不会写入（patch 只带合法叶子）
-        const validated = schema.parse(merged) as ConfigMap[K]
-
-        await backupFile(key)
-
-        // ★ 注释保留：只对 patch 的叶子路径做 modify，不动其他内容
-        const nextText = applyPatchJsonc(originalText, patch as Record<string, unknown>)
-        // 若 patch 为空或 modify 失败导致空串，降级整写
-        const writeText = nextText.trim() ? nextText : stringifyJsonc(validated)
-
-        markSelfWriting()
-        try {
-          await atomicWrite(filePath(key), writeText)
-        } finally {
-          // markSelfWriting 时间窗自动覆盖
-        }
-
-        cache.set(key, validated)
-        conflicts.delete(key)
+        // 注释保留：只对 patch 叶子做 modify
+        const cleanPatch = deepMerge({}, patch as Record<string, unknown>)
+        const nextText = applyPatchJsonc(originalText, cleanPatch as Record<string, unknown>)
+        const writeText = nextText.trim()
+          ? nextText
+          : stringifyJsonc(validated.data)
+        await writeContent(key, writeText)
+        // cache 用 validated
+        cache.set(key, validated.data as ConfigMap[K])
         notify(key)
         logger.info('config patched (comments preserved)', { key })
-        return validated
+        return validated.data as ConfigMap[K]
       })
     },
 
-    /** 整文件替换（不保留注释，按契约使用） */
     async replace<K extends ConfigKey>(key: K, value: ConfigMap[K]): Promise<void> {
       return enqueueWrite(async () => {
         const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
-        const validated = schema.parse(value) as ConfigMap[K]
-        await backupFile(key)
-        markSelfWriting()
-        try {
-          await atomicWrite(filePath(key), stringifyJsonc(validated))
-        } finally {
-          // markSelfWriting 时间窗自动覆盖
+        const validated = schema.safeParse(value)
+        if (!validated.success) {
+          throw createAppError('CONFIG_INVALID', {
+            message: `${CONFIG_FILE_NAMES[key]} 校验失败`,
+            detail: validated.error.issues.slice(0, 5).map((i) => i.message).join('; '),
+          })
         }
-        cache.set(key, validated)
-        conflicts.delete(key)
+        await writeContent(key, stringifyJsonc(validated.data))
+        cache.set(key, validated.data as ConfigMap[K])
         notify(key)
+      })
+    },
+
+    async update(key, fn) {
+      return enqueueWrite(async () => {
+        const current = cache.get(key) as ConfigMap[typeof key]
+        const next = await fn(current)
+        const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
+        const validated = schema.safeParse(next)
+        if (!validated.success) {
+          throw createAppError('CONFIG_INVALID', {
+            message: `${CONFIG_FILE_NAMES[key]} 校验失败`,
+            detail: validated.error.issues.slice(0, 5).map((i) => i.message).join('; '),
+          })
+        }
+        await writeContent(key, stringifyJsonc(validated.data))
+        cache.set(key, validated.data as ConfigMap[typeof key])
+        notify(key)
+        return validated.data as ConfigMap[typeof key]
       })
     },
 
@@ -350,27 +378,16 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     async resolveConflict(key: ConfigKey, action: ConfigConflictAction) {
       return enqueueWrite(async () => {
         const text = await fs.readFile(filePath(key), 'utf8')
-        const parsed = parseJsoncSafe(text)
-        const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
-        const defaults = defaultConfig(key as any) as Record<string, unknown>
 
         if (action === 'overwrite') {
           const current = cache.get(key) as ConfigMap[ConfigKey]
-          await backupFile(key)
-          markSelfWriting()
-          try {
-            await atomicWrite(filePath(key), stringifyJsonc(current))
-          } finally {
-            // markSelfWriting 时间窗自动覆盖
-          }
-          conflicts.delete(key)
-          notify(key)
+          await writeContent(key, stringifyJsonc(current))
           return current
         }
 
-        // reload / ignore → 以磁盘为准（ignore 也先重载，避免脏写）
-        const incoming = (parsed.data ?? defaults) as Record<string, unknown>
-        const sanitized = sanitizeWithSchema(schema as any, incoming, defaults as any) as ConfigMap[ConfigKey]
+        // reload / ignore → 以磁盘为准
+        const sanitized = await parseAndSanitize(key, text)
+        lastSelfWriteHash.set(key, hashText(text))
         cache.set(key, sanitized)
         conflicts.delete(key)
         notify(key)

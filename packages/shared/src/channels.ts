@@ -122,4 +122,5 @@ export const EVENT_CHANNELS = [
   CH.taskProgress,
   CH.configChanged,
   CH.configConflict,
+  CH.appNavigate,
 ] as const

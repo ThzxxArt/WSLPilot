@@ -5,12 +5,13 @@ import { createConfigService } from './services/config-service'
 import { createLogger } from '@wslpilot/kit'
 import { APP_NAME } from '@wslpilot/shared'
 import { createMainWindow } from './window/main-window'
+import { decideClose } from './window/close-policy'
 import { createTray } from './tray/tray'
 import { createWslService } from './services/wsl-service'
 import { createRegistryService } from './services/registry-service'
 import { isQuitting, markQuitting } from './app-state'
 
-// 单实例锁
+// 单实例锁 —— 败者直接退出，不注册任何 bootstrap（M10）
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
@@ -23,12 +24,38 @@ if (!gotLock) {
       win.focus()
     }
   })
+
+  app.on('before-quit', () => {
+    markQuitting()
+  })
+
+  app.whenReady().then(() => {
+    void bootstrap()
+  })
+
+  // 有托盘常驻：窗口关闭不退出；真正退出时才 quit
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin' && isQuitting()) {
+      app.quit()
+    }
+  })
+
+  app.on('activate', () => {
+    // 由 bootstrap 内的 mainWindow 引用处理
+  })
+
+  // 安全基线：禁止新建窗口
+  app.on('web-contents-created', (_e, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    contents.on('will-navigate', (event) => event.preventDefault())
+  })
+
+  app.setName(APP_NAME)
 }
 
 let mainWindow: BrowserWindow | null = null
 
 async function bootstrap() {
-  // 去掉系统自带菜单栏（窗口用自绘标题栏）
   Menu.setApplicationMenu(null)
 
   const userDataDir = app.getPath('userData')
@@ -54,28 +81,29 @@ async function bootstrap() {
     { wsl, registry },
   )
 
-  // 系统托盘
-  const settings = await configService.load('settings')
   createTray({
     getMainWindow: () => mainWindow,
     logger,
-    closeBehavior: settings.general.closeBehavior,
   })
 
   await mainWindow.loadURL(
     process.env.VITE_DEV_SERVER_URL ?? `file://${join(__dirname, '../renderer/index.html')}`,
   )
 
-  // 最小化到托盘而非退出 —— 运行期现读设置，改 closeBehavior 即时生效
+  // close 决策必须同步（preventDefault 只在同步派发期有效）
   mainWindow.on('close', (e) => {
-    void (async () => {
-      if (isQuitting()) return
-      const s = await configService.load('settings')
-      if (s.general.closeBehavior === 'minimizeToTray') {
-        e.preventDefault()
-        mainWindow?.hide()
-      }
-    })()
+    const s = configService.loadSync('settings')
+    const decision = decideClose(s.general.closeBehavior, isQuitting())
+    if (decision.action === 'hide') {
+      e.preventDefault()
+      mainWindow?.hide()
+      return
+    }
+    if (decision.action === 'quit') {
+      // 用户选择「关闭即退出」
+      markQuitting()
+      app.quit()
+    }
   })
 
   app.on('will-quit', () => {
@@ -84,29 +112,3 @@ async function bootstrap() {
 
   logger.info('window ready')
 }
-
-app.on('before-quit', () => {
-  markQuitting()
-})
-
-app.whenReady().then(bootstrap)
-
-app.on('window-all-closed', () => {
-  // 有托盘常驻时窗口关闭不退出
-  if (process.platform !== 'darwin' && isQuitting()) {
-    app.quit()
-  }
-})
-
-app.on('activate', () => {
-  mainWindow?.show()
-})
-
-// 安全基线：禁止新建窗口
-app.on('web-contents-created', (_e, contents) => {
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  contents.on('will-navigate', (event) => event.preventDefault())
-})
-
-// 设置应用名称（任务栏 / 标题）
-app.setName(APP_NAME)

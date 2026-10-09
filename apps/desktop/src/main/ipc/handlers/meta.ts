@@ -3,7 +3,8 @@ import type { IpcContext } from '../router'
 
 type AddFn = (
   channel: string,
-  handler: (ctx: IpcContext, ...args: any[]) => Promise<unknown> | unknown,
+  // 参数经 parseIpcArgs 校验后按通道约定类型传入
+  handler: (ctx: IpcContext, arg: never) => unknown,
 ) => void
 
 export function registerMetaHandlers(add: AddFn): void {
@@ -16,13 +17,14 @@ export function registerMetaHandlers(add: AddFn): void {
     if (!meta || typeof meta.name !== 'string' || !meta.name.trim()) {
       throw createAppError('CONFIG_INVALID', { message: '缺少发行版名称' })
     }
-    const file = await c.configService.load('distros')
-    const idx = file.distros.findIndex((d) => d.name === meta.name)
-    const next = [...file.distros]
-    if (idx >= 0) next[idx] = meta
-    else next.push(meta)
-    // ★ 用 patch 而非 replace：数组整体作为叶子替换，保留文件其余注释
-    await c.configService.patch('distros', { distros: next } as any)
+    // ★ 读-改-写放进写队列，避免并发 meta:set 丢更新（M2）
+    await c.configService.update('distros', (file) => {
+      const idx = file.distros.findIndex((d) => d.name === meta.name)
+      const next = [...file.distros]
+      if (idx >= 0) next[idx] = meta
+      else next.push(meta)
+      return { ...file, distros: next }
+    })
     return meta
   })
 }

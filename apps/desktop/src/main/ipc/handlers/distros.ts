@@ -5,7 +5,8 @@ import type { IpcContext } from '../router'
 
 type AddFn = (
   channel: string,
-  handler: (ctx: IpcContext, ...args: any[]) => Promise<unknown> | unknown,
+  // 参数经 parseIpcArgs 校验后按通道约定类型传入
+  handler: (ctx: IpcContext, arg: never) => unknown,
 ) => void
 
 function assertName(name: unknown): string {

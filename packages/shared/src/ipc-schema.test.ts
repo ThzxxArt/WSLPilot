@@ -49,10 +49,35 @@ describe('ipc-schema', () => {
     })
   })
 
-  it('has schemas for critical channels', () => {
-    expect(IPC_SCHEMAS[CH.distrosStart]).toBeTruthy()
-    expect(IPC_SCHEMAS[CH.configSet]).toBeTruthy()
-    expect(IPC_SCHEMAS[CH.metaSet]).toBeTruthy()
-    expect(IPC_SCHEMAS[CH.metricsSample]).toBeTruthy()
+  it('rejects prototype pollution keys in patch', () => {
+    const evil = JSON.parse('{"__proto__":{"polluted":true}}')
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: evil }])).toThrow()
+    const evil2 = JSON.parse('{"constructor":{"x":1}}')
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: evil2 }])).toThrow()
+    // 正常 patch 可通过
+    expect(parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: { general: {} } }])).toBeTruthy()
+  })
+
+  it('every multi-arg IPC channel that is used in M1+M2 has a schema', () => {
+    // 契约：注册了 handler 且带参的通道必须登记 schema，防止 M3 漏校验
+    const required = [
+      CH.distrosStart,
+      CH.distrosTerminate,
+      CH.distrosSetDefault,
+      CH.registryDetail,
+      CH.metaGet,
+      CH.metaSet,
+      CH.metricsSample,
+      CH.configGet,
+      CH.configSet,
+      CH.configOpenExternal,
+      CH.configResolveConflict,
+    ]
+    for (const ch of required) {
+      expect(IPC_SCHEMAS[ch], `missing schema for ${ch}`).toBeTruthy()
+    }
+    // void 通道不应有 schema
+    expect(IPC_SCHEMAS[CH.distrosList]).toBeUndefined()
+    expect(IPC_SCHEMAS[CH.appGetVersion]).toBeUndefined()
   })
 })

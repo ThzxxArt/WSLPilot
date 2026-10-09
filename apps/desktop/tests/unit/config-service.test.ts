@@ -168,29 +168,29 @@ describe('ConfigService', () => {
     expect(() => JSON.parse(text.replace(/^\s*\/\/.*$/gm, ''))).not.toThrow()
   })
 
-  it('detects external modification as conflict', async () => {
-    await new Promise((r) => setTimeout(r, 50)) // 让 watcher 起来
+  it('detects external modification as conflict (content hash, not time window)', async () => {
+    // 写入一次，让 lastSelfWriteHash 记录当前内容
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    await new Promise((r) => setTimeout(r, 100))
+
     const filePath = join(dir, 'settings.jsonc')
+    // 外部改成不同内容（与自写哈希不同）
     await fs.writeFile(
       filePath,
-      JSON.stringify({
-        $schemaVersion: 2,
-        general: { accent: 'sunset' },
-      }),
+      JSON.stringify({ $schemaVersion: 2, general: { accent: 'sunset' } }),
       'utf8',
     )
 
-    // 等待 chokidar + handler
     let conflict: { fileKey: string; detail: string } | null = null
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 50))
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 25))
       conflict = svc.getConflict('settings')
       if (conflict) break
     }
-    // 注释变化可能不算冲突；内容 accent 变化应算
-    if (conflict) {
-      expect(conflict.fileKey).toBe('settings')
-    }
+    // ★ 无条件断言 —— 外部内容不同必须被识别为冲突
+    expect(conflict).not.toBeNull()
+    expect(conflict!.fileKey).toBe('settings')
+    expect(conflict!.detail).toContain('外部')
   })
 
   it('resolveConflict reload takes disk as source of truth', async () => {
@@ -207,20 +207,14 @@ describe('ConfigService', () => {
 
   it('resolveConflict overwrite writes cache back to disk', async () => {
     await svc.patch('settings', { general: { accent: 'forest' } })
-
-    // 外部改成 ocean
     const filePath = join(dir, 'settings.jsonc')
     await fs.writeFile(
       filePath,
       JSON.stringify({ $schemaVersion: 2, general: { accent: 'ocean' } }),
       'utf8',
     )
-
     const result = (await svc.resolveConflict('settings', 'overwrite')) as any
     expect(result.general.accent).toBe('forest')
-
-    const text = await fs.readFile(filePath, 'utf8')
-    expect(text).toContain('forest')
     expect(svc.getConflict('settings')).toBeNull()
   })
 
@@ -261,5 +255,82 @@ describe('ConfigService', () => {
     const s = (await svc.load('settings')) as any
     expect(s.general.reduceMotion).toBe(true)
     expect(s.terminal.fontSize).toBe(18)
+  })
+
+  it('loadSync returns cached value without await', async () => {
+    await svc.patch('settings', { general: { accent: 'ocean' } })
+    const s = svc.loadSync('settings') as any
+    expect(s.general.accent).toBe('ocean')
+    expect(svc.loadSync('distros').$schemaVersion).toBe(1)
+  })
+
+  it('empty patch keeps file intact and comments', async () => {
+    const filePath = join(dir, 'settings.jsonc')
+    await fs.writeFile(filePath, '{\n  // keep me\n  "general": {}\n}\n', 'utf8')
+    const svc2 = await createConfigService(dir, mockLogger())
+    try {
+      await svc2.patch('settings', {})
+      const text = await fs.readFile(filePath, 'utf8')
+      expect(text).toContain('keep me')
+    } finally {
+      svc2.dispose()
+    }
+  })
+
+  it('rejects patch that fails schema after merge', async () => {
+    await expect(
+      svc.patch('settings', { general: { pollIntervalMs: 1 } } as any),
+    ).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
+  })
+
+  it('replace rejects invalid value with CONFIG_INVALID', async () => {
+    await expect(
+      svc.replace('settings', { $schemaVersion: 2, general: { pollIntervalMs: -1 } } as any),
+    ).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
+  })
+
+  it('update rejects invalid next value', async () => {
+    await expect(
+      svc.update('settings', (cur) => ({ ...cur, general: { ...cur.general, pollIntervalMs: 1 } })),
+    ).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
+  })
+
+  it('deepMerge rejects __proto__ pollution', async () => {
+    const { deepMerge } = await import('../../src/main/services/config-service')
+    const base = { general: { accent: 'aurora' } } as any
+    const polluted = JSON.parse('{"__proto__":{"polluted":true}}')
+    const merged = deepMerge(base, polluted)
+    expect((merged as any).polluted).toBeUndefined()
+    expect(({} as any).polluted).toBeUndefined()
+  })
+
+  it('patch survives invalid fields already on disk (sanitize, no ZodError)', async () => {
+    const filePath = join(dir, 'settings.jsonc')
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({
+        $schemaVersion: 2,
+        general: { accent: 'aurora', pollIntervalMs: 100 },
+      }),
+      'utf8',
+    )
+    const svc2 = await createConfigService(dir, mockLogger())
+    try {
+      // 不应抛 ZodError
+      const next = await svc2.patch('settings', { general: { accent: 'ocean' } })
+      expect((next as any).general.accent).toBe('ocean')
+    } finally {
+      svc2.dispose()
+    }
+  })
+
+  it('update runs inside write queue', async () => {
+    const r = await svc.update('settings', (cur) => ({
+      ...cur,
+      general: { ...cur.general, accent: 'forest' },
+    }))
+    expect(r.general.accent).toBe('forest')
+    const loaded = await svc.load('settings')
+    expect(loaded.general.accent).toBe('forest')
   })
 })

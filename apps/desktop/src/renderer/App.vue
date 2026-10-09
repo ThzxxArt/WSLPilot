@@ -6,6 +6,7 @@ import DefaultLayout from './layouts/DefaultLayout.vue'
 import { useSettingsStore } from './stores/settings'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
+import type { ConfigKey } from '@wslpilot/shared'
 
 const settings = useSettingsStore()
 const router = useRouter()
@@ -46,13 +47,16 @@ onMounted(async () => {
     void router.push(path)
   })
 
-  // 外部修改冲突：设计书 §6.10-3「重载 / 覆盖 / 对比」
+  // 外部修改冲突：设计书 §6.10-3「重载 / 覆盖」（对比见配置目录）
   unsubConflict = window.wslAPI?.config.onConflict((payload) => {
     const action = window.confirm(
-      `配置文件 ${payload.fileKey} 已被外部修改。\n\n${payload.detail}\n\n点「确定」= 重载（以磁盘为准）\n点「取消」= 覆盖（以应用内为准）\n\n详细对比请打开配置目录手工查看。`,
+      `配置文件 ${payload.fileKey} 已被外部修改。\n\n${payload.detail}\n\n点「确定」= 重载（以磁盘为准）\n点「取消」= 覆盖（以应用内为准）\n\n需要对比请打开配置目录手工查看。`,
     )
     void window.wslAPI.config
-      .resolveConflict(payload.fileKey as never, action ? 'reload' : 'overwrite')
+      .resolveConflict(
+        payload.fileKey as ConfigKey,
+        action ? 'reload' : 'overwrite',
+      )
       .then(() => {
         if (payload.fileKey === 'settings') void settings.load()
       })
