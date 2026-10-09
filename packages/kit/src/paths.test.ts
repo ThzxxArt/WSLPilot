@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { promises as fs } from 'node:fs'
+import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { randomUUID } from 'node:crypto'
 import {
   defaultUserDataDir,
   configFilePath,

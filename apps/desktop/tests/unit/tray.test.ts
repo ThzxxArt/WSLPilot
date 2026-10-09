@@ -88,8 +88,8 @@ describe('tray', () => {
       closeBehavior: 'minimizeToTray',
     })
 
-    expect(tray.tooltip).toContain('WSLPilot')
-    expect(tray.menu).toBeTruthy()
+    expect((tray as any).tooltip).toContain('WSLPilot')
+    expect((tray as any).menu).toBeTruthy()
     const labels = trayMenu.items.map((i: any) => i.label).filter(Boolean)
     expect(labels).toContain('打开 WSLPilot')
     expect(labels).toContain('驾驶舱')
@@ -117,7 +117,7 @@ describe('tray', () => {
       closeBehavior: 'quit',
     })
 
-    tray.handlers.get('double-click')!()
+    ;(tray as any).handlers.get('double-click')!()
     expect(win.restore).toHaveBeenCalled()
     expect(win.show).toHaveBeenCalled()
     expect(win.focus).toHaveBeenCalled()
@@ -155,6 +155,6 @@ describe('tray', () => {
       closeBehavior: 'quit',
     })
     destroyTray()
-    expect(t.destroyed).toBe(true)
+    expect((t as any).destroyed).toBe(true)
   })
 })

@@ -178,7 +178,7 @@ describe('IPC router + handlers', () => {
 
   it('window ops no-op when no window', async () => {
     const ctx = makeCtx()
-    ctx.getMainWindow = vi.fn(() => null)
+    ;(ctx.getMainWindow as any) = vi.fn(() => null)
     const { wrapped } = register(ctx)
     await wrapped.get(CH.appWindowMinimize)({})
     await wrapped.get(CH.appWindowClose)({})

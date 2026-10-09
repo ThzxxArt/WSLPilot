@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { isQuitting, markQuitting } from '../../src/main/app-state'
 
 // app-state 用模块级变量，单测需按序执行并在 end 时重置
