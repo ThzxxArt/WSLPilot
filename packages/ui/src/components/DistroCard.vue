@@ -79,13 +79,25 @@ function onMore(key: string) {
     <div class="brand-bar" />
     <header class="head">
       <div class="title-row">
-        <span class="icon">{{ distro.meta?.icon === 'ubuntu' ? '🐧' : '🐧' }}</span>
+        <span class="icon">🐧</span>
         <div class="names">
-          <div class="name">{{ displayName }}</div>
+          <div class="name">
+            {{ displayName }}
+          </div>
           <div class="sub">
-            <span v-if="distro.meta?.alias" class="real">{{ distro.name }}</span>
+            <span
+              v-if="distro.meta?.alias"
+              class="real"
+            >{{ distro.name }}</span>
             <span v-else>WSL{{ distro.version }}</span>
-            <n-tag v-if="distro.isDefault" size="tiny" :bordered="false" type="info">默认</n-tag>
+            <n-tag
+              v-if="distro.isDefault"
+              size="tiny"
+              :bordered="false"
+              type="info"
+            >
+              默认
+            </n-tag>
           </div>
         </div>
       </div>
@@ -93,12 +105,23 @@ function onMore(key: string) {
     </header>
 
     <div class="state-line">
-      <span class="state" :class="{ on: isRunning }">{{ stateText }}</span>
+      <span
+        class="state"
+        :class="{ on: isRunning }"
+      >{{ stateText }}</span>
       <span class="ver">WSL{{ distro.version }}</span>
     </div>
 
-    <div v-if="distro.meta?.tags?.length" class="tags">
-      <n-tag v-for="t in distro.meta.tags.slice(0, 3)" :key="t" size="tiny" :bordered="false">
+    <div
+      v-if="distro.meta?.tags?.length"
+      class="tags"
+    >
+      <n-tag
+        v-for="t in distro.meta.tags.slice(0, 3)"
+        :key="t"
+        size="tiny"
+        :bordered="false"
+      >
         {{ t }}
       </n-tag>
     </div>
@@ -114,12 +137,33 @@ function onMore(key: string) {
       >
         启动
       </n-button>
-      <n-button v-else size="small" secondary :loading="busy" @click="emit('terminate', distro.name)">
+      <n-button
+        v-else
+        size="small"
+        secondary
+        :loading="busy"
+        @click="emit('terminate', distro.name)"
+      >
         停止
       </n-button>
-      <n-button size="small" secondary @click="emit('openTerminal', distro.name)">终端</n-button>
-      <n-dropdown trigger="click" :options="moreOptions" @select="onMore">
-        <n-button size="small" secondary>···</n-button>
+      <n-button
+        size="small"
+        secondary
+        @click="emit('openTerminal', distro.name)"
+      >
+        终端
+      </n-button>
+      <n-dropdown
+        trigger="click"
+        :options="moreOptions"
+        @select="onMore"
+      >
+        <n-button
+          size="small"
+          secondary
+        >
+          ···
+        </n-button>
       </n-dropdown>
     </footer>
   </article>

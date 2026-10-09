@@ -1,5 +1,4 @@
 @use './tokens.generated.scss' as tokens;
-
 @include tokens.pilot-css-vars;
 
 // 强调色由 JS 在 :root 上覆盖 --color-accent 系列变量
@@ -8,7 +7,6 @@
 .glass {
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: var(--glass-border);
 }
 

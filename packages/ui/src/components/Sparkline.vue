@@ -39,13 +39,37 @@ const gid = computed(() => `spark-${Math.abs(props.values.length * 31 + (props.v
     aria-hidden="true"
   >
     <defs>
-      <linearGradient :id="gid" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" :stop-color="stroke" stop-opacity="0.28" />
-        <stop offset="100%" :stop-color="stroke" stop-opacity="0" />
+      <linearGradient
+        :id="gid"
+        x1="0"
+        y1="0"
+        x2="0"
+        y2="1"
+      >
+        <stop
+          offset="0%"
+          :stop-color="stroke"
+          stop-opacity="0.28"
+        />
+        <stop
+          offset="100%"
+          :stop-color="stroke"
+          stop-opacity="0"
+        />
       </linearGradient>
     </defs>
-    <path :d="area" :fill="`url(#${gid})`" />
-    <path :d="path" fill="none" :stroke="stroke" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    <path
+      :d="area"
+      :fill="`url(#${gid})`"
+    />
+    <path
+      :d="path"
+      fill="none"
+      :stroke="stroke"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
   </svg>
 </template>
 

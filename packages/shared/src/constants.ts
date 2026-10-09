@@ -2,6 +2,8 @@
  * 全局常量
  * 颜色 / 令牌一律来自 ./tokens.ts（唯一事实源）
  */
+import { ACCENT_MAPS } from './tokens'
+
 export {
   PRIMITIVE_GRADIENTS as ACCENT_GRADIENTS,
   ACCENT_MAPS,
@@ -32,11 +34,7 @@ export const MAX_PTY_SESSIONS = 10
 /** 默认轮询间隔 */
 export const DEFAULT_POLL_INTERVAL_MS = 5000
 
-/** 强调色 → 主色（用于 Naive UI primary） */
-export const ACCENT_PRIMARY = {
-  aurora: '#6366F1',
-  sunset: '#F59E0B',
-  ocean: '#0EA5E9',
-  forest: '#10B981',
-  custom: '#6366F1',
-} as const
+/** 强调色 → 主色（从 ACCENT_MAPS 派生，禁止另一套色值） */
+export const ACCENT_PRIMARY = Object.fromEntries(
+  Object.entries(ACCENT_MAPS).map(([k, v]) => [k, v.accent]),
+) as Record<keyof typeof ACCENT_MAPS, string>

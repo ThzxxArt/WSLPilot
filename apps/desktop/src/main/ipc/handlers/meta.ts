@@ -1,4 +1,4 @@
-import { CH, type DistroMeta } from '@wslpilot/shared'
+import { CH, createAppError, type DistroMeta } from '@wslpilot/shared'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -14,14 +14,15 @@ export function registerMetaHandlers(add: AddFn): void {
 
   add(CH.metaSet, async (c, meta: DistroMeta) => {
     if (!meta || typeof meta.name !== 'string' || !meta.name.trim()) {
-      throw new Error('缺少发行版名称')
+      throw createAppError('CONFIG_INVALID', { message: '缺少发行版名称' })
     }
     const file = await c.configService.load('distros')
     const idx = file.distros.findIndex((d) => d.name === meta.name)
     const next = [...file.distros]
     if (idx >= 0) next[idx] = meta
     else next.push(meta)
-    await c.configService.replace('distros', { ...file, distros: next })
+    // ★ 用 patch 而非 replace：数组整体作为叶子替换，保留文件其余注释
+    await c.configService.patch('distros', { distros: next } as any)
     return meta
   })
 }

@@ -47,7 +47,7 @@ describe('WslService', () => {
 
   describe('list', () => {
     it('parses verbose list', async () => {
-      ;(runWsl as any).mockResolvedValue(
+      (runWsl as any).mockResolvedValue(
         ok('  NAME            STATE           VERSION\r\n* Ubuntu-22.04    Running         2\r\n  Debian          Stopped         1'),
       )
       const list = await svc.list()
@@ -63,7 +63,7 @@ describe('WslService', () => {
     })
 
     it('throws WSL_NOT_FOUND when wsl.exe missing', async () => {
-      ;(runWsl as any).mockResolvedValue({
+      (runWsl as any).mockResolvedValue({
         stdout: '',
         stderr: "'wsl.exe' is not recognized",
         code: 1,
@@ -72,7 +72,7 @@ describe('WslService', () => {
     })
 
     it('throws WSL_NOT_INSTALLED when WSL disabled', async () => {
-      ;(runWsl as any).mockResolvedValue({
+      (runWsl as any).mockResolvedValue({
         stdout: '',
         stderr: 'Windows Subsystem for Linux is not installed',
         code: 1,
@@ -81,14 +81,14 @@ describe('WslService', () => {
     })
 
     it('throws TASK_FAILED for other errors', async () => {
-      ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'boom', code: 3 })
+      (runWsl as any).mockResolvedValue({ stdout: '', stderr: 'boom', code: 3 })
       await expect(svc.list()).rejects.toMatchObject({ code: 'TASK_FAILED' })
     })
   })
 
   describe('listWithMeta', () => {
     it('merges meta from map and fills defaults', async () => {
-      ;(runWsl as any).mockResolvedValue(
+      (runWsl as any).mockResolvedValue(
         ok('NAME STATE VERSION\n* Ubuntu  Running  2\n  Alpine  Stopped  2'),
       )
       const meta = new Map([
@@ -116,25 +116,25 @@ describe('WslService', () => {
 
   describe('start / terminate / shutdown / setDefault', () => {
     it('start uses -d name -e true', async () => {
-      ;(runWsl as any).mockResolvedValue(ok(''))
+      (runWsl as any).mockResolvedValue(ok(''))
       await svc.start('Ubuntu-22.04')
       expect((runWsl as any).mock.calls[0][0]).toEqual(['-d', 'Ubuntu-22.04', '-e', 'true'])
     })
 
     it('terminate uses --terminate', async () => {
-      ;(runWsl as any).mockResolvedValue(ok(''))
+      (runWsl as any).mockResolvedValue(ok(''))
       await svc.terminate('Debian')
       expect((runWsl as any).mock.calls[0][0]).toEqual(['--terminate', 'Debian'])
     })
 
     it('shutdown uses --shutdown', async () => {
-      ;(runWsl as any).mockResolvedValue(ok(''))
+      (runWsl as any).mockResolvedValue(ok(''))
       await svc.shutdown()
       expect((runWsl as any).mock.calls[0][0]).toEqual(['--shutdown'])
     })
 
     it('setDefault uses --set-default', async () => {
-      ;(runWsl as any).mockResolvedValue(ok(''))
+      (runWsl as any).mockResolvedValue(ok(''))
       await svc.setDefault('Ubuntu')
       expect((runWsl as any).mock.calls[0][0]).toEqual(['--set-default', 'Ubuntu'])
     })
@@ -155,13 +155,13 @@ describe('WslService', () => {
     })
 
     it('allows spaces and unicode in real WSL names', async () => {
-      ;(runWsl as any).mockResolvedValue(ok(''))
+      (runWsl as any).mockResolvedValue(ok(''))
       await expect(svc.start('Ubuntu 22.04 LTS')).resolves.toBeUndefined()
       await expect(svc.start('测试发行版')).resolves.toBeUndefined()
     })
 
     it('propagates DISTRO_NOT_FOUND on failure', async () => {
-      ;(runWsl as any).mockResolvedValue({
+      (runWsl as any).mockResolvedValue({
         stdout: '',
         stderr: 'Error: not found',
         code: 1,
@@ -172,7 +172,7 @@ describe('WslService', () => {
 
   describe('getVersion', () => {
     it('extracts wsl and kernel versions', async () => {
-      ;(runWsl as any)
+      (runWsl as any)
         .mockResolvedValueOnce(ok('WSL version: 2.3.26\r\nKernel version: 5.15.153.1'))
         .mockResolvedValueOnce(ok('OK'))
       const v = await svc.getVersion()
@@ -183,7 +183,7 @@ describe('WslService', () => {
 
   describe('sampleMetrics', () => {
     it('parses free/df/loadavg output', async () => {
-      ;(runWsl as any).mockResolvedValue(
+      (runWsl as any).mockResolvedValue(
         ok('4194304 812345\n263168000 12884900\n0.25 0.30 0.40 1/100 1'),
       )
       const m = await svc.sampleMetrics('Ubuntu')
@@ -196,7 +196,7 @@ describe('WslService', () => {
     })
 
     it('returns zeros when command fails', async () => {
-      ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'no', code: 1 })
+      (runWsl as any).mockResolvedValue({ stdout: '', stderr: 'no', code: 1 })
       const m = await svc.sampleMetrics('Ubuntu')
       expect(m.memUsedKB).toBe(0)
       expect(m.diskUsedKB).toBe(0)

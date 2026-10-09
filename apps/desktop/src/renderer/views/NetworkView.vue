@@ -5,7 +5,9 @@
 <template>
   <div class="page">
     <h1>网络</h1>
-    <p class="sub">M6 将在此提供端口转发规则与代理配置。</p>
+    <p class="sub">
+      M6 将在此提供端口转发规则与代理配置。
+    </p>
   </div>
 </template>
 
@@ -15,10 +17,12 @@
   max-width: 1200px;
   margin: 0 auto;
 }
+
 h1 {
   font-size: 24px;
   font-weight: 650;
 }
+
 .sub {
   margin-top: 8px;
   color: var(--color-text-secondary);

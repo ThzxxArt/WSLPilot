@@ -61,6 +61,7 @@ const pulsing = computed(() => props.state === 'Running' || props.state === 'Ins
     transform: scale(1);
     opacity: 0.7;
   }
+
   100% {
     transform: scale(1.9);
     opacity: 0;

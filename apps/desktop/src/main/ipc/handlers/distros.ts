@@ -1,4 +1,4 @@
-import { CH, type DistroView } from '@wslpilot/shared'
+import { CH, createAppError, type DistroView } from '@wslpilot/shared'
 import type { WslService } from '../../services/wsl-service'
 import type { RegistryService } from '../../services/registry-service'
 import type { IpcContext } from '../router'
@@ -10,7 +10,7 @@ type AddFn = (
 
 function assertName(name: unknown): string {
   if (typeof name !== 'string' || !name.trim()) {
-    throw new Error('缺少发行版名称')
+    throw createAppError('DISTRO_NOT_FOUND', { message: '缺少发行版名称' })
   }
   return name.trim()
 }
@@ -23,7 +23,6 @@ export function registerDistroHandlers(
   const { wsl, registry } = deps
 
   add(CH.distrosList, async (c): Promise<DistroView[]> => {
-    // 合并 distros.jsonc 元数据
     const metaFile = await c.configService.load('distros')
     const metaMap = new Map(metaFile.distros.map((d) => [d.name, d]))
     return wsl.listWithMeta(metaMap)
@@ -50,8 +49,8 @@ export function registerDistroHandlers(
   })
 
   add(CH.metricsSample, async (c, name: string) => {
+    // '*' 是全局概览保留键，不走发行版名校验
     if (name === '*') {
-      // 全局概览：设计书驾驶舱指标卡
       const { sampleOverview } = await import('../../services/metrics-service')
       const distros = await wsl.list()
       return sampleOverview(wsl, distros, c.logger)

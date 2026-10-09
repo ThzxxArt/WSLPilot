@@ -110,6 +110,9 @@ export const INVOKE_CHANNELS = [
   CH.appGetVersion,
   CH.appOpenConfigDir,
   CH.appGetWslVersion,
+  CH.appWindowMinimize,
+  CH.appWindowMaximize,
+  CH.appWindowClose,
 ] as const satisfies readonly ChannelName[]
 
 /** 所有 M→R 事件通道 */

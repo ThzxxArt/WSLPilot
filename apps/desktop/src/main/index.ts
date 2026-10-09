@@ -66,13 +66,16 @@ async function bootstrap() {
     process.env.VITE_DEV_SERVER_URL ?? `file://${join(__dirname, '../renderer/index.html')}`,
   )
 
-  // 最小化到托盘而非退出（可配置）
+  // 最小化到托盘而非退出 —— 运行期现读设置，改 closeBehavior 即时生效
   mainWindow.on('close', (e) => {
-    const behavior = settings.general.closeBehavior
-    if (behavior === 'minimizeToTray' && !isQuitting()) {
-      e.preventDefault()
-      mainWindow?.hide()
-    }
+    void (async () => {
+      if (isQuitting()) return
+      const s = await configService.load('settings')
+      if (s.general.closeBehavior === 'minimizeToTray') {
+        e.preventDefault()
+        mainWindow?.hide()
+      }
+    })()
   })
 
   app.on('will-quit', () => {

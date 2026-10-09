@@ -34,6 +34,9 @@ jobs:
         run: npm install-scripts approve electron esbuild vue-demi @parcel/watcher
         continue-on-error: true
 
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -48,9 +51,8 @@ jobs:
           path: coverage/
           retention-days: 14
 
-      - name: Component tests
+      - name: Component tests (hard gate)
         run: npm run test:component
-        continue-on-error: true
 
       - name: Build (electron-vite)
         run: npm run build --workspace @wslpilot/desktop
@@ -76,8 +78,6 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-        continue-on-error: true
 
-      - name: Run E2E
+      - name: Run E2E (hard gate)
         run: npm run test:e2e
-        continue-on-error: true

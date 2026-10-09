@@ -77,8 +77,17 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
   const conflicts = new Map<ConfigKey, { fileKey: ConfigKey; detail: string }>()
   /** 单写者原则：Promise 队列串行化写操作 */
   let writeQueue: Promise<unknown> = Promise.resolve()
-  /** 自写标记：避免 chokidar 把自己的写入当成外部修改 */
-  let selfWriting = 0
+  /** 自写标记时间窗：写入后 500ms 内的 chokidar 事件视为自写 */
+  let selfWriteUntil = 0
+  const SELF_WRITE_MS = 500
+
+  function markSelfWriting(): void {
+    selfWriteUntil = Date.now() + SELF_WRITE_MS
+  }
+
+  function isSelfWriting(): boolean {
+    return Date.now() < selfWriteUntil
+  }
   const watchers: FSWatcher[] = []
 
   const filePath = (key: ConfigKey) => join(userDataDir, CONFIG_FILE_NAMES[key])
@@ -90,11 +99,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     } catch {
       const defaults = defaultConfig(key as any)
       const header = `WSLPilot ${CONFIG_FILE_NAMES[key]} — 可手工编辑；写回时尽量保留注释`
-      selfWriting++
+      markSelfWriting()
       try {
         await atomicWrite(path, stringifyJsonc(defaults, header))
       } finally {
-        selfWriting--
+        // markSelfWriting 时间窗自动覆盖
       }
       logger.info('config created', { key, path })
     }
@@ -128,11 +137,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
           nextText = modifyJsonc(nextText, [k], v)
         }
       }
-      selfWriting++
+      markSelfWriting()
       try {
         await atomicWrite(filePath(key), nextText)
       } finally {
-        selfWriting--
+        // markSelfWriting 时间窗自动覆盖
       }
     }
 
@@ -205,7 +214,7 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
   watchers.push(configWatcher)
 
   configWatcher.on('change', (changedPath: string) => {
-    if (selfWriting > 0) return
+    if (isSelfWriting()) return
     const key = FILE_KEYS.find((k) => filePath(k) === changedPath)
     if (!key) return
 
@@ -286,11 +295,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         // 若 patch 为空或 modify 失败导致空串，降级整写
         const writeText = nextText.trim() ? nextText : stringifyJsonc(validated)
 
-        selfWriting++
+        markSelfWriting()
         try {
           await atomicWrite(filePath(key), writeText)
         } finally {
-          selfWriting--
+          // markSelfWriting 时间窗自动覆盖
         }
 
         cache.set(key, validated)
@@ -307,11 +316,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
         const validated = schema.parse(value) as ConfigMap[K]
         await backupFile(key)
-        selfWriting++
+        markSelfWriting()
         try {
           await atomicWrite(filePath(key), stringifyJsonc(validated))
         } finally {
-          selfWriting--
+          // markSelfWriting 时间窗自动覆盖
         }
         cache.set(key, validated)
         conflicts.delete(key)
@@ -348,11 +357,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         if (action === 'overwrite') {
           const current = cache.get(key) as ConfigMap[ConfigKey]
           await backupFile(key)
-          selfWriting++
+          markSelfWriting()
           try {
             await atomicWrite(filePath(key), stringifyJsonc(current))
           } finally {
-            selfWriting--
+            // markSelfWriting 时间窗自动覆盖
           }
           conflicts.delete(key)
           notify(key)

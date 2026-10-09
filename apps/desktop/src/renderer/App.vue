@@ -78,10 +78,16 @@ onUnmounted(() => {
   >
     <n-message-provider>
       <n-dialog-provider>
-        <div v-if="ready" class="pilot-shell">
+        <div
+          v-if="ready"
+          class="pilot-shell"
+        >
           <DefaultLayout />
         </div>
-        <div v-else class="loading-screen">
+        <div
+          v-else
+          class="loading-screen"
+        >
           <n-spin size="large" />
         </div>
       </n-dialog-provider>

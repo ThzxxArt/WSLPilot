@@ -8,6 +8,8 @@ const DEFAULTS = {
   showRawCommand: false,
   confirmDestructive: true,
   logLevel: 'info',
+  pollIntervalMs: 5000,
+  closeBehavior: 'minimizeToTray' as 'minimizeToTray' | 'quit',
 } as const
 
 export const useSettingsStore = defineStore('settings', {
@@ -19,6 +21,8 @@ export const useSettingsStore = defineStore('settings', {
     showRawCommand: DEFAULTS.showRawCommand as boolean,
     confirmDestructive: DEFAULTS.confirmDestructive as boolean,
     logLevel: DEFAULTS.logLevel as LogLevel,
+    pollIntervalMs: DEFAULTS.pollIntervalMs as number,
+    closeBehavior: DEFAULTS.closeBehavior as AppSettings['general']['closeBehavior'],
     version: '',
   }),
 
@@ -31,6 +35,8 @@ export const useSettingsStore = defineStore('settings', {
       this.showRawCommand = s.advanced.showRawCommand
       this.confirmDestructive = s.advanced.confirmDestructive
       this.logLevel = s.advanced.logLevel
+      this.pollIntervalMs = s.general.pollIntervalMs
+      this.closeBehavior = s.general.closeBehavior
       this.version = await window.wslAPI.app.getVersion()
       this.loaded = true
     },
@@ -53,6 +59,16 @@ export const useSettingsStore = defineStore('settings', {
     async setConfirmDestructive(confirmDestructive: boolean) {
       this.confirmDestructive = confirmDestructive
       await window.wslAPI.config.set('settings', { advanced: { confirmDestructive } })
+    },
+
+    async setPollIntervalMs(pollIntervalMs: number) {
+      this.pollIntervalMs = pollIntervalMs
+      await window.wslAPI.config.set('settings', { general: { pollIntervalMs } })
+    },
+
+    async setCloseBehavior(closeBehavior: AppSettings['general']['closeBehavior']) {
+      this.closeBehavior = closeBehavior
+      await window.wslAPI.config.set('settings', { general: { closeBehavior } })
     },
   },
 })

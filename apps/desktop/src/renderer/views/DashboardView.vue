@@ -25,7 +25,10 @@ const wslLabel = computed(() => {
   return 'WSL'
 })
 
-const pollInterval = computed(() => 5000)
+const pollInterval = computed(() => {
+  const ms = (settings as any).pollIntervalMs
+  return typeof ms === 'number' && ms >= 1000 ? ms : 5000
+})
 
 async function refreshAll() {
   await Promise.all([distros.refresh(), metrics.sample()])
@@ -39,7 +42,7 @@ onMounted(() => {
 })
 
 const { start: startPolling } = usePolling(() => void refreshAll(), {
-  intervalMs: pollInterval.value,
+  intervalMs: pollInterval,
 })
 startPolling()
 
@@ -79,10 +82,16 @@ function onMore(name: string) {
   <div class="dashboard">
     <header class="hero">
       <div>
-        <h1 class="greeting">{{ greeting }}，指挥官</h1>
+        <h1 class="greeting">
+          {{ greeting }}，指挥官
+        </h1>
         <p class="sub">
           {{ wslLabel }} · {{ distros.items.length }} 个发行版 ·
-          <StatusDot state="Running" :size="8" class="inline-dot" />
+          <StatusDot
+            state="Running"
+            :size="8"
+            class="inline-dot"
+          />
           {{ distros.runningCount }} 个运行中
           <template v-if="wslInfo.kernelVersion">
             · 内核 {{ wslInfo.kernelVersion.split(/\s+/)[0] }}
@@ -90,14 +99,27 @@ function onMore(name: string) {
         </p>
       </div>
       <div class="hero-actions">
-        <n-button secondary :loading="distros.loading" @click="refreshAll">刷新</n-button>
-        <n-button type="primary" :style="{ background: gradient, border: 'none' }" disabled>
+        <n-button
+          secondary
+          :loading="distros.loading"
+          @click="refreshAll"
+        >
+          刷新
+        </n-button>
+        <n-button
+          type="primary"
+          :style="{ background: gradient, border: 'none' }"
+          disabled
+        >
           + 安装发行版
         </n-button>
       </div>
     </header>
 
-    <p v-if="distros.lastError" class="error-banner">
+    <p
+      v-if="distros.lastError"
+      class="error-banner"
+    >
       {{ distros.lastError.message }}
       <span v-if="distros.lastError.suggestion"> — {{ distros.lastError.suggestion }}</span>
     </p>
@@ -131,19 +153,39 @@ function onMore(name: string) {
 
     <section class="panel card">
       <div class="panel-head">
-        <h2 class="panel-title">我的发行版</h2>
-        <n-button text type="primary" @click="router.push('/distros')">全部 →</n-button>
+        <h2 class="panel-title">
+          我的发行版
+        </h2>
+        <n-button
+          text
+          type="primary"
+          @click="router.push('/distros')"
+        >
+          全部 →
+        </n-button>
       </div>
 
-      <div v-if="distros.items.length === 0" class="empty-wrap">
+      <div
+        v-if="distros.items.length === 0"
+        class="empty-wrap"
+      >
         <n-empty description="还没有发行版数据">
           <template #extra>
-            <n-button size="small" secondary @click="refreshAll">重新加载</n-button>
+            <n-button
+              size="small"
+              secondary
+              @click="refreshAll"
+            >
+              重新加载
+            </n-button>
           </template>
         </n-empty>
       </div>
 
-      <div v-else class="cards">
+      <div
+        v-else
+        class="cards"
+      >
         <DistroCard
           v-for="d in distros.items.slice(0, 6)"
           :key="d.name"
@@ -159,17 +201,36 @@ function onMore(name: string) {
     </section>
 
     <section class="panel card">
-      <h2 class="panel-title">快捷操作</h2>
+      <h2 class="panel-title">
+        快捷操作
+      </h2>
       <div class="quick">
         <n-popconfirm @positive-click="onShutdown">
           <template #trigger>
-            <n-button secondary>🔌 全部关机</n-button>
+            <n-button secondary>
+              🔌 全部关机
+            </n-button>
           </template>
           将执行 <code>wsl --shutdown</code>，关闭所有运行中的发行版，确定吗？
         </n-popconfirm>
-        <n-button secondary disabled>📦 备份</n-button>
-        <n-button secondary disabled>🧹 清理</n-button>
-        <n-button secondary disabled>🧭 网络配置</n-button>
+        <n-button
+          secondary
+          disabled
+        >
+          📦 备份
+        </n-button>
+        <n-button
+          secondary
+          disabled
+        >
+          🧹 清理
+        </n-button>
+        <n-button
+          secondary
+          disabled
+        >
+          🧭 网络配置
+        </n-button>
       </div>
     </section>
   </div>
@@ -232,7 +293,7 @@ function onMore(name: string) {
   gap: 16px;
 }
 
-@media (max-width: 1100px) {
+@media (width <= 1100px) {
   .metrics {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -262,13 +323,13 @@ function onMore(name: string) {
   gap: 14px;
 }
 
-@media (max-width: 960px) {
+@media (width <= 960px) {
   .cards {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
-@media (max-width: 640px) {
+@media (width <= 640px) {
   .cards {
     grid-template-columns: 1fr;
   }

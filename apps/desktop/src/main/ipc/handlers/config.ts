@@ -1,4 +1,4 @@
-import { CH, type ConfigKey, type ConfigMap } from '@wslpilot/shared'
+import { CH, createAppError, type ConfigKey, type ConfigMap } from '@wslpilot/shared'
 import type { ConfigConflictAction, DeepPartial } from '../../services/config-service'
 import type { IpcContext } from '../router'
 
@@ -11,7 +11,7 @@ const CONFIG_KEYS: ConfigKey[] = ['settings', 'distros', 'actions', 'network', '
 
 function assertConfigKey(key: string): ConfigKey {
   if (!CONFIG_KEYS.includes(key as ConfigKey)) {
-    throw new Error(`未知配置键: ${key}`)
+    throw createAppError('CONFIG_INVALID', { message: `未知配置键: ${key}` })
   }
   return key as ConfigKey
 }
@@ -38,7 +38,7 @@ export function registerConfigHandlers(add: AddFn, ctx: IpcContext): void {
       const key = assertConfigKey(payload?.fileKey)
       const action = payload?.action
       if (action !== 'reload' && action !== 'overwrite' && action !== 'ignore') {
-        throw new Error(`无效的冲突处理动作: ${action}`)
+        throw createAppError('CONFIG_INVALID', { message: `无效的冲突处理动作: ${action}` })
       }
       return c.configService.resolveConflict(key, action)
     },

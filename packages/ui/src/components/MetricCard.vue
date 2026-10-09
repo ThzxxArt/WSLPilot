@@ -53,9 +53,13 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
 
 <template>
   <div class="metric card">
-    <div class="metric-label">{{ label }}</div>
+    <div class="metric-label">
+      {{ label }}
+    </div>
     <div class="metric-value-row">
-      <div class="metric-value">{{ display }}</div>
+      <div class="metric-value">
+        {{ display }}
+      </div>
       <Sparkline
         v-if="hasHistory"
         :values="history"
@@ -64,7 +68,12 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
         :height="26"
       />
     </div>
-    <div v-if="hint" class="metric-hint">{{ hint }}</div>
+    <div
+      v-if="hint"
+      class="metric-hint"
+    >
+      {{ hint }}
+    </div>
   </div>
 </template>
 

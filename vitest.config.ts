@@ -7,7 +7,10 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
-    include: ['packages/*/src/**/*.test.ts', 'apps/desktop/tests/unit/**/*.test.ts'],
+    include: [
+      'packages/*/src/**/*.test.ts',
+      'apps/desktop/tests/unit/**/*.test.ts',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'json-summary', 'html', 'lcov'],
@@ -16,6 +19,8 @@ export default defineConfig({
         'packages/shared/src/**/*.ts',
         'packages/kit/src/**/*.ts',
         'apps/desktop/src/main/**/*.ts',
+        'apps/desktop/src/renderer/stores/**/*.ts',
+        'apps/desktop/src/renderer/composables/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',

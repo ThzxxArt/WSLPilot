@@ -14,7 +14,10 @@ const sidebarCollapsed = ref(false)
       <SidebarNav v-model:collapsed="sidebarCollapsed" />
       <main class="layout-content">
         <router-view v-slot="{ Component }">
-          <transition name="fade-slide" mode="out-in">
+          <transition
+            name="fade-slide"
+            mode="out-in"
+          >
             <component :is="Component" />
           </transition>
         </router-view>

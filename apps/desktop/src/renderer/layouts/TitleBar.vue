@@ -25,12 +25,19 @@ function close() {
 <template>
   <header class="titlebar">
     <div class="titlebar-brand">
-      <div class="logo" :style="{ background: gradient }" />
+      <div
+        class="logo"
+        :style="{ background: gradient }"
+      />
       <span class="title">WSLPilot</span>
     </div>
 
     <div class="titlebar-search">
-      <div class="search-box" role="button" tabindex="0">
+      <div
+        class="search-box"
+        role="button"
+        tabindex="0"
+      >
         <span class="search-placeholder">搜索或执行命令…</span>
         <kbd>Ctrl K</kbd>
       </div>
@@ -40,25 +47,64 @@ function close() {
       <div class="window-controls no-drag">
         <n-tooltip trigger="hover">
           <template #trigger>
-            <button class="win-btn" aria-label="最小化" @click="minimize">
-              <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor" /></svg>
+            <button
+              class="win-btn"
+              aria-label="最小化"
+              @click="minimize"
+            >
+              <svg
+                width="10"
+                height="1"
+                viewBox="0 0 10 1"
+              ><rect
+                width="10"
+                height="1"
+                fill="currentColor"
+              /></svg>
             </button>
           </template>
           最小化
         </n-tooltip>
         <n-tooltip trigger="hover">
           <template #trigger>
-            <button class="win-btn" aria-label="最大化" @click="toggleMaximize">
-              <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" fill="none" /></svg>
+            <button
+              class="win-btn"
+              aria-label="最大化"
+              @click="toggleMaximize"
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+              ><rect
+                x="0.5"
+                y="0.5"
+                width="9"
+                height="9"
+                stroke="currentColor"
+                fill="none"
+              /></svg>
             </button>
           </template>
           最大化
         </n-tooltip>
         <n-tooltip trigger="hover">
           <template #trigger>
-            <button class="win-btn win-close" aria-label="关闭" @click="close">
-              <svg width="10" height="10" viewBox="0 0 10 10">
-                <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.2" />
+            <button
+              class="win-btn win-close"
+              aria-label="关闭"
+              @click="close"
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+              >
+                <path
+                  d="M1 1l8 8M9 1L1 9"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                />
               </svg>
             </button>
           </template>
@@ -79,7 +125,6 @@ function close() {
   gap: 16px;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--color-border-subtle);
   user-select: none;
 }

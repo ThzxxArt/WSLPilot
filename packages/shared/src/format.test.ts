@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { formatKb, formatKbPair, EMPTY_OVERVIEW } from '../src/types'
+import { formatKb, formatKbPair } from '../src/format'
+import { EMPTY_OVERVIEW } from '../src/types'
 
 describe('formatKb', () => {
   it('formats zero/invalid as dash', () => {

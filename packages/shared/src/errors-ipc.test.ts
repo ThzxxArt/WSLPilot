@@ -50,6 +50,36 @@ describe('IPC 错误序列化协议', () => {
     expect(deserializeIpcError({ nope: true })).toBeNull()
   })
 
+  it('★ deserializes through Electron invoke error wrapper', () => {
+    // Electron ipcRenderer.invoke 真实 reject 形态
+    const inner = createAppError('WSL_NOT_INSTALLED', {
+      suggestion: '点击「一键安装 WSL」',
+    }).toJSON()
+    const electronWrapped = new Error(
+      `Error invoking remote method 'distros:start': Error: WSLPILOT:${JSON.stringify(inner)}`,
+    )
+    const restored = deserializeIpcError(electronWrapped)
+    expect(restored).not.toBeNull()
+    expect(restored!.code).toBe('WSL_NOT_INSTALLED')
+    expect(restored!.suggestion).toContain('一键安装')
+    expect(toAppError(electronWrapped).code).toBe('WSL_NOT_INSTALLED')
+  })
+
+  it('deserializes when JSON is followed by extra text', () => {
+    const inner = createAppError('DISTRO_NOT_FOUND').toJSON()
+    const wrapped = new Error(`something WSLPILOT:${JSON.stringify(inner)} and more`)
+    const r = deserializeIpcError(wrapped)
+    expect(r).not.toBeNull()
+    expect(r!.code).toBe('DISTRO_NOT_FOUND')
+  })
+
+  it('serializeIpcError keeps AppError shape with recoverable', () => {
+    const err = serializeIpcError(createAppError('PERMISSION_DENIED').toJSON())
+    const r = deserializeIpcError(err)
+    expect(r!.recoverable).toBe(true)
+    expect(r!.suggestion).toBeTruthy()
+  })
+
   it('deserialize returns null for malformed WSLPILOT payload', () => {
     expect(deserializeIpcError(new Error('WSLPILOT:{not-json'))).toBeNull()
   })

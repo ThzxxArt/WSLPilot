@@ -36,10 +36,11 @@ function makeCtx() {
     return { $schemaVersion: 2 }
   })
   const replace = vi.fn(async () => {})
+  const patch = vi.fn(async (_k: string, p: unknown) => ({ patched: p }))
   return {
     configService: {
       load,
-      patch: vi.fn(async (_k: string, p: any) => ({ patched: p })),
+      patch,
       replace,
       openInEditor: vi.fn(async () => {}),
       resolveConflict: vi.fn(async () => ({})),
@@ -59,6 +60,7 @@ function makeCtx() {
     getMainWindow: vi.fn(() => ({ webContents: { send: vi.fn() } })),
     load,
     replace,
+    patch,
   }
 }
 
@@ -188,8 +190,8 @@ describe('distros + meta IPC handlers', () => {
       pinned: false,
       quickActions: [],
     })
-    expect(ctx.replace).toHaveBeenCalled()
-    const call = (ctx.replace as any).mock.calls[0] as any[]
+    expect(ctx.patch).toHaveBeenCalled()
+    const call = (ctx.patch as any).mock.calls[0] as any[]
     const arg = call[1] as { distros: unknown[] }
     expect(arg.distros).toHaveLength(2)
   })

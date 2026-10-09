@@ -65,11 +65,11 @@ export function parseDistroList(raw: string): ParsedDistro[] {
     .slice(1)
     .filter((l) => l.trim() !== '')
     .map((line) => {
-      const isDefault = line.trimStart().startsWith('*')
-      const parts = line
-        .replace('*', '')
-        .trim()
-        .split(/\s{2,}/)
+      const trimmed = line.trimStart()
+      const isDefault = trimmed.startsWith('*')
+      // 仅去掉「默认标记」的一个 *，保留名称内部的 *
+      const body = (isDefault ? trimmed.slice(1) : line).trim()
+      const parts = body.split(/\s{2,}/)
       return {
         isDefault,
         name: parts[0] ?? '',

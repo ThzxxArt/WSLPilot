@@ -2,6 +2,8 @@ import type { IpcMain } from 'electron'
 import {
   CH,
   serializeIpcError,
+  createAppError,
+  parseIpcArgs,
   type ConfigKey,
 } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
@@ -43,7 +45,17 @@ export function registerIpcHandlers(
     ipcMain.handle(channel, async (_event, ...args) => {
       try {
         ctx.logger.debug('ipc invoke', { channel })
-        return await handler(ctx, ...args)
+        // 设计书 §8.2：入参 zod 校验，失败抛结构化错误
+        let validated: unknown = args[0]
+        try {
+          validated = parseIpcArgs(channel, args)
+        } catch (e: any) {
+          throw createAppError('CONFIG_INVALID', {
+            message: `参数校验失败：${channel}`,
+            detail: e?.message ? String(e.message) : String(e),
+          })
+        }
+        return await handler(ctx, validated)
       } catch (e) {
         const err = serializeIpcError(e)
         ctx.logger.error('ipc error', { channel, message: err.message.slice(0, 200) })

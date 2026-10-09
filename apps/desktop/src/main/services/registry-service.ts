@@ -83,9 +83,22 @@ export function createRegistryService(logger: Logger, regQuery: RegQuery = defau
     return parseGuidDetail(guid, out)
   }
 
+  async function listGuids(): Promise<Array<{ guid: string; distributionName: string }>> {
+    const out = await query(['query', LXSS])
+    const ids = extractGuids(out)
+    const guids: Array<{ guid: string; distributionName: string }> = []
+    for (const guid of ids) {
+      const info = await readGuid(guid)
+      if (info.name) {
+        guids.push({ guid, distributionName: info.name })
+      }
+    }
+    return guids
+  }
+
   return {
     async detail(name) {
-      const guids = await this.listGuids()
+      const guids = await listGuids()
       for (const g of guids) {
         if (g.distributionName === name) {
           return readGuid(g.guid)
@@ -94,17 +107,6 @@ export function createRegistryService(logger: Logger, regQuery: RegQuery = defau
       return {}
     },
 
-    async listGuids() {
-      const out = await query(['query', LXSS])
-      const ids = extractGuids(out)
-      const guids: Array<{ guid: string; distributionName: string }> = []
-      for (const guid of ids) {
-        const info = await readGuid(guid)
-        if (info.name) {
-          guids.push({ guid, distributionName: info.name })
-        }
-      }
-      return guids
-    },
+    listGuids,
   }
 }

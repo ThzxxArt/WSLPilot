@@ -132,21 +132,67 @@ export const IPC_ERROR_PREFIX = 'WSLPILOT:'
 
 /** 主进程抛出 IPC 错误（message 内嵌 AppError JSON） */
 export function serializeIpcError(e: unknown): Error {
-  const appErr: AppError =
-    e && typeof e === 'object' && 'code' in e && 'message' in e
-      ? (e as AppError)
-      : createAppError('UNKNOWN', { detail: String(e) }).toJSON()
+  let appErr: AppError
+  if (e && typeof e === 'object' && 'code' in e && 'message' in e && 'recoverable' in e) {
+    appErr = e as AppError
+  } else {
+    const detail =
+      e instanceof Error
+        ? `${e.name}: ${e.message}`
+        : typeof e === 'string'
+          ? e
+          : (() => {
+              try {
+                return JSON.stringify(e)
+              } catch {
+                return String(e)
+              }
+            })()
+    appErr = createAppError('UNKNOWN', { detail }).toJSON()
+  }
   return new Error(`${IPC_ERROR_PREFIX}${JSON.stringify(appErr)}`)
 }
 
-/** 从 invoke reject / catch 结果还原 AppError */
+/**
+ * 从 invoke reject / catch 结果还原 AppError。
+ * Electron 真实 reject 形态为：
+ *   Error invoking remote method 'channel': Error: WSLPILOT:{...}
+ * 因此必须 indexOf 而不是 startsWith。
+ */
 export function deserializeIpcError(e: unknown): AppError | null {
-  if (e instanceof Error && e.message.startsWith(IPC_ERROR_PREFIX)) {
+  const raw =
+    e instanceof Error
+      ? e.message
+      : typeof e === 'string'
+        ? e
+        : (() => {
+            try {
+              return JSON.stringify(e)
+            } catch {
+              return ''
+            }
+          })()
+
+  const idx = raw.indexOf(IPC_ERROR_PREFIX)
+  if (idx >= 0) {
+    const payload = raw.slice(idx + IPC_ERROR_PREFIX.length)
+    // 直接解析
     try {
-      return JSON.parse(e.message.slice(IPC_ERROR_PREFIX.length)) as AppError
+      return JSON.parse(payload) as AppError
     } catch {
-      return null
+      /* fallthrough */
     }
+    // 兼容 JSON 后还有尾巴（Error stack 等）：截取首个 { 到最后一个 }
+    const start = payload.indexOf('{')
+    const end = payload.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(payload.slice(start, end + 1)) as AppError
+      } catch {
+        return null
+      }
+    }
+    return null
   }
   if (e && typeof e === 'object' && 'code' in e && 'message' in e && 'recoverable' in e) {
     return e as AppError
@@ -158,6 +204,8 @@ export function deserializeIpcError(e: unknown): AppError | null {
 export function toAppError(e: unknown): AppError {
   return (
     deserializeIpcError(e) ??
-    createAppError('UNKNOWN', { detail: e instanceof Error ? e.message : String(e) }).toJSON()
+    createAppError('UNKNOWN', {
+      detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+    }).toJSON()
   )
 }
