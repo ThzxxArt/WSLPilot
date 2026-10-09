@@ -23,6 +23,12 @@
       {
         "ignore": ["consecutive-duplicates-with-different-values"]
       }
+    ],
+    "selector-pseudo-class-no-unknown": [
+      true,
+      {
+        "ignorePseudoClasses": ["deep", "global", "slotted"]
+      }
     ]
   },
   "ignoreFiles": [

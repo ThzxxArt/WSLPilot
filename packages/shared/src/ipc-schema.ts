@@ -57,6 +57,25 @@ export const IPC_SCHEMAS: Record<string, z.ZodTypeAny> = {
   }),
 
   [CH.metaSet]: metaPayloadSchema,
+
+  // PTY
+  [CH.ptyCreate]: z.object({
+    distro: nameSchema,
+    shell: z.string().max(200).optional(),
+    cwd: z.string().max(500).optional(),
+    cols: z.number().int().min(2).max(500).default(80),
+    rows: z.number().int().min(1).max(200).default(24),
+  }),
+  [CH.ptyInput]: z.object({
+    ptyId: z.string().min(1),
+    data: z.string().max(1024 * 64),
+  }),
+  [CH.ptyResize]: z.object({
+    ptyId: z.string().min(1),
+    cols: z.number().int().min(2).max(500),
+    rows: z.number().int().min(1).max(200),
+  }),
+  [CH.ptyKill]: z.string().min(1),
 }
 
 /** 校验入参；通道约定：invoke 只传一个参数（对象或原始值） */

@@ -42,6 +42,8 @@ export const CH = {
   ptyKill: 'pty:kill',
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
+  ptyList: 'pty:list',
+  ptyMaxSessions: 'pty:maxSessions',
 
   // fs
   fsReadDir: 'fs:readDir',
@@ -99,6 +101,8 @@ export const INVOKE_CHANNELS = [
   CH.ptyInput,
   CH.ptyResize,
   CH.ptyKill,
+  CH.ptyList,
+  CH.ptyMaxSessions,
   CH.fsReadDir,
   CH.fsRead,
   CH.fsWrite,

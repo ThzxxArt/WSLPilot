@@ -9,6 +9,9 @@ import {
   NSpace,
   NDivider,
   NTag,
+  NInput,
+  NInputNumber,
+  NSelect,
   useMessage,
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
@@ -125,6 +128,83 @@ function openConfigDir() {
         <n-switch
           :value="settings.reduceMotion"
           @update:value="(v: boolean) => settings.setReduceMotion(v)"
+        />
+      </div>
+    </n-card>
+
+    <n-card
+      title="终端"
+      class="block"
+    >
+      <div class="setting-line">
+        <div style="flex: 1">
+          <div class="label">
+            字体
+          </div>
+          <n-input
+            :value="settings.terminalFontFamily"
+            size="small"
+            style="max-width: 320px"
+            @update:value="(v: string) => settings.setTerminalFontFamily(v)"
+          />
+        </div>
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            字号
+          </div>
+        </div>
+        <n-input-number
+          :value="settings.terminalFontSize"
+          size="small"
+          :min="8"
+          :max="32"
+          @update:value="(v: number | null) => { if (v) settings.setTerminalFontSize(v) }"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            光标样式
+          </div>
+        </div>
+        <n-select
+          :value="settings.terminalCursorStyle"
+          size="small"
+          style="width: 140px"
+          :options="[
+            { label: '块状', value: 'block' },
+            { label: '下划线', value: 'underline' },
+            { label: '竖线', value: 'bar' },
+          ]"
+          @update:value="(v: 'block' | 'underline' | 'bar') => settings.setTerminalCursorStyle(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            光标闪烁
+          </div>
+        </div>
+        <n-switch
+          :value="settings.terminalCursorBlink"
+          @update:value="(v: boolean) => settings.setTerminalCursorBlink(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">
+            回滚缓冲行数
+          </div>
+        </div>
+        <n-input-number
+          :value="settings.terminalScrollback"
+          size="small"
+          :min="100"
+          :max="100000"
+          :step="500"
+          @update:value="(v: number | null) => { if (v) settings.setTerminalScrollback(v) }"
         />
       </div>
     </n-card>

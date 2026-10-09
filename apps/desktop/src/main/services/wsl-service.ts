@@ -7,6 +7,7 @@ import type {
 } from '@wslpilot/shared'
 import {
   createAppError,
+  assertSafeDistroName,
   DISTRO_BRAND_COLORS,
 } from '@wslpilot/shared'
 import { runWsl, parseDistroList, type Logger } from '@wslpilot/kit'
@@ -41,18 +42,7 @@ export interface WslService {
 }
 
 function assertName(name: string): string {
-  const n = (name ?? '').trim()
-  if (!n) throw createAppError('DISTRO_NOT_FOUND', { message: '发行版名称不能为空' })
-  // 拒绝控制字符、空字节、路径穿越与 Windows 非法文件名字符
-  // （WSL 发行版名允许空格、中划线、点、下划线与中文）
-  // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
-  if (/[\u0000-\u001f\u007f]/.test(n) || n.includes('..')) {
-    throw createAppError('DISTRO_NOT_FOUND', { message: `非法的发行版名称：${n}` })
-  }
-  if (/[\\/:*?"<>|]/.test(n)) {
-    throw createAppError('DISTRO_NOT_FOUND', { message: `非法的发行版名称：${n}` })
-  }
-  return n
+  return assertSafeDistroName(name)
 }
 
 async function runOk(

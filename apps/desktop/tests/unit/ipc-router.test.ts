@@ -83,6 +83,16 @@ function makeDeps() {
       detail: vi.fn(async () => ({})),
       listGuids: vi.fn(async () => []),
     } as any,
+    pty: {
+      create: vi.fn(() => ({ ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 0 })),
+      input: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      killAll: vi.fn(),
+      list: vi.fn(() => []),
+      get: vi.fn(() => null),
+      count: vi.fn(() => 0),
+    } as any,
   }
 }
 

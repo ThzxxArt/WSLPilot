@@ -64,6 +64,35 @@ const api = {
     },
   },
 
+  terminal: {
+    create: (opts: {
+      distro: string
+      shell?: string
+      cwd?: string
+      cols: number
+      rows: number
+    }): Promise<{ ptyId: string; distro: string; shell: string; createdAt: number }> =>
+      ipcRenderer.invoke(CH.ptyCreate, opts),
+    input: (ptyId: string, data: string): Promise<void> =>
+      ipcRenderer.invoke(CH.ptyInput, { ptyId, data }),
+    resize: (ptyId: string, cols: number, rows: number): Promise<void> =>
+      ipcRenderer.invoke(CH.ptyResize, { ptyId, cols, rows }),
+    kill: (ptyId: string): Promise<void> => ipcRenderer.invoke(CH.ptyKill, ptyId),
+    list: (): Promise<{ ptyId: string; distro: string; shell: string }[]> =>
+      ipcRenderer.invoke(CH.ptyList),
+    maxSessions: (): Promise<number> => ipcRenderer.invoke(CH.ptyMaxSessions),
+    onData: (cb: (p: { ptyId: string; chunk: string }) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: { ptyId: string; chunk: string }) => cb(p)
+      ipcRenderer.on(CH.ptyData, h)
+      return () => ipcRenderer.removeListener(CH.ptyData, h)
+    },
+    onExit: (cb: (p: { ptyId: string; code: number }) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: { ptyId: string; code: number }) => cb(p)
+      ipcRenderer.on(CH.ptyExit, h)
+      return () => ipcRenderer.removeListener(CH.ptyExit, h)
+    },
+  },
+
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(CH.appGetVersion),
     openConfigDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenConfigDir),

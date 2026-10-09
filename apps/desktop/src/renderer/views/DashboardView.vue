@@ -71,7 +71,7 @@ function onShutdown() {
   void action(() => distros.shutdownAll(), '已关闭全部发行版')
 }
 function onOpenTerminal(name: string) {
-  message.info(`终端将在 M3 交付（${name}）`)
+  void router.push({ path: '/terminal', query: { distro: name } })
 }
 function onMore(name: string) {
   void router.push({ path: '/distros', query: { focus: name } })

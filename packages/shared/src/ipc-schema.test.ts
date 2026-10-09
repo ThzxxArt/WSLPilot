@@ -49,6 +49,24 @@ describe('ipc-schema', () => {
     })
   })
 
+  it('validates pty create/input/resize/kill payloads', () => {
+    expect(
+      parseIpcArgs(CH.ptyCreate, [{ distro: 'Ubuntu', cols: 80, rows: 24 }]),
+    ).toMatchObject({ distro: 'Ubuntu', cols: 80 })
+    expect(() => parseIpcArgs(CH.ptyCreate, [{ distro: '', cols: 80, rows: 24 }])).toThrow()
+    expect(() =>
+      parseIpcArgs(CH.ptyInput, [{ ptyId: '', data: 'x' }]),
+    ).toThrow()
+    expect(
+      parseIpcArgs(CH.ptyInput, [{ ptyId: 'p1', data: 'ls\n' }]),
+    ).toMatchObject({ ptyId: 'p1' })
+    expect(() => parseIpcArgs(CH.ptyKill, [''])).toThrow()
+    expect(parseIpcArgs(CH.ptyKill, ['p1'])).toBe('p1')
+    expect(() =>
+      parseIpcArgs(CH.ptyResize, [{ ptyId: 'p1', cols: 1, rows: 10 }]),
+    ).toThrow()
+  })
+
   it('rejects prototype pollution keys in patch', () => {
     const evil = JSON.parse('{"__proto__":{"polluted":true}}')
     expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: evil }])).toThrow()

@@ -73,6 +73,7 @@ function makeCtx() {
 }
 
 function makeDeps() {
+  const pty = { create: vi.fn(() => ({ ptyId: "p1", distro: "U", shell: "b", createdAt: 0 })), input: vi.fn(), resize: vi.fn(), kill: vi.fn(), killAll: vi.fn(), list: vi.fn(() => []), get: vi.fn(() => null), count: vi.fn(() => 0) } as any
   return {
     wsl: {
       list: vi.fn(async () => [
@@ -102,6 +103,7 @@ function makeDeps() {
         sampledAt: 'T',
       })),
     } as any,
+    pty,
     registry: {
       detail: vi.fn(async () => ({ name: 'Ubuntu', guid: '{x}' })),
       listGuids: vi.fn(async () => []),
@@ -206,5 +208,15 @@ describe('distros + meta IPC handlers', () => {
     const { wrapped } = register(ctx)
     await expect(wrapped.get(CH.metaSet)({}, { alias: 'x' })).rejects.toThrow()
     await expect(wrapped.get(CH.metaSet)({}, null)).rejects.toThrow()
+  })
+
+  it('config handlers reject unknown keys and bad actions', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    await expect(wrapped.get(CH.configGet)({}, 'evil')).rejects.toThrow()
+    await expect(wrapped.get(CH.configOpenExternal)({}, 'evil')).rejects.toThrow()
+    await expect(
+      wrapped.get(CH.configResolveConflict)({}, { fileKey: 'settings', action: 'hack' }),
+    ).rejects.toThrow()
   })
 })

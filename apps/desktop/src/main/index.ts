@@ -9,6 +9,7 @@ import { decideClose } from './window/close-policy'
 import { createTray } from './tray/tray'
 import { createWslService } from './services/wsl-service'
 import { createRegistryService } from './services/registry-service'
+import { createPtyManager } from './services/pty-manager'
 import { isQuitting, markQuitting } from './app-state'
 
 // 单实例锁 —— 败者直接退出，不注册任何 bootstrap（M10）
@@ -68,6 +69,14 @@ async function bootstrap() {
 
   const wsl = createWslService(logger)
   const registry = createRegistryService(logger)
+  const pty = createPtyManager(logger, {
+    onData: (ptyId, chunk) => {
+      mainWindow?.webContents.send('pty:data', { ptyId, chunk })
+    },
+    onExit: (ptyId, code) => {
+      mainWindow?.webContents.send('pty:exit', { ptyId, code })
+    },
+  })
 
   registerIpcHandlers(
     ipcMain,
@@ -77,8 +86,9 @@ async function bootstrap() {
       getMainWindow: () => mainWindow,
       wsl,
       registry,
+      pty,
     },
-    { wsl, registry },
+    { wsl, registry, pty },
   )
 
   createTray({
@@ -107,6 +117,7 @@ async function bootstrap() {
   })
 
   app.on('will-quit', () => {
+    pty.killAll()
     configService.dispose()
   })
 

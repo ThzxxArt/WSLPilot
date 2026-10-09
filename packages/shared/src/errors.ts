@@ -209,3 +209,22 @@ export function toAppError(e: unknown): AppError {
     }).toJSON()
   )
 }
+
+/**
+ * 发行版名称安全校验（执行边界统一入口）。
+ * 允许空格/中文/中划线/点/下划线；拒绝控制字符、`..`、Windows 非法文件名字符。
+ */
+export function assertSafeDistroName(name: unknown): string {
+  const n = typeof name === 'string' ? name.trim() : ''
+  if (!n) {
+    throw createAppError('DISTRO_NOT_FOUND', { message: '发行版名称不能为空' })
+  }
+  // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+  if (/[\u0000-\u001f\u007f]/.test(n) || n.includes('..')) {
+    throw createAppError('DISTRO_NOT_FOUND', { message: `非法的发行版名称：${n}` })
+  }
+  if (/[\\/:*?"<>|]/.test(n)) {
+    throw createAppError('DISTRO_NOT_FOUND', { message: `非法的发行版名称：${n}` })
+  }
+  return n
+}

@@ -1,0 +1,183 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
+import {
+  createPtyManager,
+  type PtyProcessLike,
+  type PtySpawnFn,
+} from '../../src/main/services/pty-manager'
+import { MAX_PTY_SESSIONS } from '@wslpilot/shared'
+
+function logger() {
+  return {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    setLevel: vi.fn(),
+  } as any
+}
+
+function makeProc() {
+  const ee = new EventEmitter()
+  const proc: PtyProcessLike = {
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    pid: 12345,
+    onData: (l) => {
+      ee.on('data', l)
+      return { dispose: () => ee.off('data', l) }
+    },
+    onExit: (l) => {
+      ee.on('exit', l)
+      return { dispose: () => ee.off('exit', l) }
+    },
+  }
+  return {
+    proc,
+    emitData: (s: string) => ee.emit('data', s),
+    emitExit: (code: number) => ee.emit('exit', { exitCode: code }),
+  }
+}
+
+describe('PtyManager', () => {
+  let spawned: Array<{ file: string; args: string[]; opts: any }>
+  let procs: ReturnType<typeof makeProc>[]
+  let events: { onData: ReturnType<typeof vi.fn>; onExit: ReturnType<typeof vi.fn> }
+  let pty: ReturnType<typeof createPtyManager>
+
+  const spawnFn: PtySpawnFn = (file, args, opts) => {
+    const p = makeProc()
+    procs.push(p)
+    spawned.push({ file, args, opts })
+    return p.proc
+  }
+
+  beforeEach(() => {
+    spawned = []
+    procs = []
+    events = { onData: vi.fn(), onExit: vi.fn() }
+    pty = createPtyManager(logger(), events, spawnFn)
+  })
+
+  it('creates session with wsl.exe -d distro -e shell (array args)', () => {
+    const info = pty.create({ distro: 'Ubuntu-22.04', cols: 80, rows: 24 })
+    expect(info.ptyId).toBeTruthy()
+    expect(info.distro).toBe('Ubuntu-22.04')
+    expect(spawned[0]!.file).toBe('wsl.exe')
+    expect(spawned[0]!.args).toEqual(['-d', 'Ubuntu-22.04', '-e', '/bin/bash'])
+    expect(spawned[0]!.opts.useConpty).toBe(true)
+    expect(spawned[0]!.opts.name).toBe('xterm-256color')
+  })
+
+  it('passes --cd and custom shell via arrays', () => {
+    pty.create({
+      distro: 'Debian',
+      shell: '/bin/zsh',
+      cwd: '/home/me',
+      cols: 100,
+      rows: 30,
+    })
+    expect(spawned[0]!.args).toEqual([
+      '-d',
+      'Debian',
+      '--cd',
+      '/home/me',
+      '-e',
+      '/bin/zsh',
+    ])
+  })
+
+  it('rejects illegal distro name and shell', () => {
+    expect(() => pty.create({ distro: '../evil', cols: 80, rows: 24 })).toThrow()
+    expect(() =>
+      pty.create({ distro: 'Ubuntu', shell: '../bin/bash', cols: 80, rows: 24 }),
+    ).toThrow()
+    expect(() => pty.create({ distro: '', cols: 80, rows: 24 })).toThrow()
+  })
+
+  it('enforces session limit', () => {
+    for (let i = 0; i < MAX_PTY_SESSIONS; i++) {
+      pty.create({ distro: 'U', cols: 80, rows: 24 })
+    }
+    expect(pty.count()).toBe(MAX_PTY_SESSIONS)
+    expect(() => pty.create({ distro: 'U', cols: 80, rows: 24 })).toThrow(/上限/)
+  })
+
+  it('routes onData and onExit events', () => {
+    const info = pty.create({ distro: 'U', cols: 80, rows: 24 })
+    procs[0]!.emitData('hello')
+    expect(events.onData).toHaveBeenCalledWith(info.ptyId, 'hello')
+
+    procs[0]!.emitExit(3)
+    expect(events.onExit).toHaveBeenCalledWith(info.ptyId, 3)
+    expect(pty.count()).toBe(0)
+    expect(procs[0]!.proc.kill).toHaveBeenCalled()
+  })
+
+  it('input / resize forward to process; unknown id throws', () => {
+    const info = pty.create({ distro: 'U', cols: 80, rows: 24 })
+    pty.input(info.ptyId, 'ls\n')
+    expect(procs[0]!.proc.write).toHaveBeenCalledWith('ls\n')
+    pty.resize(info.ptyId, 120, 40)
+    expect(procs[0]!.proc.resize).toHaveBeenCalledWith(120, 40)
+
+    expect(() => pty.input('nope', 'x')).toThrow()
+    expect(() => pty.resize('nope', 10, 10)).toThrow()
+  })
+
+  it('clamps cols/rows to sane ranges', () => {
+    const info = pty.create({ distro: 'U', cols: 1, rows: 9999 })
+    // create 时已 clamp 进 spawn
+    expect(spawned[0]!.opts.cols).toBe(2)
+    expect(spawned[0]!.opts.rows).toBe(200)
+    pty.resize(info.ptyId, 0, -5)
+    expect(procs[0]!.proc.resize).toHaveBeenCalledWith(2, 1)
+  })
+
+  it('kill is idempotent and killAll clears', () => {
+    pty.create({ distro: 'A', cols: 80, rows: 24 })
+    pty.create({ distro: 'B', cols: 80, rows: 24 })
+    const id = pty.list()[0]!.ptyId
+    pty.kill(id)
+    pty.kill(id) // 不抛
+    expect(pty.count()).toBe(1)
+    pty.killAll()
+    expect(pty.count()).toBe(0)
+  })
+
+  it('list / get reflect sessions', () => {
+    const a = pty.create({ distro: 'A', cols: 80, rows: 24 })
+    expect(pty.list()).toHaveLength(1)
+    expect(pty.get(a.ptyId)?.distro).toBe('A')
+    expect(pty.get('missing')).toBeNull()
+  })
+
+  it('ignores empty input data', () => {
+    const info = pty.create({ distro: 'U', cols: 80, rows: 24 })
+    pty.input(info.ptyId, '')
+    expect(procs[0]!.proc.write).not.toHaveBeenCalled()
+  })
+
+  it('throws on unknown ptyId for input/resize', () => {
+    expect(() => pty.input('missing', 'x')).toThrow(/不存在/)
+    expect(() => pty.resize('missing', 80, 24)).toThrow(/不存在/)
+  })
+
+  it('kill does not throw when already gone', () => {
+    const info = pty.create({ distro: 'U', cols: 80, rows: 24 })
+    procs[0]!.emitExit(0)
+    expect(() => pty.kill(info.ptyId)).not.toThrow()
+  })
+
+  it('empty shell falls back to /bin/bash', () => {
+    pty.create({ distro: 'U', shell: '   ', cols: 80, rows: 24 })
+    expect(spawned[0]!.args).toContain('/bin/bash')
+  })
+
+  it('cwd empty skips --cd', () => {
+    pty.create({ distro: 'U', cwd: '  ', cols: 80, rows: 24 })
+    expect(spawned[0]!.args).toEqual(['-d', 'U', '-e', '/bin/bash'])
+  })
+})

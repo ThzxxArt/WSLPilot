@@ -10,6 +10,12 @@ const DEFAULTS = {
   logLevel: 'info',
   pollIntervalMs: 5000,
   closeBehavior: 'minimizeToTray' as 'minimizeToTray' | 'quit',
+  terminalFontFamily: 'Cascadia Mono, Consolas, monospace',
+  terminalFontSize: 14,
+  terminalLineHeight: 1.2,
+  terminalCursorStyle: 'block' as 'block' | 'underline' | 'bar',
+  terminalCursorBlink: true,
+  terminalScrollback: 5000,
 } as const
 
 export const useSettingsStore = defineStore('settings', {
@@ -23,6 +29,12 @@ export const useSettingsStore = defineStore('settings', {
     logLevel: DEFAULTS.logLevel as LogLevel,
     pollIntervalMs: DEFAULTS.pollIntervalMs as number,
     closeBehavior: DEFAULTS.closeBehavior as AppSettings['general']['closeBehavior'],
+    terminalFontFamily: DEFAULTS.terminalFontFamily as string,
+    terminalFontSize: DEFAULTS.terminalFontSize as number,
+    terminalLineHeight: DEFAULTS.terminalLineHeight as number,
+    terminalCursorStyle: DEFAULTS.terminalCursorStyle as 'block' | 'underline' | 'bar',
+    terminalCursorBlink: DEFAULTS.terminalCursorBlink as boolean,
+    terminalScrollback: DEFAULTS.terminalScrollback as number,
     version: '',
   }),
 
@@ -37,6 +49,12 @@ export const useSettingsStore = defineStore('settings', {
       this.logLevel = s.advanced.logLevel
       this.pollIntervalMs = s.general.pollIntervalMs
       this.closeBehavior = s.general.closeBehavior
+      this.terminalFontFamily = s.terminal.fontFamily
+      this.terminalFontSize = s.terminal.fontSize
+      this.terminalLineHeight = s.terminal.lineHeight
+      this.terminalCursorStyle = s.terminal.cursorStyle
+      this.terminalCursorBlink = s.terminal.cursorBlink
+      this.terminalScrollback = s.terminal.scrollback
       this.version = await window.wslAPI.app.getVersion()
       this.loaded = true
     },
@@ -69,6 +87,31 @@ export const useSettingsStore = defineStore('settings', {
     async setCloseBehavior(closeBehavior: AppSettings['general']['closeBehavior']) {
       this.closeBehavior = closeBehavior
       await window.wslAPI.config.set('settings', { general: { closeBehavior } })
+    },
+
+    async setTerminalFontFamily(fontFamily: string) {
+      this.terminalFontFamily = fontFamily
+      await window.wslAPI.config.set('settings', { terminal: { fontFamily } })
+    },
+
+    async setTerminalFontSize(fontSize: number) {
+      this.terminalFontSize = fontSize
+      await window.wslAPI.config.set('settings', { terminal: { fontSize } })
+    },
+
+    async setTerminalCursorStyle(cursorStyle: 'block' | 'underline' | 'bar') {
+      this.terminalCursorStyle = cursorStyle
+      await window.wslAPI.config.set('settings', { terminal: { cursorStyle } })
+    },
+
+    async setTerminalCursorBlink(cursorBlink: boolean) {
+      this.terminalCursorBlink = cursorBlink
+      await window.wslAPI.config.set('settings', { terminal: { cursorBlink } })
+    },
+
+    async setTerminalScrollback(scrollback: number) {
+      this.terminalScrollback = scrollback
+      await window.wslAPI.config.set('settings', { terminal: { scrollback } })
     },
   },
 })

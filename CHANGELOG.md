@@ -11,6 +11,13 @@
 
 ### Added
 
+- **M3 终端**：node-pty + xterm.js 多标签终端工作区
+- PtyManager：会话池（上限 10）、`wsl.exe -d … -e shell` 参数数组、ConPTY、退出统一 kill
+- 终端 UI：标签栏（新建/重命名/拖拽排序/中键关闭）、工具栏（清屏/搜索/字号/复制/导出）、状态栏（光标/UTF-8/会话时长）
+- 明亮终端主题，与浅色应用协调
+- 设置 → 终端：字体/字号/光标样式/闪烁/回滚缓冲
+- 驾驶舱与发行版卡片「终端」按钮直达指定发行版会话
+
 - **M2 驾驶舱**：`wsl --list --verbose` 解析、发行版列表（卡片/表格）、指标卡、启停、设默认
 - WslService：list / start / terminate / shutdown / setDefault / getVersion / sampleMetrics
 - MetricsService：Running 发行版并发采样、驾驶舱全局概览

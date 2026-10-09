@@ -11,7 +11,7 @@ import {
   NSpin,
   useMessage,
 } from 'naive-ui'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useDistrosStore } from '../stores/distros'
 import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
@@ -20,6 +20,7 @@ import { DistroCard, StatusDot } from '@ui/components'
 import { stateLabel } from '../composables/state-label'
 
 const route = useRoute()
+const router = useRouter()
 const distros = useDistrosStore()
 const metrics = useMetricsStore()
 const message = useMessage()
@@ -93,8 +94,7 @@ function onSetDefault(name: string) {
   void act(() => distros.setDefault(name), `已设 ${name} 为默认`)
 }
 function onOpenTerminal(name: string) {
-  search.value = name
-  message.info(`终端将在 M3 交付（${name}）`)
+  void router.push({ path: '/terminal', query: { distro: name } })
 }
 function onMore(name: string) {
   search.value = name
