@@ -16,6 +16,7 @@ import { useDistrosStore } from '../stores/distros'
 import { useMetricsStore } from '../stores/metrics'
 import { usePolling } from '../composables/usePolling'
 import { DistroCard, StatusDot } from '@ui/components'
+import { stateLabel } from '../composables/useDistroState'
 
 const route = useRoute()
 const distros = useDistrosStore()
@@ -60,10 +61,8 @@ watch(
   { immediate: true },
 )
 
-function stateLabel(s: string) {
-  if (s === 'Running') return '运行中'
-  if (s === 'Stopped') return '已停止'
-  return s
+function stateLabelFn(s: string) {
+  return stateLabel(s)
 }
 
 async function act(fn: () => Promise<void>, ok: string) {
@@ -179,7 +178,7 @@ function onMore(name: string) {
             <td>
               <span class="status-cell">
                 <StatusDot :state="d.state" :size="8" />
-                {{ stateLabel(d.state) }}
+                {{ stateLabelFn(d.state) }}
               </span>
             </td>
             <td>

@@ -11,6 +11,11 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
     return shell.openPath(c.configService.userDataDir)
   })
 
+  add(CH.appGetWslVersion, async (c) => {
+    if (!c.wsl) return { wslVersion: '', kernelVersion: '' }
+    return c.wsl.getVersion()
+  })
+
   add(CH.appWindowMinimize, (c) => {
     c.getMainWindow()?.minimize()
   })
@@ -25,7 +30,6 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
   add(CH.appWindowClose, (c) => {
     const win = c.getMainWindow()
     if (!win) return
-    // 交给主进程 close 事件决定：最小化到托盘 或 退出
     win.close()
   })
 }

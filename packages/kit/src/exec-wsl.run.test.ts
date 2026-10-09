@@ -124,6 +124,11 @@ describe('parseDistroList', () => {
     expect(list[0]?.name).toBe('测试发行版')
   })
 
+  it('skips blank lines', () => {
+    const raw = 'NAME  STATE  VERSION\n* A  Running  2\n\n'
+    expect(parseDistroList(raw)).toHaveLength(1)
+  })
+
   it('defaults version to 2 when missing', () => {
     const list = parseDistroList('NAME STATE VERSION\n  A  Running')
     expect(list[0]?.version).toBe(2)

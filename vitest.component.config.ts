@@ -9,6 +9,18 @@ export default defineConfig({
     globals: false,
     environment: 'happy-dom',
     include: ['packages/ui/**/*.test.ts', 'apps/desktop/tests/component/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary'],
+      include: ['packages/ui/src/components/**/*.{vue,ts}'],
+      exclude: ['**/index.ts'],
+      thresholds: {
+        lines: 70,
+        functions: 50,
+        branches: 70,
+        statements: 70,
+      },
+    },
   },
   resolve: {
     alias: {

@@ -45,7 +45,9 @@ expect(() => ipcSchema.configSet.parse({ fileKey: 'evil', patch: {} })).toThrow(
 
 环境：`happy-dom` + `@vue/test-utils`
 
-覆盖：按钮、卡片、确认框、配置表单、命令面板、状态点。
+覆盖：StatusDot、Sparkline、MetricCard、DistroCard（启停事件、状态中文、默认禁用菜单）。
+
+组件覆盖率门禁：lines/statements/branches ≥70%，functions ≥50%（`vitest.component.config.ts`）。
 
 ### 4. 视觉回归
 

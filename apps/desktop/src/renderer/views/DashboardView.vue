@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { NButton, NEmpty, NPopconfirm, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useDistrosStore } from '../stores/distros'
@@ -19,6 +19,12 @@ const hour = new Date().getHours()
 const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
 const gradient = computed(() => ACCENT_GRADIENTS[settings.accent] ?? ACCENT_GRADIENTS.aurora)
 
+const wslInfo = ref({ wslVersion: '', kernelVersion: '' })
+const wslLabel = computed(() => {
+  if (wslInfo.value.wslVersion) return `WSL ${wslInfo.value.wslVersion}`
+  return 'WSL'
+})
+
 const pollInterval = computed(() => 5000)
 
 async function refreshAll() {
@@ -27,6 +33,9 @@ async function refreshAll() {
 
 onMounted(() => {
   void refreshAll()
+  void window.wslAPI.app.getWslVersion().then((info) => {
+    if (info) wslInfo.value = { wslVersion: info.wslVersion, kernelVersion: info.kernelVersion }
+  }).catch(() => {})
 })
 
 const { start: startPolling } = usePolling(() => void refreshAll(), {
@@ -34,12 +43,7 @@ const { start: startPolling } = usePolling(() => void refreshAll(), {
 })
 startPolling()
 
-const memLabel = computed(() => {
-  const { memUsedKB, memTotalKB } = metrics.overview
-  if (!memTotalKB) return '—'
-  const gb = (kb: number) => (kb / 1024 / 1024).toFixed(1)
-  return `${gb(memUsedKB)} / ${gb(memTotalKB)} GB`
-})
+const memLabel = computed(() => metrics.memLabel)
 
 async function action(fn: () => Promise<void>, ok: string) {
   try {
@@ -77,9 +81,12 @@ function onMore(name: string) {
       <div>
         <h1 class="greeting">{{ greeting }}，指挥官</h1>
         <p class="sub">
-          WSL 2 · {{ distros.items.length }} 个发行版 ·
+          {{ wslLabel }} · {{ distros.items.length }} 个发行版 ·
           <StatusDot state="Running" :size="8" class="inline-dot" />
           {{ distros.runningCount }} 个运行中
+          <template v-if="wslInfo.kernelVersion">
+            · 内核 {{ wslInfo.kernelVersion.split(/\s+/)[0] }}
+          </template>
         </p>
       </div>
       <div class="hero-actions">
@@ -105,17 +112,18 @@ function onMore(name: string) {
       <MetricCard
         label="内存占用"
         :value="memLabel"
-        hint="已采样 Running 发行版"
+        hint="已采样 Running 发行版合计"
         :history="metrics.history.mem"
       />
       <MetricCard
         label="磁盘占用"
-        :value="`${metrics.overview.diskUsed} / ${metrics.overview.diskTotal}`"
-        hint="根分区近似"
+        :value="metrics.diskLabel"
+        hint="根分区合计（KB 真值累加）"
+        :history="metrics.history.disk"
       />
       <MetricCard
         label="CPU 负载"
-        :value="`${metrics.overview.cpuPercent}%`"
+        :value="metrics.cpuLabel"
         hint="基于 loadavg 估算"
         :history="metrics.history.cpu"
       />

@@ -43,7 +43,11 @@ export interface WslService {
 function assertName(name: string): string {
   const n = (name ?? '').trim()
   if (!n) throw createAppError('DISTRO_NOT_FOUND', { message: '发行版名称不能为空' })
-  // 名称仅允许常规字符，防止拼进参数数组外的意外
+  // 拒绝控制字符、空字节、路径穿越与 Windows 非法文件名字符
+  // （WSL 发行版名允许空格、中划线、点、下划线与中文）
+  if (/[\u0000-\u001f\u007f]/.test(n) || n.includes('..')) {
+    throw createAppError('DISTRO_NOT_FOUND', { message: `非法的发行版名称：${n}` })
+  }
   if (/[\\/:*?"<>|]/.test(n)) {
     throw createAppError('DISTRO_NOT_FOUND', { message: `非法的发行版名称：${n}` })
   }
@@ -153,29 +157,30 @@ export function createWslService(logger: Logger): WslService {
 
     /**
      * 采样单个发行版资源指标。
-     * 在发行版内执行 free / df / loadavg；失败时返回零值而不是抛错（仪表盘降级）。
+     * free / df / loadavg；失败时返回零值（展示层显示 —）而不是抛错。
      */
-    async sampleMetrics(name): Promise<Metrics> {
+    async sampleMetrics(name: string): Promise<Metrics> {
       const n = assertName(name)
       const script =
-        'free -k 2>/dev/null | awk \'/Mem:/{print $2,$3}\'; df -k / 2>/dev/null | awk \'NR==2{print $3,$2,$4}\'; cat /proc/loadavg 2>/dev/null | awk \'{print $1}\''
+        'free -k 2>/dev/null | awk \'/Mem:/{print $2,$3}\'; df -k / 2>/dev/null | awk \'NR==2{print $3,$2}\'; cat /proc/loadavg 2>/dev/null | awk \'{print $1}\''
       const r = await runWsl(['-d', n, '-e', 'sh', '-c', script], { timeoutMs: 8000 })
       const now = new Date().toISOString()
+      const zero: Metrics = {
+        memUsedKB: 0,
+        memTotalKB: 0,
+        diskUsedKB: 0,
+        diskTotalKB: 0,
+        cpuPercent: 0,
+        sampledAt: now,
+      }
 
       if (r.code !== 0) {
         logger.debug('metrics sample failed', { name: n, code: r.code })
-        return {
-          memUsedKB: 0,
-          memTotalKB: 0,
-          diskUsed: '—',
-          diskTotal: '—',
-          cpuPercent: 0,
-          sampledAt: now,
-        }
+        return zero
       }
 
       const lines = r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      // 预期：第1行 "memTotal memUsed"（KB），第2行 "used total avail"（KB），第3行 loadavg
+      // 第1行 "memTotal memUsed"（KB），第2行 "used total"（KB），第3行 loadavg
       let memTotalKB = 0
       let memUsedKB = 0
       let diskUsedKB = 0
@@ -189,27 +194,24 @@ export function createWslService(logger: Logger): WslService {
           memUsedKB = Number(mem[2])
           continue
         }
-        const disk = /^(\d+)\s+(\d+)\s+(\d+)$/.exec(line)
-        if (disk && !diskTotalKB) {
+        const disk = /^(\d+)\s+(\d+)$/.exec(line)
+        if (disk && !diskTotalKB && memTotalKB) {
+          // 与 mem 行格式相同，靠「已读过 mem」区分
           diskUsedKB = Number(disk[1])
           diskTotalKB = Number(disk[2])
           continue
         }
-        const load = /^(\d+(?:\.\d+)?)\s/.exec(line + ' ')
-        if (load && !load1) load1 = Number(load[1])
-      }
-
-      const fmt = (kb: number) => {
-        if (kb >= 1024 * 1024) return `${(kb / (1024 * 1024)).toFixed(1)}T`
-        if (kb >= 1024) return `${(kb / 1024).toFixed(1)}G`
-        return `${kb}K`
+        const load = /^(\d+(?:\.\d+)?)/.exec(line)
+        if (load && !load1 && memTotalKB && diskTotalKB) {
+          load1 = Number(load[1])
+        }
       }
 
       return {
         memUsedKB,
         memTotalKB,
-        diskUsed: diskTotalKB ? fmt(diskUsedKB) : '—',
-        diskTotal: diskTotalKB ? fmt(diskTotalKB) : '—',
+        diskUsedKB,
+        diskTotalKB,
         cpuPercent: Math.min(100, Math.round(load1 * 25 * 10) / 10),
         sampledAt: now,
       }

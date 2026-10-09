@@ -7,6 +7,7 @@ import {
   type DistroMeta,
   type DistroView,
   type Metrics,
+  type OverviewMetrics,
   type TaskProgress,
 } from '@wslpilot/shared'
 
@@ -51,9 +52,11 @@ const api = {
   },
 
   metrics: {
-    /** name='*' 时返回全局 OverviewMetrics */
-    sample: (name: string): Promise<Metrics | Record<string, unknown>> =>
-      ipcRenderer.invoke(CH.metricsSample, name),
+    /** 单个发行版指标 */
+    sample: (name: string): Promise<Metrics> => ipcRenderer.invoke(CH.metricsSample, name),
+    /** 全局概览指标 */
+    sampleOverview: (): Promise<OverviewMetrics> =>
+      ipcRenderer.invoke(CH.metricsSample, '*'),
     onProgress: (cb: (p: TaskProgress) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, p: TaskProgress) => cb(p)
       ipcRenderer.on(CH.taskProgress, h)
@@ -64,6 +67,8 @@ const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(CH.appGetVersion),
     openConfigDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenConfigDir),
+    getWslVersion: (): Promise<{ wslVersion: string; kernelVersion: string; raw: string }> =>
+      ipcRenderer.invoke(CH.appGetWslVersion),
     minimize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMinimize),
     maximize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMaximize),
     close: (): Promise<void> => ipcRenderer.invoke(CH.appWindowClose),
@@ -78,4 +83,4 @@ const api = {
 contextBridge.exposeInMainWorld('wslAPI', api)
 
 export type WslApi = typeof api
-export type { AppSettings, ConfigKey, ConfigMap, DistroView, DistroMeta, Metrics }
+export type { AppSettings, ConfigKey, ConfigMap, DistroView, DistroMeta, Metrics, OverviewMetrics }

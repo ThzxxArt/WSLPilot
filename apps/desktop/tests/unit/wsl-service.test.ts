@@ -147,6 +147,19 @@ describe('WslService', () => {
       await expect(svc.terminate('../etc')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
     })
 
+    it('rejects control characters and path traversal', async () => {
+      await expect(svc.start('bad\nname')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+      await expect(svc.start('bad\0name')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+      await expect(svc.terminate('..')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+      await expect(svc.setDefault('a/../b')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+    })
+
+    it('allows spaces and unicode in real WSL names', async () => {
+      ;(runWsl as any).mockResolvedValue(ok(''))
+      await expect(svc.start('Ubuntu 22.04 LTS')).resolves.toBeUndefined()
+      await expect(svc.start('测试发行版')).resolves.toBeUndefined()
+    })
+
     it('propagates DISTRO_NOT_FOUND on failure', async () => {
       ;(runWsl as any).mockResolvedValue({
         stdout: '',
@@ -171,12 +184,13 @@ describe('WslService', () => {
   describe('sampleMetrics', () => {
     it('parses free/df/loadavg output', async () => {
       ;(runWsl as any).mockResolvedValue(
-        ok('4194304 812345\n263168000 12884900 230000000\n0.25 0.30 0.40 1/100 1'),
+        ok('4194304 812345\n263168000 12884900\n0.25 0.30 0.40 1/100 1'),
       )
       const m = await svc.sampleMetrics('Ubuntu')
       expect(m.memTotalKB).toBe(4194304)
       expect(m.memUsedKB).toBe(812345)
-      expect(m.diskTotal).toBeTruthy()
+      expect(m.diskUsedKB).toBe(263168000)
+      expect(m.diskTotalKB).toBe(12884900)
       expect(m.cpuPercent).toBeGreaterThan(0)
       expect(m.sampledAt).toBeTruthy()
     })
@@ -185,7 +199,8 @@ describe('WslService', () => {
       ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'no', code: 1 })
       const m = await svc.sampleMetrics('Ubuntu')
       expect(m.memUsedKB).toBe(0)
-      expect(m.diskUsed).toBe('—')
+      expect(m.diskUsedKB).toBe(0)
+      expect(m.diskTotalKB).toBe(0)
       expect(m.cpuPercent).toBe(0)
     })
 

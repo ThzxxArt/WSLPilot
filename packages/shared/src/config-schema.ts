@@ -145,8 +145,8 @@ export const stateFileSchema = z.object({
       z.object({
         memUsedKB: z.number(),
         memTotalKB: z.number(),
-        diskUsed: z.string(),
-        diskTotal: z.string(),
+        diskUsedKB: z.number().default(0),
+        diskTotalKB: z.number().default(0),
         cpuPercent: z.number(),
         sampledAt: z.string(),
       }),

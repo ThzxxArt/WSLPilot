@@ -67,6 +67,7 @@ export const CH = {
   appWindowMaximize: 'app:windowMaximize',
   appWindowClose: 'app:windowClose',
   appNavigate: 'app:navigate',
+  appGetWslVersion: 'app:getWslVersion',
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]
@@ -108,6 +109,7 @@ export const INVOKE_CHANNELS = [
   CH.networkApply,
   CH.appGetVersion,
   CH.appOpenConfigDir,
+  CH.appGetWslVersion,
 ] as const satisfies readonly ChannelName[]
 
 /** 所有 M→R 事件通道 */

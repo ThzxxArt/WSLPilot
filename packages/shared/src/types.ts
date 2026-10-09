@@ -133,8 +133,9 @@ export interface NetworkConfig {
 export interface Metrics {
   memUsedKB: number
   memTotalKB: number
-  diskUsed: string
-  diskTotal: string
+  /** 磁盘（KB）。无法采样时为 0，展示层显示 — */
+  diskUsedKB: number
+  diskTotalKB: number
   cpuPercent: number
   sampledAt: string
 }
@@ -145,11 +146,38 @@ export interface OverviewMetrics {
   totalCount: number
   memUsedKB: number
   memTotalKB: number
-  diskUsed: string
-  diskTotal: string
+  diskUsedKB: number
+  diskTotalKB: number
   cpuPercent: number
   sampledAt: string
   perDistro: Record<string, Metrics>
+}
+
+/** 零值概览（无运行中/无数据） */
+export const EMPTY_OVERVIEW: OverviewMetrics = {
+  runningCount: 0,
+  totalCount: 0,
+  memUsedKB: 0,
+  memTotalKB: 0,
+  diskUsedKB: 0,
+  diskTotalKB: 0,
+  cpuPercent: 0,
+  sampledAt: '',
+  perDistro: {},
+}
+
+/** KB → 人类可读 */
+export function formatKb(kb: number): string {
+  if (!kb || kb <= 0) return '—'
+  if (kb >= 1024 * 1024) return `${(kb / (1024 * 1024)).toFixed(1)}T`
+  if (kb >= 1024) return `${(kb / 1024).toFixed(1)}G`
+  return `${Math.round(kb)}K`
+}
+
+/** KB 双值 → "已用 / 总量" */
+export function formatKbPair(usedKB: number, totalKB: number): string {
+  if (!totalKB) return '—'
+  return `${formatKb(usedKB)} / ${formatKb(totalKB)}`
 }
 
 export type TaskType = 'install' | 'export' | 'import' | 'move' | 'convert' | 'action'

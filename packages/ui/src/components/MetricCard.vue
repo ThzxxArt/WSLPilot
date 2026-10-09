@@ -59,7 +59,7 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
       <Sparkline
         v-if="hasHistory"
         :values="history"
-        :stroke="gradient ? undefined : undefined"
+        :stroke="gradient || undefined"
         :width="72"
         :height="26"
       />

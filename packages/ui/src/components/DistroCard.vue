@@ -33,8 +33,31 @@ const brandColor = computed(() => {
 const isRunning = computed(() => props.distro.state === 'Running')
 const displayName = computed(() => props.distro.meta?.alias || props.distro.name)
 
+const stateText = computed(() => {
+  switch (props.distro.state) {
+    case 'Running':
+      return '运行中'
+    case 'Stopped':
+      return '已停止'
+    case 'Installing':
+      return '安装中'
+    case 'Uninstalling':
+      return '卸载中'
+    case 'Converting':
+      return '转换中'
+    case 'Unknown':
+      return '未知'
+    default:
+      return props.distro.state || '未知'
+  }
+})
+
 const moreOptions = computed(() => [
-  { label: '设为默认', key: 'setDefault' },
+  {
+    label: '设为默认',
+    key: 'setDefault',
+    disabled: props.distro.isDefault,
+  },
   { label: '打开终端', key: 'terminal' },
   { type: 'divider' as const, key: 'd1' },
   { label: '查看详情', key: 'more' },
@@ -70,7 +93,7 @@ function onMore(key: string) {
     </header>
 
     <div class="state-line">
-      <span class="state" :class="{ on: isRunning }">{{ distro.state === 'Running' ? '运行中' : distro.state === 'Stopped' ? '已停止' : distro.state }}</span>
+      <span class="state" :class="{ on: isRunning }">{{ stateText }}</span>
       <span class="ver">WSL{{ distro.version }}</span>
     </div>
 

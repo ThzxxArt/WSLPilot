@@ -26,8 +26,8 @@ describe('sampleOverview', () => {
       sampleMetrics: vi.fn(async (name: string) => ({
         memUsedKB: name === 'A' ? 1000 : 2000,
         memTotalKB: 8000,
-        diskUsed: '1G',
-        diskTotal: '10G',
+        diskUsedKB: 1024,
+        diskTotalKB: 10240,
         cpuPercent: name === 'A' ? 10 : 30,
         sampledAt: 'T',
       })),
@@ -52,7 +52,8 @@ describe('sampleOverview', () => {
     const result = await sampleOverview(wsl, [distro('A', 'Stopped')], logger())
     expect(result.runningCount).toBe(0)
     expect(result.cpuPercent).toBe(0)
-    expect(result.diskUsed).toBe('0B')
+    expect(result.diskUsedKB).toBe(0)
+    expect(result.diskTotalKB).toBe(0)
     expect(wsl.sampleMetrics).not.toHaveBeenCalled()
   })
 
@@ -63,8 +64,8 @@ describe('sampleOverview', () => {
         return {
           memUsedKB: 100,
           memTotalKB: 200,
-          diskUsed: '1G',
-          diskTotal: '2G',
+          diskUsedKB: 1024,
+          diskTotalKB: 2048,
           cpuPercent: 5,
           sampledAt: 'T',
         }
@@ -78,22 +79,26 @@ describe('sampleOverview', () => {
     expect(result.runningCount).toBe(2)
     expect(result.perDistro.good).toBeTruthy()
     expect(result.perDistro.bad).toBeUndefined()
+    expect(result.diskUsedKB).toBe(1024)
   })
 
-  it('uses single-distro disk strings when exactly one running', async () => {
+  it('sums real disk KB across multiple running distros (no fake formula)', async () => {
     const wsl: any = {
-      sampleMetrics: vi.fn(async () => ({
-        memUsedKB: 1,
-        memTotalKB: 2,
-        diskUsed: '12.3G',
-        diskTotal: '251G',
+      sampleMetrics: vi.fn(async (name: string) => ({
+        memUsedKB: name === 'A' ? 100 : 200,
+        memTotalKB: 1000,
+        diskUsedKB: name === 'A' ? 5_000_000 : 7_000_000,
+        diskTotalKB: name === 'A' ? 10_000_000 : 20_000_000,
         cpuPercent: 1,
         sampledAt: 'T',
       })),
     }
-    const result = await sampleOverview(wsl, [distro('only', 'Running')], logger())
-    expect(result.diskUsed).toBe('12.3G')
-    expect(result.diskTotal).toBe('251G')
+    const result = await sampleOverview(wsl, [distro('A', 'Running'), distro('B', 'Running')], logger())
+    expect(result.diskUsedKB).toBe(12_000_000)
+    expect(result.diskTotalKB).toBe(30_000_000)
+    // 禁止用内存推算磁盘
+    expect(result.diskUsedKB).not.toBe(Math.round(result.memUsedKB * 0.1))
+    expect(result.diskTotalKB).not.toBe(result.memTotalKB * 2)
   })
 
   it('EMPTY_OVERVIEW has zero counts', () => {

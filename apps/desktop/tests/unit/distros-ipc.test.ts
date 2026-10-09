@@ -86,8 +86,8 @@ function makeDeps() {
       sampleMetrics: vi.fn(async () => ({
         memUsedKB: 10,
         memTotalKB: 20,
-        diskUsed: '1G',
-        diskTotal: '2G',
+        diskUsedKB: 1024,
+        diskTotalKB: 2048,
         cpuPercent: 1,
         sampledAt: 'T',
       })),
