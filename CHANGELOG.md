@@ -3,7 +3,7 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [0.1.0] - 2026-10-09
+## [Unreleased]
 
 ### Added
 
@@ -17,4 +17,4 @@
 - NSIS 安装包（支持自定义安装路径）与 portable 免安装版
 - 单元测试（解析 / schema / 迁移 / 错误码）与 CI 工作流
 
-[0.1.0]: https://github.com/ThzxxArt/WSLPilot/releases/tag/v0.1.0
+> 完整应用尚未完成（M2–M7 未交付），首个正式版本待功能完整后再打标签。
