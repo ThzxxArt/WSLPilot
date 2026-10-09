@@ -99,20 +99,25 @@ export function spawnWsl(args: string[], opts: SpawnWslOptions): { kill: () => v
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-  let buf = ''
-  const handleChunk = (chunk: Buffer) => {
-    const text = chunk.toString('utf16le').replace(/\0/g, '')
-    buf += text
-    const lines = buf.split(/\r?\n/)
-    buf = lines.pop() ?? ''
-    for (const line of lines) opts.onLine(line)
+  // stdout / stderr 各自缓冲，避免交错时把半行拼接
+  const makeHandler = () => {
+    let buf = ''
+    return (chunk: Buffer) => {
+      const text = chunk.toString('utf16le').replace(/\0/g, '')
+      buf += text
+      const lines = buf.split(/\r?\n/)
+      buf = lines.pop() ?? ''
+      for (const line of lines) opts.onLine(line)
+    }
   }
 
-  child.stdout?.on('data', handleChunk)
-  child.stderr?.on('data', handleChunk)
+  const onStdout = makeHandler()
+  const onStderr = makeHandler()
+
+  child.stdout?.on('data', onStdout)
+  child.stderr?.on('data', onStderr)
   child.on('error', opts.onError)
   child.on('close', (code) => {
-    if (buf.trim()) opts.onLine(buf)
     opts.onExit(code ?? -1)
   })
 

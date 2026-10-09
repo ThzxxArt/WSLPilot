@@ -1,0 +1,203 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+// ── Electron mock ──────────────────────────────────────────
+vi.mock('electron', () => {
+  return {
+    app: {
+      getVersion: vi.fn(() => '0.1.0'),
+      getPath: vi.fn(() => '/tmp/wslpilot-test'),
+      getLoginItemSettings: vi.fn(() => ({ openAtLogin: false })),
+      setLoginItemSettings: vi.fn(),
+      quit: vi.fn(),
+    },
+    shell: {
+      openPath: vi.fn(async () => ''),
+      openExternal: vi.fn(),
+    },
+    ipcMain: {
+      handle: vi.fn(),
+    },
+    BrowserWindow: vi.fn(),
+  }
+})
+
+import { registerIpcHandlers } from '../../src/main/ipc/router'
+import { CH, serializeIpcError, deserializeIpcError, createAppError, toAppError } from '@wslpilot/shared'
+
+function makeCtx() {
+  const load = vi.fn(async (key: string) => ({ key, $schemaVersion: 2 }))
+  const patch = vi.fn(async (_k: string, p: unknown) => ({ patched: p }))
+  const openInEditor = vi.fn(async () => {})
+  const resolveConflict = vi.fn(async (_k: string, a: string) => ({ action: a }))
+  const getConflict = vi.fn(() => null)
+  const onChange = vi.fn(() => () => {})
+
+  return {
+    configService: {
+      load,
+      patch,
+      openInEditor,
+      resolveConflict,
+      getConflict,
+      onChange,
+      userDataDir: '/tmp/cfg',
+      dispose: vi.fn(),
+      replace: vi.fn(),
+    } as any,
+    logger: {
+      trace: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      setLevel: vi.fn(),
+    } as any,
+    getMainWindow: vi.fn(() => ({
+      webContents: { send: vi.fn() },
+    })),
+  }
+}
+
+type Handlers = Map<string, (ctx: any, ...args: any[]) => any>
+
+function register(ctx: any): { handlers: Handlers; wrapped: Map<string, any> } {
+  const handlers: Handlers = new Map()
+  const wrapped = new Map<string, any>()
+  const fakeIpc: any = {
+    handle: vi.fn((channel: string, fn: any) => {
+      wrapped.set(channel, fn)
+    }),
+  }
+  // registerIpcHandlers 内部用 routes Map，再调 ipcMain.handle
+  // 我们通过 fakeIpc 捕获包装后的 handle
+  registerIpcHandlers(fakeIpc, ctx)
+  return { handlers, wrapped }
+}
+
+describe('IPC router + handlers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('registers config and app channels', () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    const channels = [...wrapped.keys()]
+    expect(channels).toContain(CH.configGet)
+    expect(channels).toContain(CH.configSet)
+    expect(channels).toContain(CH.configOpenExternal)
+    expect(channels).toContain(CH.configResolveConflict)
+    expect(channels).toContain(CH.appGetVersion)
+    expect(channels).toContain(CH.appOpenConfigDir)
+    expect(channels).toContain(CH.appWindowMinimize)
+    expect(channels).toContain(CH.appWindowMaximize)
+    expect(channels).toContain(CH.appWindowClose)
+  })
+
+  it('config:get loads by fileKey', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    const result = await wrapped.get(CH.configGet)({}, 'settings')
+    expect(ctx.configService.load).toHaveBeenCalledWith('settings')
+    expect(result).toMatchObject({ key: 'settings' })
+  })
+
+  it('config:set patches and returns result', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    const result = await wrapped.get(CH.configSet)({}, {
+      fileKey: 'settings',
+      patch: { general: { accent: 'ocean' } },
+    })
+    expect(ctx.configService.patch).toHaveBeenCalled()
+    expect(result).toMatchObject({ patched: { general: { accent: 'ocean' } } })
+  })
+
+  it('config:get rejects unknown fileKey with serializable error', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    await expect(wrapped.get(CH.configGet)({}, 'evil')).rejects.toThrow(/WSLPILOT:/)
+  })
+
+  it('config:openExternal calls openInEditor', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    await wrapped.get(CH.configOpenExternal)({}, 'settings')
+    expect(ctx.configService.openInEditor).toHaveBeenCalledWith('settings')
+  })
+
+  it('config:resolveConflict validates action', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    await wrapped.get(CH.configResolveConflict)({}, { fileKey: 'settings', action: 'reload' })
+    expect(ctx.configService.resolveConflict).toHaveBeenCalledWith('settings', 'reload')
+
+    await expect(
+      wrapped.get(CH.configResolveConflict)({}, { fileKey: 'settings', action: 'hack' }),
+    ).rejects.toThrow(/WSLPILOT:/)
+  })
+
+  it('app:getVersion returns version', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    await expect(wrapped.get(CH.appGetVersion)({})).resolves.toBe('0.1.0')
+  })
+
+  it('app:openConfigDir opens path', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    await wrapped.get(CH.appOpenConfigDir)({})
+    expect(ctx.configService.userDataDir).toBe('/tmp/cfg')
+  })
+
+  it('window minimize / maximize / close delegate to window', async () => {
+    const ctx = makeCtx()
+    const win = {
+      minimize: vi.fn(),
+      maximize: vi.fn(),
+      unmaximize: vi.fn(),
+      isMaximized: vi.fn(() => false),
+      close: vi.fn(),
+    }
+    ctx.getMainWindow = vi.fn(() => win as any)
+    const { wrapped } = register(ctx)
+
+    await wrapped.get(CH.appWindowMinimize)({})
+    expect(win.minimize).toHaveBeenCalled()
+
+    await wrapped.get(CH.appWindowMaximize)({})
+    expect(win.maximize).toHaveBeenCalled()
+
+    win.isMaximized.mockReturnValue(true)
+    await wrapped.get(CH.appWindowMaximize)({})
+    expect(win.unmaximize).toHaveBeenCalled()
+
+    await wrapped.get(CH.appWindowClose)({})
+    expect(win.close).toHaveBeenCalled()
+  })
+
+  it('window ops no-op when no window', async () => {
+    const ctx = makeCtx()
+    ctx.getMainWindow = vi.fn(() => null)
+    const { wrapped } = register(ctx)
+    await wrapped.get(CH.appWindowMinimize)({})
+    await wrapped.get(CH.appWindowClose)({})
+  })
+
+  it('router wraps handler failures with serializeIpcError', async () => {
+    const ctx = makeCtx()
+    ctx.configService.load = vi.fn(async () => {
+      throw new Error('boom')
+    })
+    const { wrapped } = register(ctx)
+
+    await expect(wrapped.get(CH.configGet)({}, 'settings')).rejects.toThrow(/WSLPILOT:/)
+  })
+
+  it('serializeIpcError / deserializeIpcError round-trip', () => {
+    const original = createAppError('CONFIG_INVALID', { message: 'bad' }).toJSON()
+    const err = serializeIpcError(original)
+    expect(deserializeIpcError(err)?.code).toBe('CONFIG_INVALID')
+    expect(toAppError(new Error('x')).code).toBe('UNKNOWN')
+  })
+})

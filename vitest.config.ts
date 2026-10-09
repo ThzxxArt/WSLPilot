@@ -8,6 +8,32 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     include: ['packages/*/src/**/*.test.ts', 'apps/desktop/tests/unit/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'json-summary', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      include: [
+        'packages/shared/src/**/*.ts',
+        'packages/kit/src/**/*.ts',
+        'apps/desktop/src/main/**/*.ts',
+      ],
+      exclude: [
+        '**/*.test.ts',
+        '**/*.d.ts',
+        '**/index.ts',
+        '**/types.ts',
+        'packages/shared/src/config-migrations.ts',
+        'apps/desktop/src/main/updater/**',
+        'apps/desktop/src/main/elevation/**',
+      ],
+      // ★ 硬门禁：低于阈值 CI 直接失败
+      thresholds: {
+        lines: 85,
+        functions: 85,
+        branches: 85,
+        statements: 85,
+      },
+    },
   },
   resolve: {
     alias: {

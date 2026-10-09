@@ -68,6 +68,7 @@ chore: 升级依赖
 - 新增功能必须附带单元测试。
 - 修改 `parseDistroList`、配置 schema、IPC 通道时，同步更新对应用例。
 - UI 改动需保证 `npm run typecheck` 与组件测试通过。
+- **覆盖率门禁 ≥85%**（lines/statements/branches/functions）。`npm run test:coverage` 不达标即失败，CI 同此标准。新增代码请自带测试，避免拉低整体覆盖率。
 
 ## 报告 Bug
 

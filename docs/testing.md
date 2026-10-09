@@ -64,16 +64,41 @@ Playwright + Electron：
 
 ```bash
 npm test               # 单元 + 集成
+npm run test:coverage  # 单元 + 覆盖率（硬门禁 ≥85%）
 npm run test:component # 组件
 npm run test:e2e       # E2E（需 Windows）
 npm run test:watch     # 监听模式
 ```
 
+## 覆盖率门禁（硬性）
+
+| 指标 | 阈值 | 说明 |
+|---|---|---|
+| Lines | **≥ 85%** | 低于则 `npm run test:coverage` 与 CI **直接失败** |
+| Statements | **≥ 85%** | 同上 |
+| Branches | **≥ 85%** | 同上 |
+| Functions | **≥ 85%** | 同上 |
+
+配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
+
+**当前基线（M1）**：Lines 93%+ / Branches 85%+ / Functions 90%+。
+
+**覆盖范围**：
+- `packages/shared/src/**`（类型契约、schema、错误、令牌）
+- `packages/kit/src/**`（jsonc、atomic-write、exec-wsl、paths、logger）
+- `apps/desktop/src/main/**`（ConfigService、IPC、tray、window）
+
+**不在覆盖率门禁内**（有说明）：
+- `types.ts`（纯类型，无运行时逻辑）
+- `config-migrations.ts`（迁移链，随 schema 版本演进单独测）
+- `updater/` `elevation/`（M7 提权/更新，尚未实现）
+
 ## CI
 
 `.github/workflows/ci.yml`：
 
-- `lint-typecheck-test`：Node 20/22 矩阵，typecheck + test
+- `lint-typecheck-test`：Node 20/22 矩阵，typecheck + **test:coverage（85% 门禁）** + build
+- 覆盖率报告以 artifact 形式保留 14 天
 - `e2e`：Windows runner，Playwright 冒烟
 
 ## 新增功能的测试要求

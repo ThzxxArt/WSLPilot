@@ -4,6 +4,7 @@ import {
   deserializeIpcError,
   toAppError,
   createAppError,
+  isAppError,
 } from '../src/errors'
 
 describe('IPC 错误序列化协议', () => {
@@ -47,5 +48,15 @@ describe('IPC 错误序列化协议', () => {
   it('deserialize returns null for unrelated errors', () => {
     expect(deserializeIpcError('just a string')).toBeNull()
     expect(deserializeIpcError({ nope: true })).toBeNull()
+  })
+
+  it('deserialize returns null for malformed WSLPILOT payload', () => {
+    expect(deserializeIpcError(new Error('WSLPILOT:{not-json'))).toBeNull()
+  })
+
+  it('isAppError type guard', () => {
+    expect(isAppError(createAppError('IO_ERROR').toJSON())).toBe(true)
+    expect(isAppError(null)).toBe(false)
+    expect(isAppError({ code: 'X' })).toBe(false)
   })
 })

@@ -204,4 +204,62 @@ describe('ConfigService', () => {
     expect((reloaded as any).general.accent).toBe('ocean')
     expect(svc.getConflict('settings')).toBeNull()
   })
+
+  it('resolveConflict overwrite writes cache back to disk', async () => {
+    await svc.patch('settings', { general: { accent: 'forest' } })
+
+    // 外部改成 ocean
+    const filePath = join(dir, 'settings.jsonc')
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({ $schemaVersion: 2, general: { accent: 'ocean' } }),
+      'utf8',
+    )
+
+    const result = (await svc.resolveConflict('settings', 'overwrite')) as any
+    expect(result.general.accent).toBe('forest')
+
+    const text = await fs.readFile(filePath, 'utf8')
+    expect(text).toContain('forest')
+    expect(svc.getConflict('settings')).toBeNull()
+  })
+
+  it('resolveConflict ignore also reloads from disk (no dirty write)', async () => {
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    const filePath = join(dir, 'settings.jsonc')
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({ $schemaVersion: 2, general: { accent: 'sunset' } }),
+      'utf8',
+    )
+    const result = (await svc.resolveConflict('settings', 'ignore')) as any
+    expect(result.general.accent).toBe('sunset')
+  })
+
+  it('onChange unsubscribe removes listener', async () => {
+    let called = 0
+    const off = svc.onChange('settings', () => called++)
+    await svc.patch('settings', { general: { accent: 'ocean' } })
+    const afterFirst = called
+    off()
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    expect(called).toBe(afterFirst)
+  })
+
+  it('getConflict returns null when no conflict', () => {
+    expect(svc.getConflict('settings')).toBeNull()
+    expect(svc.getConflict('distros')).toBeNull()
+  })
+
+  it('serializes concurrent patches without losing last write', async () => {
+    const results = await Promise.all([
+      svc.patch('settings', { general: { accent: 'aurora' } }),
+      svc.patch('settings', { general: { reduceMotion: true } }),
+      svc.patch('settings', { terminal: { fontSize: 18 } }),
+    ])
+    expect(results).toHaveLength(3)
+    const s = (await svc.load('settings')) as any
+    expect(s.general.reduceMotion).toBe(true)
+    expect(s.terminal.fontSize).toBe(18)
+  })
 })
