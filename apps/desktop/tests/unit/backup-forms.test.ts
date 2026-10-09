@@ -25,6 +25,9 @@ describe('isValidDistroName', () => {
     expect(isValidDistroName('Ubuntu-22.04')).toBe(true)
     expect(isValidDistroName('我的发行版')).toBe(true)
     expect(isValidDistroName('a b')).toBe(true)
+    // `*` 为 wsl 合法名字字符（列表可见必须可操作），文件名由 sanitize 兜底
+    expect(isValidDistroName('a*b')).toBe(true)
+    expect(isValidDistroName('*mydistro')).toBe(true)
   })
 
   it('rejects empty, control chars, traversal and illegal filename chars', () => {
@@ -34,8 +37,8 @@ describe('isValidDistroName', () => {
     expect(isValidDistroName('../evil')).toBe(false)
     expect(isValidDistroName('a/b')).toBe(false)
     expect(isValidDistroName('a:b')).toBe(false)
-    expect(isValidDistroName('a*b')).toBe(false)
     expect(isValidDistroName('a|b')).toBe(false)
+    expect(isValidDistroName('a<b')).toBe(false)
     expect(isValidDistroName(null as never)).toBe(false)
   })
 })

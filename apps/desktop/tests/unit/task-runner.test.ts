@@ -373,4 +373,52 @@ describe('TaskRunner', () => {
     await new Promise((r) => setTimeout(r, 10))
     expect(() => runner.dispose()).not.toThrow()
   })
+
+  it('dispose 后排队任务不得执行 run 副作用（核验修复）', async () => {
+    const { runner } = makeRunner()
+    const ran: string[] = []
+    let release: (() => void) | undefined
+    const first = runner.start({
+      type: 'export',
+      distro: 'U',
+      message: 'first',
+      lockKey: 'U',
+      run: () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+    })
+    const second = runner.start({
+      type: 'export',
+      distro: 'U',
+      message: 'second',
+      lockKey: 'U',
+      run: async () => {
+        ran.push('second')
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    runner.dispose()
+    release?.()
+    const firstRec = await runner.waitFor(first.taskId)
+    const secondRec = await runner.waitFor(second.taskId)
+    expect(firstRec.status).toBe('canceled')
+    expect(secondRec.status).toBe('canceled')
+    expect(ran).toEqual([]) // 排队任务的 run 绝不执行
+  })
+
+  it('run 正常返回即成功，收尾窗口的取消信号不改判（核验修复）', async () => {
+    const { runner } = makeRunner()
+    const handle = runner.start({
+      type: 'import',
+      distro: 'X',
+      message: 'm',
+      run: async (ctl) => {
+        // 模拟：进程已成功退出后取消信号才到
+        runner.cancel(ctl.taskId)
+      },
+    })
+    const rec = await runner.waitFor(handle.taskId)
+    expect(rec.status).toBe('success')
+  })
 })

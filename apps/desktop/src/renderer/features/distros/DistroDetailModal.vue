@@ -90,7 +90,7 @@ async function onUnregister() {
   // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）
   if (settings.confirmDestructive) {
     const ok = window.confirm(
-      `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。\n确定请输入确认（点「取消」放弃）：`,
+      `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。\n\n点「确定」执行注销，点「取消」放弃。`,
     )
     if (!ok) return
   }

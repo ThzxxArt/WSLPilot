@@ -31,6 +31,7 @@ onMounted(() => {
       negativeText: '覆盖',
       closable: false,
       maskClosable: false,
+      closeOnEsc: false,
       onPositiveClick: () => {
         void resolve(payload.fileKey, 'reload')
       },

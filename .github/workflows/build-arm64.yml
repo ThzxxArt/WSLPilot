@@ -50,11 +50,19 @@ jobs:
           name: WSLPilot-installers-arm64
           path: apps/desktop/release/*.exe
 
-      # tag 触发时把 arm64 安装包并入同一个 GitHub Release
+      # tag 触发时等待 x64 release job 创建 Release 后再附加 arm64 安装包
+      # （直接 gh-release 会自建无 notes 的 Release —— 核验修复竞态）
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: apps/desktop/release/*.exe
+        shell: bash
+        run: |
+          for i in $(seq 1 30); do
+            if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+              gh release upload "${{ github.ref_name }}" apps/desktop/release/*.exe --clobber
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::Release ${{ github.ref_name }} 未在 5 分钟内出现，arm64 安装包未附加"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

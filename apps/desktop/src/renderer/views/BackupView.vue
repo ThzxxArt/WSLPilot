@@ -219,7 +219,7 @@ async function start() {
   }
 
   if (!entry) {
-    message.error(tasks.lastError?.message ?? '任务启动失败')
+    message.error(errorLine(tasks.lastError, '任务启动失败'))
     return
   }
   activeTaskId.value = entry.taskId

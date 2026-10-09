@@ -81,7 +81,7 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（M4）**：Lines 94%+ / Branches 85%+ / Functions 95%+。
+**当前基线（质量根治后）**：单测 Lines 94%+ / Branches 85%+ / Functions 94%+；组件 Lines 98%+ / Branches 91%+ / Functions 87%+。
 
 **覆盖范围**：
 

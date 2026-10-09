@@ -222,7 +222,16 @@ export function createIoService(deps: IoServiceDeps): IoService {
     // 已存在文件不静默覆盖：改名保留为 .bak-<ts>（安全网 — review M12）
     if (existsSync(finalPath)) {
       const backupName = `${finalPath}.bak-${Date.now()}`
-      await fs.rename(finalPath, backupName).catch(() => {})
+      try {
+        await fs.rename(finalPath, backupName)
+      } catch (e) {
+        // rename 失败（文件被占用等）必须中止，绝不动原文件（核验修复）
+        throw createAppError('IO_ERROR', {
+          message: '目标文件存在且无法改名保留，导出已中止',
+          detail: `${finalPath}: ${e instanceof Error ? e.message : String(e)}`,
+          suggestion: '请关闭占用该文件的程序，或换一个导出路径',
+        })
+      }
       ctl.log(`目标已存在，原文件已保留为 ${basename(backupName)}`)
     }
 
@@ -248,7 +257,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
     } finally {
       stop()
     }
-    ctl.throwIfCanceled()
+    // spawnTask 成功 = 任务成功（成功优先语义，取消信号不再改判 — 核验修复）
 
     const st = await fs.stat(finalPath).catch(() => null)
     if (!st) {
@@ -378,7 +387,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
       throw e
     }
     stop()
-    ctl.throwIfCanceled()
+    // spawnTask 成功 = 任务成功（成功优先语义 — 核验修复）
 
     const after = await findDistro(name)
     if (!after) {
@@ -514,7 +523,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
       throw e
     }
     stop()
-    ctl.throwIfCanceled()
+    // spawnTask 成功 = 任务成功（成功优先语义 — 核验修复）
 
     ctl.report(100, '迁移完成')
     ctl.log(`迁移完成：${name} → ${newPath}`)

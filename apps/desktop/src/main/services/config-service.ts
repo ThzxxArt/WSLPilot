@@ -9,6 +9,7 @@ import {
   defaultConfig,
   migrateConfig,
   CONFIG_SCHEMAS,
+  SCHEMA_VERSIONS,
   sanitizeWithSchema,
   type ConfigKey,
   type ConfigMap,
@@ -73,14 +74,8 @@ export function deepMerge<T extends Record<string, unknown>>(base: T, patch: unk
 }
 
 const FILE_KEYS = Object.keys(CONFIG_FILE_NAMES) as ConfigKey[]
-const TARGET_VERSIONS: Record<ConfigKey, number> = {
-  settings: 2,
-  distros: 1,
-  actions: 1,
-  network: 1,
-  uiState: 1,
-  state: 1,
-}
+// 目标版本唯一事实源在 shared（review M8 兑现，禁止另抄一份）
+const TARGET_VERSIONS: Record<ConfigKey, number> = SCHEMA_VERSIONS
 
 function hashText(s: string): string {
   return createHash('sha256').update(s).digest('hex')
@@ -138,15 +133,26 @@ export async function createConfigService(
       const before = data
       const migrated = migrateConfig(key, before, target)
       data = migrated
-      let nextText = modifyJsonc(originalText, ['$schemaVersion'], target)
-      for (const [k, v] of Object.entries(migrated)) {
-        if (k === '$schemaVersion') continue
-        if (!(k in before) && !FORBIDDEN_KEYS.has(k)) {
-          nextText = modifyJsonc(nextText, [k], v)
+      // 迁移链走完（版本戳=目标）才写盘盖章；否则保留原文件，绝不假盖章（核验修复）
+      const migratedVersion =
+        typeof migrated.$schemaVersion === 'number' ? migrated.$schemaVersion : currentVersion
+      if (migratedVersion === target) {
+        let nextText = modifyJsonc(originalText, ['$schemaVersion'], target)
+        for (const [k, v] of Object.entries(migrated)) {
+          if (k === '$schemaVersion') continue
+          if (!(k in before) && !FORBIDDEN_KEYS.has(k)) {
+            nextText = modifyJsonc(nextText, [k], v)
+          }
         }
+        await atomicWrite(filePath(key), nextText)
+        lastSelfWriteHash.set(key, hashText(nextText))
+      } else {
+        logger.warn('config migration incomplete, keeping original file', {
+          key,
+          from: currentVersion,
+          to: target,
+        })
       }
-      await atomicWrite(filePath(key), nextText)
-      lastSelfWriteHash.set(key, hashText(nextText))
     }
 
     const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
@@ -380,6 +386,8 @@ export async function createConfigService(
      * 读-改-写。写回时对用户可编辑文件做最小叶子编辑保留注释
      * （设计书 §9.3：绝不静默丢弃用户注释 — review M7）；
      * state/uiState 是机器缓存，整文件序列化。
+     * 契约：fn 应返回**完整对象**（spread 风格）；只增改不删键——
+     * 需要删键的场景请用 replace()。
      */
     async update(key, fn) {
       return enqueueWrite(async () => {

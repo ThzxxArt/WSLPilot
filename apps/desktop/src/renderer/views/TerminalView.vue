@@ -117,7 +117,7 @@ watch(
 async function create(distro: string) {
   const id = await terminal.open(distro)
   if (!id && terminal.lastError) {
-    message.error(terminal.lastError.message)
+    message.error(errorLine(terminal.lastError))
   }
 }
 

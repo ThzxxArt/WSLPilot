@@ -9,6 +9,7 @@ import type {
   IoMoveRequest,
 } from '@wslpilot/shared'
 import {
+  assertSafeDistroName,
   exportFileName,
   previewExportCommand,
   previewImportCommand,
@@ -64,17 +65,14 @@ export const DEFAULT_MOVE_FORM: MoveForm = {
   terminateFirst: true,
 }
 
-// eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
-const ILLEGAL_NAME_CHARS = /[\\/:*?"<>|]/
-
-/** 发行版名合法性（与主进程 assertSafeDistroName 规则一致的轻量版） */
+/** 发行版名合法性（与执行边界 assertSafeDistroName 同一实现 — review M3 收敛） */
 export function isValidDistroName(name: string): boolean {
-  const n = (name ?? '').trim()
-  if (!n) return false
-  if (CONTROL_CHARS.test(n) || n.includes('..')) return false
-  if (ILLEGAL_NAME_CHARS.test(n)) return false
-  return true
+  try {
+    assertSafeDistroName(name)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** 建议备份文件完整路径（默认目录 + 命名规范） */

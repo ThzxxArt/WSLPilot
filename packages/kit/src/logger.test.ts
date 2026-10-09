@@ -77,4 +77,20 @@ describe('logger', () => {
     expect(content).toContain('trace line')
     expect(content).toContain('debug line')
   })
+
+  it('extra 不可覆盖 time/level/msg；toJSON 返回 undefined 不炸（核验修复）', async () => {
+    const log = createLogger(dir, 'info')
+    log.info('safe', { level: 'fake', toJSON: () => undefined } as never)
+    log.info('circular', {
+      get self(): unknown {
+        return { self: null }
+      },
+    } as never)
+    await new Promise((r) => setTimeout(r, 50))
+
+    const files = await fs.readdir(join(dir, 'logs'))
+    const content = await fs.readFile(join(dir, 'logs', files[0]), 'utf8')
+    expect(content).toContain('"msg":"safe"')
+    expect(content).toContain('"level":"info"')
+  })
 })

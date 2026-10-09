@@ -244,10 +244,18 @@ export function createWslService(logger: Logger): WslService {
           rawCommand: 'wsl.exe --list --online',
         })
       }
-      return r.stdout
+      const lines = r.stdout
         .split(/\r?\n/)
         .map((l) => l.trim())
-        .filter((l) => l !== '' && !/^(NAME|名称)/i.test(l) && !/^-+$/.test(l))
+        .filter((l) => l !== '')
+      // 定位 NAME/名称 表头，跳过其上的说明行（"The following is a list of ..."）
+      // —— 说明行会被误当发行版名（核验修复）
+      let start = lines.findIndex((l) => /^(NAME|名称)/i.test(l))
+      if (start < 0) start = 0
+      else start += 1
+      return lines
+        .slice(start)
+        .filter((l) => !/^-+$/.test(l))
         .map((l) => l.split(/\s{2,}/)[0]?.trim() ?? '')
         .filter((l) => l !== '')
     },

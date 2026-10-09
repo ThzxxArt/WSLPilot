@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useMessage } from 'naive-ui'
 import { useDistrosStore } from '../../stores/distros'
 import { useCommandPalette } from '../../composables/useCommandPalette'
+import { errorLine } from '../../composables/useAppError'
 
 interface Command {
   id: string
@@ -14,6 +16,7 @@ interface Command {
 
 const router = useRouter()
 const distros = useDistrosStore()
+const message = useMessage()
 const { open, closePalette } = useCommandPalette()
 
 const query = ref('')
@@ -135,7 +138,8 @@ function onKeydown(e: KeyboardEvent) {
     closePalette()
   } else if (e.key === 'ArrowDown') {
     e.preventDefault()
-    activeIndex.value = Math.min(activeIndex.value + 1, flat.value.length - 1)
+    activeIndex.value =
+      flat.value.length === 0 ? 0 : Math.min(activeIndex.value + 1, flat.value.length - 1)
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
     activeIndex.value = Math.max(activeIndex.value - 1, 0)
@@ -150,8 +154,9 @@ async function execute(cmd: Command | undefined) {
   closePalette()
   try {
     await cmd.run()
-  } catch {
-    /* 执行失败由各动作自身提示 */
+  } catch (e) {
+    // 执行失败必须有反馈，禁止静默（核验修复）
+    message.error(errorLine(e, `执行失败：${cmd.label}`))
   }
 }
 

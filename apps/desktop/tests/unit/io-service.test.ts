@@ -827,6 +827,38 @@ describe('IoService backups listing & rotation', () => {
     const files = await fs.readdir(localOut)
     expect(files.some((f) => f.startsWith('exists.tar.bak-'))).toBe(true)
   })
+
+  it('目标被占用无法改名时中止导出、不覆盖原文件（核验修复）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(8))
+      },
+    }))
+    const localDistro = await tmp()
+    const localOut = await tmp()
+    await fs.writeFile(join(localDistro, 'ext4.vhdx'), Buffer.alloc(64))
+    const target = join(localOut, 'locked.tar')
+    await fs.writeFile(target, 'OLD-CONTENT')
+    const renameSpy = vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('EPERM: locked'))
+    try {
+      const io = createIoService(
+        makeDeps({
+          distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+          basePath: localDistro,
+          spawn,
+        }),
+      )
+      await expect(
+        io.runExport({ name: 'Ubuntu', path: target, format: 'tar' }, makeCtl([]) as never),
+      ).rejects.toMatchObject({ code: 'IO_ERROR', message: expect.stringContaining('中止') })
+      // 原文件未被动过，wsl --export 未被调用
+      expect(await fs.readFile(target, 'utf8')).toBe('OLD-CONTENT')
+      expect(calls).toHaveLength(0)
+    } finally {
+      renameSpy.mockRestore()
+    }
+  })
 })
 
 describe('IoService + TaskRunner integration (cancel)', () => {

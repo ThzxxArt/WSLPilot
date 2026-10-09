@@ -12,6 +12,7 @@ import { assertSafeDistroName } from './errors'
  */
 export const nameSchema = z
   .string()
+  .trim()
   .min(1)
   .max(200)
   .superRefine((s, ctx) => {
@@ -31,7 +32,7 @@ export const idSchema = z.string().min(1).max(200)
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 function hasForbiddenKey(value: unknown, depth = 0): boolean {
-  if (depth > 8 || value === null || typeof value !== 'object') return false
+  if (depth > 20 || value === null || typeof value !== 'object') return false
   const keys = Object.getOwnPropertyNames(value)
   if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return true
   for (const v of Object.values(value as Record<string, unknown>)) {

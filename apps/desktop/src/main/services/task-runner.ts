@@ -196,14 +196,17 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
   }
 
   async function execute(rec: TaskRecord, run: (ctl: TaskControl) => Promise<void>): Promise<void> {
-    if (cancelRequested.has(rec.taskId)) {
+    // 开跑前守卫：已请求取消 或 已被 dispose 结算的任务不得执行副作用
+    // （dispose 会清空 cancelRequested，必须同时看 rec.status — 核验修复）
+    if (cancelRequested.has(rec.taskId) || rec.status !== 'running') {
       settle(rec, 'canceled', '任务在开始前被取消')
       return
     }
     const ctl = makeControl(rec)
     try {
       await run(ctl)
-      ctl.throwIfCanceled()
+      // run 正常返回即成功（成功优先语义）：取消信号在收尾窗口到达
+      // 不得把已完成任务改判为 canceled（核验修复）
       settle(rec, 'success')
     } catch (e) {
       const canceled = cancelRequested.has(rec.taskId)

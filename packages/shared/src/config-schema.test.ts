@@ -49,6 +49,17 @@ describe('migrations', () => {
     expect(future.$schemaVersion).toBe(5) // 拒绝降级盖章
     expect(future.general.accent).toBe('ocean')
   })
+
+  it('迁移链不完整时不假盖章（核验修复）', () => {
+    // 输入已达目标版本：原样保留，不多次迁移
+    const done = migrateConfig(
+      'settings',
+      { $schemaVersion: 2, general: { accent: 'ocean' } },
+      2,
+    ) as any
+    expect(done.$schemaVersion).toBe(2)
+    expect(done.general.accent).toBe('ocean')
+  })
 })
 
 describe('errors', () => {

@@ -52,9 +52,18 @@ export function migrateConfig<K extends ConfigKeyOf>(
     current = fn(current)
     const nextVersion =
       typeof current.$schemaVersion === 'number' ? (current.$schemaVersion as number) : version + 1
-    // 迁移函数必须推进版本；原地踏步则中止，防止死循环
-    if (nextVersion <= version) break
+    // 迁移函数必须推进版本；原地踏步则中止且不盖章（核验修复：不给假盖章）
+    if (nextVersion <= version) {
+      delete current.$schemaVersion
+      return current
+    }
     version = nextVersion
+  }
+
+  // 未走到目标版本（链条不完整）不盖章（核验修复）
+  if (version < toVersion) {
+    delete current.$schemaVersion
+    return current
   }
 
   current.$schemaVersion = toVersion

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { NButton, NModal, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
 import { useDistrosStore } from '../../stores/distros'
 import { useTasksStore } from '../../stores/tasks'
@@ -77,6 +77,14 @@ watch(isDone, (done) => {
     if (task.value?.status === 'canceled') message.info('安装已取消')
     if (task.value?.status === 'failed')
       message.error(errorLine(task.value.error ?? task.value.message, '安装失败'))
+  }
+})
+
+// 组件卸载（切路由）时清理计时器，防泄漏（核验修复）
+onUnmounted(() => {
+  if (timer) {
+    window.clearInterval(timer)
+    timer = undefined
   }
 })
 

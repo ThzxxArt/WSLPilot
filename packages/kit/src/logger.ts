@@ -37,16 +37,22 @@ export function createLogger(userDataDir: string, level: LogLevel = 'info'): Log
   }
 
   async function write(lvl: string, msg: string, extra?: Record<string, unknown>): Promise<void> {
-    // extra 不得覆盖关键字段；序列化失败降级为占位（review m7/M30）
-    let extraJson = ''
+    // extra 不得覆盖关键字段；序列化失败/toJSON 返回 undefined 均降级为占位（核验修复）
+    let extraJson = '{}'
     try {
-      extraJson = JSON.stringify(extra ?? {})
+      extraJson = JSON.stringify(extra ?? {}) ?? '{}'
     } catch {
       extraJson = JSON.stringify({ extraError: 'unserializable extra' })
     }
+    let extraObj: Record<string, unknown> = {}
+    try {
+      extraObj = JSON.parse(extraJson) as Record<string, unknown>
+    } catch {
+      extraObj = { extraError: 'unserializable extra' }
+    }
     const line =
       JSON.stringify({
-        ...JSON.parse(extraJson === '' ? '{}' : extraJson),
+        ...extraObj,
         time: timestamp(),
         level: lvl,
         msg,
