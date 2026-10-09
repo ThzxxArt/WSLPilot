@@ -7,9 +7,15 @@ import { defineConfig } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './apps/desktop/tests/e2e',
+  outputDir: './test-results',
   timeout: 60_000,
   retries: 1,
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: './playwright-report', open: 'never' }],
+  ],
   use: {
     trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
   },
 })

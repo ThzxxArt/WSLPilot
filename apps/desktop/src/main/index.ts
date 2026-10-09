@@ -35,7 +35,7 @@ async function bootstrap() {
 
   const configService = await createConfigService(userDataDir, logger)
 
-  mainWindow = createMainWindow(join(__dirname, '../preload/index.js'))
+  mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
   registerIpcHandlers(ipcMain, {
     configService,
     logger,
@@ -61,6 +61,10 @@ async function bootstrap() {
       e.preventDefault()
       mainWindow?.hide()
     }
+  })
+
+  app.on('will-quit', () => {
+    configService.dispose()
   })
 
   logger.info('window ready')

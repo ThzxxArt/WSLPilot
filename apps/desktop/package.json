@@ -16,6 +16,7 @@
     "@wslpilot/kit": "*",
     "@wslpilot/shared": "*",
     "@wslpilot/ui": "*",
+    "chokidar": "4.0.3",
     "naive-ui": "^2.40.3",
     "pinia": "^2.3.0",
     "vue": "^3.5.13",

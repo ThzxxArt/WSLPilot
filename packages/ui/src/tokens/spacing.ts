@@ -1,43 +1,45 @@
-/** 间距（4px 基准） */
+/**
+ * 间距 / 圆角 / 阴影 / 层级 — 唯一事实源在 @wslpilot/shared/tokens
+ * 本文件仅做键名适配，禁止新增数值。
+ */
+import { SPACING, RADIUS, SHADOW, Z_INDEX } from '@wslpilot/shared'
+
 export const spacing = {
-  1: '4px',
-  2: '8px',
-  3: '12px',
-  4: '16px',
-  5: '20px',
-  6: '24px',
-  8: '32px',
-  10: '40px',
-  16: '64px',
+  1: SPACING['space-1'],
+  2: SPACING['space-2'],
+  3: SPACING['space-3'],
+  4: SPACING['space-4'],
+  5: SPACING['space-5'],
+  6: SPACING['space-6'],
+  8: SPACING['space-8'],
+  10: SPACING['space-10'],
+  16: SPACING['space-16'],
 } as const
 
-/** 圆角 */
 export const radius = {
-  xs: '6px',
-  sm: '8px',
-  md: '12px',
-  lg: '16px',
-  xl: '20px',
-  full: '9999px',
+  xs: RADIUS['radius-xs'],
+  sm: RADIUS['radius-sm'],
+  md: RADIUS['radius-md'],
+  lg: RADIUS['radius-lg'],
+  xl: RADIUS['radius-xl'],
+  full: RADIUS['radius-full'],
 } as const
 
-/** 阴影（浅色主题：柔和多层，带蓝色调） */
 export const shadow = {
-  xs: '0 1px 2px rgba(15,23,42,.06)',
-  sm: '0 2px 6px rgba(15,23,42,.08)',
-  md: '0 6px 16px -4px rgba(15,23,42,.12), 0 2px 6px -2px rgba(15,23,42,.08)',
-  lg: '0 16px 40px -12px rgba(15,23,42,.22)',
-  glow: '0 0 0 1px var(--color-border-default), 0 8px 32px -8px var(--color-accent-soft)',
+  xs: SHADOW['shadow-xs'],
+  sm: SHADOW['shadow-sm'],
+  md: SHADOW['shadow-md'],
+  lg: SHADOW['shadow-lg'],
+  glow: SHADOW['shadow-glow'],
 } as const
 
-/** 层级 */
 export const z = {
-  base: 0,
-  dropdown: 1000,
-  sticky: 1100,
-  drawer: 1200,
-  modal: 1300,
-  toast: 1400,
-  tooltip: 1500,
-  command: 1600,
+  base: Number(Z_INDEX['z-base']),
+  dropdown: Number(Z_INDEX['z-dropdown']),
+  sticky: Number(Z_INDEX['z-sticky']),
+  drawer: Number(Z_INDEX['z-drawer']),
+  modal: Number(Z_INDEX['z-modal']),
+  toast: Number(Z_INDEX['z-toast']),
+  tooltip: Number(Z_INDEX['z-tooltip']),
+  command: Number(Z_INDEX['z-command']),
 } as const

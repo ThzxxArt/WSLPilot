@@ -13,13 +13,15 @@ export interface TrayOptions {
 let tray: Tray | null = null
 
 function resolveIcon(): Electron.NativeImage {
-  // 托盘用 16/32px ico，Windows 上最稳
+  // 打包后 extraResources → <resources>/tray/；开发态 → apps/desktop/resources/tray/
   const candidates = [
-    join(app.getAppPath(), 'resources/tray/WSLPilot-16.png'),
-    join(app.getAppPath(), 'resources/WSLPilot-16.png'),
-    join(app.getAppPath(), 'out/renderer/../resources/tray/WSLPilot-16.png'),
+    join(process.resourcesPath ?? '', 'tray', 'WSLPilot-32.png'),
+    join(process.resourcesPath ?? '', 'tray', 'WSLPilot-16.png'),
+    join(app.getAppPath(), 'resources', 'tray', 'WSLPilot-32.png'),
+    join(app.getAppPath(), 'resources', 'tray', 'WSLPilot-16.png'),
   ]
   for (const p of candidates) {
+    if (!p || p.startsWith('tray')) continue
     try {
       const img = nativeImage.createFromPath(p)
       if (!img.isEmpty()) return img
@@ -27,7 +29,6 @@ function resolveIcon(): Electron.NativeImage {
       /* 继续尝试 */
     }
   }
-  // 回退：生成空图标（仍可显示菜单）
   return nativeImage.createEmpty()
 }
 
@@ -96,8 +97,6 @@ export function createTray(opts: TrayOptions): Tray {
   ])
 
   tray.setContextMenu(menu)
-
-  // 双击托盘图标显示主窗口
   tray.on('double-click', showWindow)
 
   opts.logger.info('tray created')

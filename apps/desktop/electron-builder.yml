@@ -13,6 +13,10 @@ extraResources:
     to: icons
     filter:
       - '**/*'
+  - from: resources/tray
+    to: tray
+    filter:
+      - '**/*'
 
 win:
   target:

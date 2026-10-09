@@ -1,4 +1,6 @@
 /** 领域模型 — 主/渲染进程共享 */
+import type { AccentName } from './tokens'
+export type { AccentName }
 
 export type WslState = 'Running' | 'Stopped' | 'Installing' | 'Uninstalling' | 'Converting' | 'Unknown'
 
@@ -31,7 +33,6 @@ export interface DistroView extends DistroRuntime {
   meta?: DistroMeta
 }
 
-export type AccentName = 'aurora' | 'sunset' | 'ocean' | 'forest' | 'custom'
 export type LocaleCode = 'system' | 'zh-CN' | 'en-US'
 export type CloseBehavior = 'minimizeToTray' | 'quit'
 export type InstallSource = 'store' | 'web'

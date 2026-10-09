@@ -1,7 +1,11 @@
 import type { IpcMain } from 'electron'
-import { CH, createAppError, type AppError } from '@wslpilot/shared'
+import {
+  CH,
+  serializeIpcError,
+  type ConfigKey,
+} from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
-import type { ConfigService } from '../services/config-service'
+import type { ConfigService, ConfigConflictAction } from '../services/config-service'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
 
@@ -11,13 +15,7 @@ export interface IpcContext {
   getMainWindow: () => Electron.BrowserWindow | null
 }
 
-/** 将错误序列化为 AppError，供渲染层消费 */
-export function toIpcError(e: unknown): AppError {
-  if (e && typeof e === 'object' && 'code' in e && 'message' in e) {
-    return e as AppError
-  }
-  return createAppError('UNKNOWN', { detail: String(e) }).toJSON()
-}
+export { serializeIpcError, deserializeIpcError, toAppError } from '@wslpilot/shared'
 
 type Handler = (ctx: IpcContext, ...args: any[]) => Promise<unknown> | unknown
 
@@ -35,9 +33,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, ctx: IpcContext): void {
         ctx.logger.debug('ipc invoke', { channel })
         return await handler(ctx, ...args)
       } catch (e) {
-        const err = toIpcError(e)
-        ctx.logger.error('ipc error', { channel, code: err.code, message: err.message })
-        // Electron invoke 会 reject；抛出可序列化对象
+        const err = serializeIpcError(e)
+        ctx.logger.error('ipc error', { channel, message: err.message.slice(0, 200) })
         throw err
       }
     })
@@ -47,3 +44,4 @@ export function registerIpcHandlers(ipcMain: IpcMain, ctx: IpcContext): void {
 }
 
 export { CH }
+export type { ConfigKey, ConfigConflictAction }

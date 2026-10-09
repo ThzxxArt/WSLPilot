@@ -28,6 +28,8 @@ export const CH = {
   configSet: 'config:set',
   configOpenExternal: 'config:openExternal',
   configChanged: 'config:changed',
+  configConflict: 'config:conflict',
+  configResolveConflict: 'config:resolveConflict',
 
   // wsl.conf
   wslconfRead: 'wslconf:read',
@@ -89,6 +91,7 @@ export const INVOKE_CHANNELS = [
   CH.configGet,
   CH.configSet,
   CH.configOpenExternal,
+  CH.configResolveConflict,
   CH.wslconfRead,
   CH.wslconfWrite,
   CH.ptyCreate,
@@ -108,4 +111,10 @@ export const INVOKE_CHANNELS = [
 ] as const satisfies readonly ChannelName[]
 
 /** 所有 M→R 事件通道 */
-export const EVENT_CHANNELS = [CH.ptyData, CH.ptyExit, CH.taskProgress, CH.configChanged] as const
+export const EVENT_CHANNELS = [
+  CH.ptyData,
+  CH.ptyExit,
+  CH.taskProgress,
+  CH.configChanged,
+  CH.configConflict,
+] as const

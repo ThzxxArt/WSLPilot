@@ -10,10 +10,22 @@ const api = {
       ipcRenderer.invoke(CH.configSet, { fileKey, patch }),
     openExternal: (fileKey: ConfigKey): Promise<void> =>
       ipcRenderer.invoke(CH.configOpenExternal, fileKey),
+    resolveConflict: (
+      fileKey: ConfigKey,
+      action: 'reload' | 'overwrite' | 'ignore',
+    ): Promise<ConfigMap[ConfigKey]> =>
+      ipcRenderer.invoke(CH.configResolveConflict, { fileKey, action }),
     onChanged: (cb: (payload: { fileKey: string }) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, p: { fileKey: string }) => cb(p)
       ipcRenderer.on(CH.configChanged, h)
       return () => ipcRenderer.removeListener(CH.configChanged, h)
+    },
+    onConflict: (
+      cb: (payload: { fileKey: string; detail: string }) => void,
+    ): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: { fileKey: string; detail: string }) => cb(p)
+      ipcRenderer.on(CH.configConflict, h)
+      return () => ipcRenderer.removeListener(CH.configConflict, h)
     },
   },
 

@@ -126,3 +126,38 @@ export function createAppError(code: ErrorCode, overrides: Partial<AppError> = {
     suggestion: overrides.suggestion ?? base.suggestion,
   })
 }
+
+/** IPC 错误序列化前缀 */
+export const IPC_ERROR_PREFIX = 'WSLPILOT:'
+
+/** 主进程抛出 IPC 错误（message 内嵌 AppError JSON） */
+export function serializeIpcError(e: unknown): Error {
+  const appErr: AppError =
+    e && typeof e === 'object' && 'code' in e && 'message' in e
+      ? (e as AppError)
+      : createAppError('UNKNOWN', { detail: String(e) }).toJSON()
+  return new Error(`${IPC_ERROR_PREFIX}${JSON.stringify(appErr)}`)
+}
+
+/** 从 invoke reject / catch 结果还原 AppError */
+export function deserializeIpcError(e: unknown): AppError | null {
+  if (e instanceof Error && e.message.startsWith(IPC_ERROR_PREFIX)) {
+    try {
+      return JSON.parse(e.message.slice(IPC_ERROR_PREFIX.length)) as AppError
+    } catch {
+      return null
+    }
+  }
+  if (e && typeof e === 'object' && 'code' in e && 'message' in e && 'recoverable' in e) {
+    return e as AppError
+  }
+  return null
+}
+
+/** 任意 catch 结果 → 用户可读 AppError */
+export function toAppError(e: unknown): AppError {
+  return (
+    deserializeIpcError(e) ??
+    createAppError('UNKNOWN', { detail: e instanceof Error ? e.message : String(e) }).toJSON()
+  )
+}

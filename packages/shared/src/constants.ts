@@ -1,4 +1,13 @@
-/** 全局常量 */
+/**
+ * 全局常量
+ * 颜色 / 令牌一律来自 ./tokens.ts（唯一事实源）
+ */
+export {
+  PRIMITIVE_GRADIENTS as ACCENT_GRADIENTS,
+  ACCENT_MAPS,
+  DISTRO_BRAND_COLORS,
+  type AccentName,
+} from './tokens'
 
 export const APP_NAME = 'WSLPilot'
 export const APP_ID = 'com.wslpilot.app'
@@ -22,26 +31,6 @@ export const MAX_PTY_SESSIONS = 10
 
 /** 默认轮询间隔 */
 export const DEFAULT_POLL_INTERVAL_MS = 5000
-
-/** 发行版品牌色映射 */
-export const DISTRO_BRAND_COLORS: Record<string, string> = {
-  Ubuntu: '#E95420',
-  Debian: '#A80030',
-  Fedora: '#51A2DA',
-  Arch: '#1793D1',
-  openSUSE: '#73BA25',
-  Kali: '#557C94',
-  Alpine: '#0D597F',
-}
-
-/** 强调色 → 渐变定义 */
-export const ACCENT_GRADIENTS = {
-  aurora: 'linear-gradient(135deg, #22D3EE 0%, #6366F1 50%, #A855F7 100%)',
-  sunset: 'linear-gradient(135deg, #FB7185 0%, #F59E0B 100%)',
-  ocean: 'linear-gradient(135deg, #38BDF8 0%, #0EA5E9 50%, #2563EB 100%)',
-  forest: 'linear-gradient(135deg, #34D399 0%, #10B981 50%, #059669 100%)',
-  custom: 'linear-gradient(135deg, #22D3EE 0%, #6366F1 50%, #A855F7 100%)',
-} as const
 
 /** 强调色 → 主色（用于 Naive UI primary） */
 export const ACCENT_PRIMARY = {

@@ -1,7 +1,11 @@
-/** 字体系统 */
+/**
+ * 字体系统 — 唯一事实源在 @wslpilot/shared/tokens
+ */
+import { TYPOGRAPHY } from '@wslpilot/shared'
+
 export const typography = {
-  sans: "'Inter Variable','HarmonyOS Sans SC','PingFang SC','Microsoft YaHei UI',system-ui,sans-serif",
-  mono: "'Cascadia Mono','JetBrains Mono','Fira Code',Consolas,monospace",
+  sans: TYPOGRAPHY['font-sans'],
+  mono: TYPOGRAPHY['font-mono'],
 } as const
 
 /** 字号阶梯（1.25 比例） */

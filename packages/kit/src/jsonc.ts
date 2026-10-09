@@ -41,7 +41,39 @@ export function modifyJsonc(text: string, path: (string | number)[], value: unkn
   return applyEdits(text, edits)
 }
 
-/** 整文件序列化（首次写入 / replace 场景） */
+export interface LeafPatch {
+  path: (string | number)[]
+  value: unknown
+}
+
+/** 把嵌套 patch 打平成叶子路径列表（数组整体作为一个叶子） */
+export function collectLeafPaths(obj: unknown, prefix: (string | number)[] = []): LeafPatch[] {
+  if (obj === undefined) return []
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+    return [{ path: prefix, value: obj }]
+  }
+  const results: LeafPatch[] = []
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (v === undefined) continue
+    results.push(...collectLeafPaths(v, [...prefix, k]))
+  }
+  return results
+}
+
+/**
+ * 对 JSONC 原文做嵌套补丁，逐叶子 modify，**完整保留用户注释与格式**。
+ * 遵循设计书 §9.3 注释策略。
+ */
+export function applyPatchJsonc(text: string, patch: Record<string, unknown>): string {
+  const leaves = collectLeafPaths(patch)
+  let out = text
+  for (const { path, value } of leaves) {
+    out = modifyJsonc(out, path, value)
+  }
+  return out
+}
+
+/** 整文件序列化（首次写入 / replace 场景，不保留注释） */
 export function stringifyJsonc(value: unknown, header?: string): string {
   const body = JSON.stringify(value, null, 2)
   return header ? `// ${header}\n${body}\n` : `${body}\n`
