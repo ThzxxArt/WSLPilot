@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, zhCN, dateZhCN } from 'naive-ui'
 import DefaultLayout from './layouts/DefaultLayout.vue'
 import { useSettingsStore } from './stores/settings'
+import { useTerminalStore } from './stores/terminal'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
 import type { ConfigKey } from '@wslpilot/shared'
@@ -32,6 +33,8 @@ watch(
 let unsubConfig: (() => void) | undefined
 let unsubNavigate: (() => void) | undefined
 let unsubConflict: (() => void) | undefined
+let unsubPtyData: (() => void) | undefined
+let unsubPtyExit: (() => void) | undefined
 
 onMounted(async () => {
   await settings.load()
@@ -47,22 +50,26 @@ onMounted(async () => {
     void router.push(path)
   })
 
-  // 外部修改冲突：设计书 §6.10-3「重载 / 覆盖」（对比见配置目录）
+  // ★ PTY 数据应用级常驻：离开终端页也不丢输出（评审 I1）
+  const terminal = useTerminalStore()
+  unsubPtyData = window.wslAPI?.terminal.onData((p) => {
+    terminal.appendOutput(p.ptyId, p.chunk)
+  })
+  unsubPtyExit = window.wslAPI?.terminal.onExit((p) => {
+    terminal.handleExit(p.ptyId, p.code)
+  })
+
+  // 外部修改冲突
   unsubConflict = window.wslAPI?.config.onConflict((payload) => {
     const action = window.confirm(
       `配置文件 ${payload.fileKey} 已被外部修改。\n\n${payload.detail}\n\n点「确定」= 重载（以磁盘为准）\n点「取消」= 覆盖（以应用内为准）\n\n需要对比请打开配置目录手工查看。`,
     )
     void window.wslAPI.config
-      .resolveConflict(
-        payload.fileKey as ConfigKey,
-        action ? 'reload' : 'overwrite',
-      )
+      .resolveConflict(payload.fileKey as ConfigKey, action ? 'reload' : 'overwrite')
       .then(() => {
         if (payload.fileKey === 'settings') void settings.load()
       })
-      .catch(() => {
-        // 忽略：下次写入前会再次检测
-      })
+      .catch(() => {})
   })
 })
 
@@ -70,6 +77,8 @@ onUnmounted(() => {
   unsubConfig?.()
   unsubNavigate?.()
   unsubConflict?.()
+  unsubPtyData?.()
+  unsubPtyExit?.()
 })
 </script>
 

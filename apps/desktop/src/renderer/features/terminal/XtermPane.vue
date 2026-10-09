@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { TERMINAL_LIGHT_THEME, type TerminalFontPrefs, DEFAULT_TERMINAL_PREFS } from './theme'
 
 const props = defineProps({
@@ -21,7 +22,6 @@ const props = defineProps({
 
 const emit = defineEmits<{
   ready: [term: Terminal]
-  exit: [code: number]
   cursorMove: [pos: { col: number; row: number }]
 }>()
 
@@ -54,7 +54,8 @@ onMounted(() => {
   if (!host.value) return
   const t = new Terminal({
     allowProposedApi: true,
-    convertEol: true,
+    // 真 PTY 数据：不要 convertEol，避免 TUI 光标异常（评审 M2）
+    convertEol: false,
     theme: { ...TERMINAL_LIGHT_THEME },
     ...DEFAULT_TERMINAL_PREFS,
   })
@@ -65,6 +66,9 @@ onMounted(() => {
   t.loadAddon(fit)
   t.loadAddon(search)
   t.loadAddon(new WebLinksAddon())
+  // Unicode 11 宽字符（中文/emoji 表格不错位）评审 M3
+  t.loadAddon(new Unicode11Addon())
+  t.unicode.activeVersion = '11'
   t.open(host.value)
 
   // 恢复历史缓冲（切标签 / 重挂时）
@@ -94,7 +98,6 @@ onMounted(() => {
   const offExit = window.wslAPI.terminal.onExit((p) => {
     if (p.ptyId !== props.ptyId) return
     t.write(`\r\n\x1b[90m[进程已退出，代码 ${p.code}]\x1b[0m\r\n`)
-    emit('exit', p.code)
   })
   unsubs.push(offData, offExit)
 
@@ -149,14 +152,22 @@ function write(data: string) {
   term?.write(data)
 }
 
+let lastSearch = ''
+
 function findNext(text: string) {
-  if (!text || !search) return false
-  return search.findNext(text)
+  if (!search) return false
+  const q = text || lastSearch
+  if (!q) return false
+  lastSearch = q
+  return search.findNext(q)
 }
 
 function findPrevious(text: string) {
-  if (!text || !search) return false
-  return search.findPrevious(text)
+  if (!search) return false
+  const q = text || lastSearch
+  if (!q) return false
+  lastSearch = q
+  return search.findPrevious(q)
 }
 
 function zoom(delta: number) {

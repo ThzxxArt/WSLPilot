@@ -68,7 +68,8 @@ export const IPC_SCHEMAS: Record<string, z.ZodTypeAny> = {
   }),
   [CH.ptyInput]: z.object({
     ptyId: z.string().min(1),
-    data: z.string().max(1024 * 64),
+    // 大粘贴分片；256KB 足够，超过由渲染层分片
+    data: z.string().max(1024 * 256),
   }),
   [CH.ptyResize]: z.object({
     ptyId: z.string().min(1),

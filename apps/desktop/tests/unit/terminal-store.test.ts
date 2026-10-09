@@ -124,8 +124,28 @@ describe('useTerminalStore', () => {
     expect(() => s.appendOutput('nope', 'x')).not.toThrow()
   })
 
-  it('handleExit on unknown id is a no-op', () => {
+  it('kill failure keeps session (review M5)', async () => {
+    wslAPI.terminal.kill.mockRejectedValue(
+      new Error('WSLPILOT:{"code":"TASK_FAILED","message":"kill 失败","recoverable":true}'),
+    )
     const s = useTerminalStore()
-    expect(() => s.handleExit('nope', 1)).not.toThrow()
+    const id = await s.open('U')
+    await expect(s.kill(id!)).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    expect(s.sessions).toHaveLength(1)
+    expect(s.sessions[0]!.alive).toBe(true)
+  })
+
+  it('buffer slice keeps surrogate pairs whole (review M1)', async () => {
+    const s = useTerminalStore()
+    const id = await s.open('U')
+    // 🎉 = 2 UTF-16 units；灌超 200KB 触发截断
+    s.appendOutput(id!, 'x'.repeat(200 * 1024 - 1))
+    s.appendOutput(id!, '🎉') // 临界写入代理对
+    s.appendOutput(id!, 'y'.repeat(100))
+    const buf = s.sessions[0]!.buffer
+    expect(buf.length).toBeLessThanOrEqual(200 * 1024)
+    // 截断后开头不得是孤立高代理
+    const c = buf.charCodeAt(0)
+    expect(c < 0xd800 || c > 0xdbff).toBe(true)
   })
 })

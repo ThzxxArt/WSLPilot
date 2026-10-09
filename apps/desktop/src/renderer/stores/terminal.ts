@@ -98,7 +98,9 @@ export const useTerminalStore = defineStore('terminal', {
       try {
         await window.wslAPI.terminal.kill(id)
       } catch (e) {
+        // 失败保留标签，由调用方提示（评审 M5）
         this.lastError = toAppError(e)
+        throw this.lastError
       }
       s.alive = false
       this.removeLocal(id)
@@ -118,7 +120,14 @@ export const useTerminalStore = defineStore('terminal', {
       if (!s) return
       s.buffer += chunk
       if (s.buffer.length > BUFFER_LIMIT) {
-        s.buffer = s.buffer.slice(s.buffer.length - BUFFER_LIMIT)
+        // 按码点边界截断，避免劈开代理对/ANSI（评审 M1）
+        let slice = s.buffer.slice(s.buffer.length - BUFFER_LIMIT)
+        // 向前跳过残缺代理对
+        const first = slice.charCodeAt(0)
+        if (first >= 0xd800 && first <= 0xdbff) {
+          slice = slice.slice(1)
+        }
+        s.buffer = slice
       }
     },
 

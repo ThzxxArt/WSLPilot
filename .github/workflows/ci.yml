@@ -57,6 +57,9 @@ jobs:
       - name: Build (electron-vite)
         run: npm run build --workspace @wslpilot/desktop
 
+      - name: Product smoke (main/preload module graph)
+        run: npm run smoke:product
+
   e2e:
     name: E2E (Playwright)
     runs-on: windows-latest

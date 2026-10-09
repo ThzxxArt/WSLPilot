@@ -30,8 +30,8 @@ function onTabMouseDown(e: MouseEvent, index: number) {
     if (s) emit('close', s.ptyId)
     return
   }
-  // 拖拽排序
-  const startX = e.clientX
+  // 拖拽排序：每次成功交换后重置起点（评审 I4）
+  let startX = e.clientX
   let dragged = index
   const onMove = (ev: MouseEvent) => {
     const dx = ev.clientX - startX
@@ -41,6 +41,7 @@ function onTabMouseDown(e: MouseEvent, index: number) {
       if (target >= 0 && target < props.sessions.length) {
         emit('reorder', dragged, target)
         dragged = target
+        startX = ev.clientX // 清零阈值，避免连环乱序
       }
     }
   }

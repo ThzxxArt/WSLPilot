@@ -48,7 +48,10 @@ export function createTray(opts: TrayOptions): Tray {
 
   const navigate = (path: string) => {
     showWindow()
-    opts.getMainWindow()?.webContents.send(CH.appNavigate, path)
+    const win = opts.getMainWindow()
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(CH.appNavigate, path)
+    }
   }
 
   const menu = Menu.buildFromTemplate([

@@ -66,15 +66,22 @@ async function bootstrap() {
   const configService = await createConfigService(userDataDir, logger)
 
   mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
 
   const wsl = createWslService(logger)
   const registry = createRegistryService(logger)
   const pty = createPtyManager(logger, {
     onData: (ptyId, chunk) => {
-      mainWindow?.webContents.send('pty:data', { ptyId, chunk })
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pty:data', { ptyId, chunk })
+      }
     },
     onExit: (ptyId, code) => {
-      mainWindow?.webContents.send('pty:exit', { ptyId, code })
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pty:exit', { ptyId, code })
+      }
     },
   })
 

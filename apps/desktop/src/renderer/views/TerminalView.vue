@@ -23,6 +23,7 @@ const message = useMessage()
 const paneRefs = new Map<string, InstanceType<typeof XtermPane>>()
 const cursorPos = ref({ col: 1, row: 1 })
 const elapsed = ref('00:00')
+const lastQuery = ref('')
 let timer: number | undefined
 
 function setPaneRef(id: string, el: unknown) {
@@ -109,8 +110,12 @@ async function create(distro: string) {
 }
 
 async function close(id: string) {
-  await terminal.kill(id)
-  message.success('终端已关闭')
+  try {
+    await terminal.kill(id)
+    message.success('终端已关闭')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '关闭终端失败')
+  }
 }
 
 function onRename(id: string, title: string) {
@@ -151,16 +156,27 @@ function onExport() {
 }
 
 function onSearch(q: string) {
+  lastQuery.value = q
   const ok = activePane()?.findNext(q)
   if (!ok) message.info('未找到匹配')
 }
 
 function onSearchNext() {
-  activePane()?.findNext('')
+  const q = lastQuery.value
+  if (!q) {
+    message.info('请先输入搜索词并回车')
+    return
+  }
+  activePane()?.findNext(q)
 }
 
 function onSearchPrev() {
-  activePane()?.findPrevious('')
+  const q = lastQuery.value
+  if (!q) {
+    message.info('请先输入搜索词并回车')
+    return
+  }
+  activePane()?.findPrevious(q)
 }
 
 function onZoom(delta: number) {
@@ -171,15 +187,9 @@ function onCursorMove(pos: { col: number; row: number }) {
   cursorPos.value = pos
 }
 
-const offData = window.wslAPI.terminal.onData((p) => {
-  terminal.appendOutput(p.ptyId, p.chunk)
-})
-const offExit = window.wslAPI.terminal.onExit((p) => {
-  terminal.handleExit(p.ptyId, p.code)
-})
+// PTY 输出/退出订阅在 App.vue 应用级常驻（评审 I1）
 onUnmounted(() => {
-  offData()
-  offExit()
+  // 保留 store 中的 buffer；不在此解绑全局订阅
 })
 </script>
 
