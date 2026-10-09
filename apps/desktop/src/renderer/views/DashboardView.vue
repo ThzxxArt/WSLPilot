@@ -1,23 +1,74 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NButton } from 'naive-ui'
+import { computed, onMounted } from 'vue'
+import { NButton, NEmpty, NPopconfirm, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
+import { useDistrosStore } from '../stores/distros'
+import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
+import { usePolling } from '../composables/usePolling'
+import { MetricCard, DistroCard, StatusDot } from '@ui/components'
 import { ACCENT_GRADIENTS } from '@shared/constants'
 
 const router = useRouter()
+const distros = useDistrosStore()
+const metrics = useMetricsStore()
 const settings = useSettingsStore()
+const message = useMessage()
 
 const hour = new Date().getHours()
 const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
 const gradient = computed(() => ACCENT_GRADIENTS[settings.accent] ?? ACCENT_GRADIENTS.aurora)
 
-const metrics = [
-  { label: '运行中', value: '—', hint: '等待 M2' },
-  { label: '内存占用', value: '—', hint: '等待 M2' },
-  { label: '磁盘占用', value: '—', hint: '等待 M2' },
-  { label: 'CPU 负载', value: '—', hint: '等待 M2' },
-]
+const pollInterval = computed(() => 5000)
+
+async function refreshAll() {
+  await Promise.all([distros.refresh(), metrics.sample()])
+}
+
+onMounted(() => {
+  void refreshAll()
+})
+
+const { start: startPolling } = usePolling(() => void refreshAll(), {
+  intervalMs: pollInterval.value,
+})
+startPolling()
+
+const memLabel = computed(() => {
+  const { memUsedKB, memTotalKB } = metrics.overview
+  if (!memTotalKB) return '—'
+  const gb = (kb: number) => (kb / 1024 / 1024).toFixed(1)
+  return `${gb(memUsedKB)} / ${gb(memTotalKB)} GB`
+})
+
+async function action(fn: () => Promise<void>, ok: string) {
+  try {
+    await fn()
+    message.success(ok)
+    await refreshAll()
+  } catch (e: any) {
+    message.error(e?.message || '操作失败')
+  }
+}
+
+function onStart(name: string) {
+  void action(() => distros.start(name), `已启动 ${name}`)
+}
+function onTerminate(name: string) {
+  void action(() => distros.terminate(name), `已停止 ${name}`)
+}
+function onSetDefault(name: string) {
+  void action(() => distros.setDefault(name), `已将 ${name} 设为默认`)
+}
+function onShutdown() {
+  void action(() => distros.shutdownAll(), '已关闭全部发行版')
+}
+function onOpenTerminal(name: string) {
+  message.info(`终端将在 M3 交付（${name}）`)
+}
+function onMore(name: string) {
+  void router.push({ path: '/distros', query: { focus: name } })
+}
 </script>
 
 <template>
@@ -25,36 +76,89 @@ const metrics = [
     <header class="hero">
       <div>
         <h1 class="greeting">{{ greeting }}，指挥官</h1>
-        <p class="sub">WSLPilot 骨架已就绪 · 强调色：{{ settings.accent }}</p>
+        <p class="sub">
+          WSL 2 · {{ distros.items.length }} 个发行版 ·
+          <StatusDot state="Running" :size="8" class="inline-dot" />
+          {{ distros.runningCount }} 个运行中
+        </p>
       </div>
       <div class="hero-actions">
-        <n-button secondary @click="router.push('/settings')">打开设置</n-button>
-        <n-button type="primary" :style="{ background: gradient, border: 'none' }">
+        <n-button secondary :loading="distros.loading" @click="refreshAll">刷新</n-button>
+        <n-button type="primary" :style="{ background: gradient, border: 'none' }" disabled>
           + 安装发行版
         </n-button>
       </div>
     </header>
 
+    <p v-if="distros.lastError" class="error-banner">
+      {{ distros.lastError.message }}
+      <span v-if="distros.lastError.suggestion"> — {{ distros.lastError.suggestion }}</span>
+    </p>
+
     <section class="metrics">
-      <div v-for="m in metrics" :key="m.label" class="metric card">
-        <div class="metric-label">{{ m.label }}</div>
-        <div class="metric-value">{{ m.value }}</div>
-        <div class="metric-hint">{{ m.hint }}</div>
-      </div>
+      <MetricCard
+        label="运行中"
+        :value="metrics.overview.runningCount"
+        :hint="`共 ${metrics.overview.totalCount} 个发行版`"
+        :history="metrics.history.running"
+      />
+      <MetricCard
+        label="内存占用"
+        :value="memLabel"
+        hint="已采样 Running 发行版"
+        :history="metrics.history.mem"
+      />
+      <MetricCard
+        label="磁盘占用"
+        :value="`${metrics.overview.diskUsed} / ${metrics.overview.diskTotal}`"
+        hint="根分区近似"
+      />
+      <MetricCard
+        label="CPU 负载"
+        :value="`${metrics.overview.cpuPercent}%`"
+        hint="基于 loadavg 估算"
+        :history="metrics.history.cpu"
+      />
     </section>
 
     <section class="panel card">
-      <h2 class="panel-title">我的发行版</h2>
-      <div class="empty">
-        <div class="empty-illustration" :style="{ background: gradient }" />
-        <p>还没有发行版数据 — M2 将接入 <code>wsl --list --verbose</code></p>
+      <div class="panel-head">
+        <h2 class="panel-title">我的发行版</h2>
+        <n-button text type="primary" @click="router.push('/distros')">全部 →</n-button>
+      </div>
+
+      <div v-if="distros.items.length === 0" class="empty-wrap">
+        <n-empty description="还没有发行版数据">
+          <template #extra>
+            <n-button size="small" secondary @click="refreshAll">重新加载</n-button>
+          </template>
+        </n-empty>
+      </div>
+
+      <div v-else class="cards">
+        <DistroCard
+          v-for="d in distros.items.slice(0, 6)"
+          :key="d.name"
+          :distro="d"
+          :busy="distros.isBusy(d.name)"
+          @start="onStart"
+          @terminate="onTerminate"
+          @set-default="onSetDefault"
+          @open-terminal="onOpenTerminal"
+          @more="onMore"
+        />
       </div>
     </section>
 
     <section class="panel card">
       <h2 class="panel-title">快捷操作</h2>
       <div class="quick">
-        <n-button secondary disabled>🔌 全部关机</n-button>
+        <n-popconfirm @positive-click="onShutdown">
+          <template #trigger>
+            <n-button secondary>🔌 全部关机</n-button>
+          </template>
+          将执行 <code>wsl --shutdown</code>，关闭所有运行中的发行版，确定吗？
+        </n-popconfirm>
         <n-button secondary disabled>📦 备份</n-button>
         <n-button secondary disabled>🧹 清理</n-button>
         <n-button secondary disabled>🧭 网络配置</n-button>
@@ -91,11 +195,27 @@ const metrics = [
   margin-top: 4px;
   color: var(--color-text-secondary);
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-dot {
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .hero-actions {
   display: flex;
   gap: 10px;
+}
+
+.error-banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 13px;
 }
 
 .metrics {
@@ -110,59 +230,44 @@ const metrics = [
   }
 }
 
-.metric {
-  padding: 18px 20px;
-}
-
-.metric-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-tertiary);
-  text-transform: none;
-}
-
-.metric-value {
-  margin-top: 6px;
-  font-size: 32px;
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  color: var(--color-text-primary);
-}
-
-.metric-hint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-}
-
 .panel {
   padding: 20px 22px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
 }
 
 .panel-title {
   font-size: 16px;
   font-weight: 600;
-  margin-bottom: 14px;
   color: var(--color-text-primary);
+  margin: 0;
 }
 
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 28px 0;
-  color: var(--color-text-secondary);
-  font-size: 13px;
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
 }
 
-.empty-illustration {
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
-  opacity: 0.85;
-  box-shadow: var(--shadow-glow);
+@media (max-width: 960px) {
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.empty-wrap {
+  padding: 24px 0;
 }
 
 .quick {

@@ -6,26 +6,38 @@ import {
 } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
 import type { ConfigService, ConfigConflictAction } from '../services/config-service'
+import type { WslService } from '../services/wsl-service'
+import type { RegistryService } from '../services/registry-service'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
+import { registerDistroHandlers } from './handlers/distros'
+import { registerMetaHandlers } from './handlers/meta'
 
 export interface IpcContext {
   configService: ConfigService
   logger: Logger
   getMainWindow: () => Electron.BrowserWindow | null
+  wsl?: WslService
+  registry?: RegistryService
 }
 
 export { serializeIpcError, deserializeIpcError, toAppError } from '@wslpilot/shared'
 
 type Handler = (ctx: IpcContext, ...args: any[]) => Promise<unknown> | unknown
 
-export function registerIpcHandlers(ipcMain: IpcMain, ctx: IpcContext): void {
+export function registerIpcHandlers(
+  ipcMain: IpcMain,
+  ctx: IpcContext,
+  deps: { wsl: WslService; registry: RegistryService },
+): void {
   const routes = new Map<string, Handler>()
 
   const add = (channel: string, handler: Handler) => routes.set(channel, handler)
 
   registerConfigHandlers(add, ctx)
   registerAppHandlers(add, ctx)
+  registerDistroHandlers(add, ctx, deps)
+  registerMetaHandlers(add)
 
   for (const [channel, handler] of routes) {
     ipcMain.handle(channel, async (_event, ...args) => {

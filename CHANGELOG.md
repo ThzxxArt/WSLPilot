@@ -7,6 +7,17 @@
 
 ### Added
 
+- **M2 驾驶舱**：`wsl --list --verbose` 解析、发行版列表（卡片/表格）、指标卡、启停、设默认
+- WslService：list / start / terminate / shutdown / setDefault / getVersion / sampleMetrics
+- MetricsService：Running 发行版并发采样、驾驶舱全局概览
+- RegistryService：Lxss 注册表只读（GUID / BasePath / DefaultUid），失败降级
+- 发行版元数据 meta:get / meta:set（distros.jsonc）
+- UI 组件：DistroCard、MetricCard、StatusDot、Sparkline
+- 驾驶舱真实数据 + 快捷「全部关机」+ 轮询（失焦暂停）
+- 发行版中心：搜索 / 标签筛选 / 卡片网格 / 紧凑表格
+
+### Added (M1)
+
 - **M1 工程骨架**：npm workspaces monorepo（shared / kit / ui / desktop）
 - 设计系统：设计令牌、Naive UI 主题适配、浅色「极光」主题、四种强调色
 - ConfigService：JSONC 读写、原子替换、备份轮转、zod 校验、版本迁移链

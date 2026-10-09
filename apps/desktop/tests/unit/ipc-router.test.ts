@@ -60,6 +60,32 @@ function makeCtx() {
 
 type Handlers = Map<string, (ctx: any, ...args: any[]) => any>
 
+function makeDeps() {
+  return {
+    wsl: {
+      list: vi.fn(async () => []),
+      listWithMeta: vi.fn(async () => []),
+      start: vi.fn(async () => {}),
+      terminate: vi.fn(async () => {}),
+      shutdown: vi.fn(async () => {}),
+      setDefault: vi.fn(async () => {}),
+      getVersion: vi.fn(async () => ({ raw: '', wslVersion: '', kernelVersion: '' })),
+      sampleMetrics: vi.fn(async () => ({
+        memUsedKB: 0,
+        memTotalKB: 0,
+        diskUsed: '—',
+        diskTotal: '—',
+        cpuPercent: 0,
+        sampledAt: '',
+      })),
+    } as any,
+    registry: {
+      detail: vi.fn(async () => ({})),
+      listGuids: vi.fn(async () => []),
+    } as any,
+  }
+}
+
 function register(ctx: any): { handlers: Handlers; wrapped: Map<string, any> } {
   const handlers: Handlers = new Map()
   const wrapped = new Map<string, any>()
@@ -68,9 +94,7 @@ function register(ctx: any): { handlers: Handlers; wrapped: Map<string, any> } {
       wrapped.set(channel, fn)
     }),
   }
-  // registerIpcHandlers 内部用 routes Map，再调 ipcMain.handle
-  // 我们通过 fakeIpc 捕获包装后的 handle
-  registerIpcHandlers(fakeIpc, ctx)
+  registerIpcHandlers(fakeIpc, ctx, makeDeps())
   return { handlers, wrapped }
 }
 

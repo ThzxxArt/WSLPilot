@@ -15,3 +15,4 @@ export function applyAccentToDom(accent: AccentName): void {
 export * from './tokens'
 export * from './naive'
 export * from './composables/useNaiveTheme'
+export * from './components'

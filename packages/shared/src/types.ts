@@ -139,6 +139,19 @@ export interface Metrics {
   sampledAt: string
 }
 
+/** 驾驶舱全局概览指标（metrics:sample('*') 返回） */
+export interface OverviewMetrics {
+  runningCount: number
+  totalCount: number
+  memUsedKB: number
+  memTotalKB: number
+  diskUsed: string
+  diskTotal: string
+  cpuPercent: number
+  sampledAt: string
+  perDistro: Record<string, Metrics>
+}
+
 export type TaskType = 'install' | 'export' | 'import' | 'move' | 'convert' | 'action'
 export type TaskStatus = 'running' | 'success' | 'failed' | 'canceled'
 

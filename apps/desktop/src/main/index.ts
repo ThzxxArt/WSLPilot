@@ -6,6 +6,8 @@ import { createLogger } from '@wslpilot/kit'
 import { APP_NAME } from '@wslpilot/shared'
 import { createMainWindow } from './window/main-window'
 import { createTray } from './tray/tray'
+import { createWslService } from './services/wsl-service'
+import { createRegistryService } from './services/registry-service'
 import { isQuitting, markQuitting } from './app-state'
 
 // 单实例锁
@@ -36,11 +38,21 @@ async function bootstrap() {
   const configService = await createConfigService(userDataDir, logger)
 
   mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
-  registerIpcHandlers(ipcMain, {
-    configService,
-    logger,
-    getMainWindow: () => mainWindow,
-  })
+
+  const wsl = createWslService(logger)
+  const registry = createRegistryService(logger)
+
+  registerIpcHandlers(
+    ipcMain,
+    {
+      configService,
+      logger,
+      getMainWindow: () => mainWindow,
+      wsl,
+      registry,
+    },
+    { wsl, registry },
+  )
 
   // 系统托盘
   const settings = await configService.load('settings')
