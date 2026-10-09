@@ -35,7 +35,7 @@ for (const file of [mainPath, preloadPath]) {
 const req = createRequire(import.meta.url)
 const Module = req('module')
 const orig = Module._load
-Module._load = function (request, parent, isMain) {
+Module._load = function (request, _parent, _isMain) {
   if (request === 'electron') {
     class FakeWindow {
       static getAllWindows() {
@@ -50,7 +50,6 @@ Module._load = function (request, parent, isMain) {
       }
       once() {}
       on() {}
-      once() {}
       loadURL() {
         return Promise.resolve()
       }

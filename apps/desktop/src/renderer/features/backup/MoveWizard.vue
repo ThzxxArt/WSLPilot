@@ -51,9 +51,7 @@ async function browse() {
     <!-- 步骤 1：选择发行版 -->
     <template v-if="step === 1">
       <div class="field">
-        <div class="label">
-          选择要迁移的发行版
-        </div>
+        <div class="label">选择要迁移的发行版</div>
         <n-select
           :value="name"
           :options="distroOptions"
@@ -61,24 +59,15 @@ async function browse() {
           filterable
           @update:value="setName"
         />
-        <div
-          v-if="selectedDistro"
-          class="hint"
-        >
+        <div v-if="selectedDistro" class="hint">
           当前位置：{{ currentBasePath || '（未知，注册表信息不可用）' }}
         </div>
       </div>
 
-      <n-alert
-        v-if="isRunning"
-        type="warning"
-      >
+      <n-alert v-if="isRunning" type="warning">
         该发行版正在运行。迁移需要先终止（terminate）会话，未保存的工作可能丢失。
         <div class="check-line">
-          <n-checkbox
-            :checked="terminateFirst"
-            @update:checked="setTerminateFirst"
-          >
+          <n-checkbox :checked="terminateFirst" @update:checked="setTerminateFirst">
             终止后继续迁移
           </n-checkbox>
         </div>
@@ -88,21 +77,10 @@ async function browse() {
     <!-- 步骤 2：目标位置 -->
     <template v-else>
       <div class="field">
-        <div class="label">
-          迁移目标位置
-        </div>
+        <div class="label">迁移目标位置</div>
         <div class="row">
-          <n-input
-            :value="path"
-            placeholder="例如 D:\\WSL\\Ubuntu-22.04"
-            @update:value="setPath"
-          />
-          <n-button
-            secondary
-            @click="browse"
-          >
-            浏览…
-          </n-button>
+          <n-input :value="path" placeholder="例如 D:\\WSL\\Ubuntu-22.04" @update:value="setPath" />
+          <n-button secondary @click="browse"> 浏览… </n-button>
         </div>
         <div class="hint">
           目标为目录（发行版虚拟磁盘将移动到该位置）。需要 WSL 2.0+ 的
@@ -110,16 +88,10 @@ async function browse() {
         </div>
       </div>
 
-      <n-alert
-        v-if="autoBackup"
-        type="info"
-      >
+      <n-alert v-if="autoBackup" type="info">
         安全兜底已开启：迁移前会自动把「{{ form.name || '该发行版' }}」导出到备份目录，再执行迁移。
       </n-alert>
-      <n-alert
-        v-else
-        type="warning"
-      >
+      <n-alert v-else type="warning">
         迁移前自动备份已关闭。迁移失败可能导致发行版不可用，建议先手动导出一次。
       </n-alert>
     </template>

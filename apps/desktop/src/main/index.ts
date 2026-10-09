@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpcHandlers } from './ipc/router'
 import { createConfigService } from './services/config-service'
-import { createLogger } from '@wslpilot/kit'
+import { createLogger, type Logger } from '@wslpilot/kit'
 import { APP_NAME, CH, type TaskProgress } from '@wslpilot/shared'
 import { createMainWindow } from './window/main-window'
 import { decideClose } from './window/close-policy'
@@ -14,11 +14,29 @@ import { createTaskRunner, type TaskRecord } from './services/task-runner'
 import { createIoService } from './services/io-service'
 import { isQuitting, markQuitting } from './app-state'
 
+let bootstrapLogger: Logger | null = null
+
+/** 全局异常兜底：绝不静默烂掉（review M1） */
+function installGlobalGuards(getLogger: () => Logger | null): void {
+  process.on('uncaughtException', (err) => {
+    const log = getLogger()
+    log?.error('uncaughtException', { error: err?.stack ?? String(err) })
+  })
+  process.on('unhandledRejection', (reason) => {
+    const log = getLogger()
+    log?.error('unhandledRejection', {
+      error: reason instanceof Error ? (reason.stack ?? reason.message) : String(reason),
+    })
+  })
+}
+
 // 单实例锁 —— 败者直接退出，不注册任何 bootstrap（M10）
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  installGlobalGuards(() => bootstrapLogger)
+
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
     if (win) {
@@ -33,7 +51,13 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    void bootstrap()
+    bootstrap().catch((e: unknown) => {
+      // bootstrap 失败必须可见，绝不静默挂死（review M1）
+      const msg = e instanceof Error ? (e.stack ?? e.message) : String(e)
+      bootstrapLogger?.error('bootstrap failed', { error: msg })
+      dialog.showErrorBox('WSLPilot 启动失败', msg)
+      app.quit()
+    })
   })
 
   // 有托盘常驻：窗口关闭不退出；真正退出时才 quit
@@ -44,13 +68,27 @@ if (!gotLock) {
   })
 
   app.on('activate', () => {
-    // 由 bootstrap 内的 mainWindow 引用处理
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      win.show()
+      win.focus()
+    }
   })
 
-  // 安全基线：禁止新建窗口
+  // 安全基线：禁止新建窗口；http(s) 导航转系统浏览器，其余拦截（review M23）
   app.on('web-contents-created', (_e, contents) => {
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    contents.on('will-navigate', (event) => event.preventDefault())
+    contents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('https://') || url.startsWith('http://')) {
+        void shell.openExternal(url)
+      }
+      return { action: 'deny' }
+    })
+    contents.on('will-navigate', (event, url) => {
+      event.preventDefault()
+      if (url.startsWith('https://') || url.startsWith('http://')) {
+        void shell.openExternal(url)
+      }
+    })
   })
 
   app.setName(APP_NAME)
@@ -63,6 +101,7 @@ async function bootstrap() {
 
   const userDataDir = app.getPath('userData')
   const logger = createLogger(userDataDir, 'info')
+  bootstrapLogger = logger
   logger.info('app starting', { version: app.getVersion(), userDataDir })
 
   const configService = await createConfigService(userDataDir, logger)
@@ -72,20 +111,42 @@ async function bootstrap() {
     mainWindow = null
   })
 
+  // close 决策必须同步（preventDefault 只在同步派发期有效）。
+  // 必须在 loadURL 之前注册，否则 loadURL 挂起期间关闭窗口会失去拦截（review M24）
+  mainWindow.on('close', (e) => {
+    const s = configService.loadSync('settings')
+    const decision = decideClose(s.general.closeBehavior, isQuitting())
+    if (decision.action === 'hide') {
+      e.preventDefault()
+      mainWindow?.hide()
+      return
+    }
+    if (decision.action === 'quit') {
+      // 用户选择「关闭即退出」
+      markQuitting()
+      app.quit()
+    }
+  })
+
   const wsl = createWslService(logger)
   const registry = createRegistryService(logger)
-  const pty = createPtyManager(logger, {
-    onData: (ptyId, chunk) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty:data', { ptyId, chunk })
-      }
+  const pty = createPtyManager(
+    logger,
+    {
+      onData: (ptyId, chunk) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(CH.ptyData, { ptyId, chunk })
+        }
+      },
+      onExit: (ptyId, code) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(CH.ptyExit, { ptyId, code })
+        }
+      },
     },
-    onExit: (ptyId, code) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty:exit', { ptyId, code })
-      }
-    },
-  })
+    undefined,
+    { defaultShell: () => configService.loadSync('settings').wsl.defaultShell },
+  )
 
   // M4：长任务调度（导出/导入/迁移）→ task:progress 事件 + lastTaskResult 落盘
   const tasks = createTaskRunner({
@@ -136,26 +197,19 @@ async function bootstrap() {
     process.env.VITE_DEV_SERVER_URL ?? `file://${join(__dirname, '../renderer/index.html')}`,
   )
 
-  // close 决策必须同步（preventDefault 只在同步派发期有效）
-  mainWindow.on('close', (e) => {
-    const s = configService.loadSync('settings')
-    const decision = decideClose(s.general.closeBehavior, isQuitting())
-    if (decision.action === 'hide') {
-      e.preventDefault()
-      mainWindow?.hide()
-      return
-    }
-    if (decision.action === 'quit') {
-      // 用户选择「关闭即退出」
-      markQuitting()
-      app.quit()
-    }
-  })
-
-  app.on('will-quit', () => {
+  app.on('will-quit', (e) => {
+    if (!isQuitting()) return
+    // 先同步取消任务与终端，再等待写队列落盘（review M25）
+    e.preventDefault()
     tasks.dispose()
     pty.killAll()
-    configService.dispose()
+    void configService
+      .flush()
+      .catch(() => {})
+      .finally(() => {
+        configService.dispose()
+        app.exit(0)
+      })
   })
 
   logger.info('window ready')

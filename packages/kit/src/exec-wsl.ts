@@ -41,10 +41,12 @@ export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise
       code: 0,
     }
   } catch (e) {
-    const err = e as { code?: number; stdout?: Buffer; stderr?: Buffer }
+    const err = e as { code?: number | string; message?: string; stdout?: Buffer; stderr?: Buffer }
+    // spawn 级错误（ENOENT 等）没有 stderr，必须保留 message，否则上层错误映射失效（review M6）
+    const stderrText = decode(err.stderr) || (err.message ? `${err.message}\n` : '')
     return {
       stdout: decode(err.stdout),
-      stderr: decode(err.stderr),
+      stderr: stderrText,
       code: typeof err.code === 'number' ? err.code : -1,
     }
   }
@@ -60,6 +62,7 @@ export interface ParsedDistro {
 /**
  * 解析 `wsl --list --verbose` 输出。
  * 按多空白切分（兼容中文列宽），不用固定列位。
+ * 默认标记是「行首第 1 列」的 `*`（名字本身可含 `*`，不得吃掉名字首字符 — review M4）。
  */
 export function parseDistroList(raw: string): ParsedDistro[] {
   return raw
@@ -67,16 +70,16 @@ export function parseDistroList(raw: string): ParsedDistro[] {
     .slice(1)
     .filter((l) => l.trim() !== '')
     .map((line) => {
-      const trimmed = line.trimStart()
-      const isDefault = trimmed.startsWith('*')
-      // 仅去掉「默认标记」的一个 *，保留名称内部的 *
-      const body = (isDefault ? trimmed.slice(1) : line).trim()
+      const isDefault = line.startsWith('*')
+      const body = (isDefault ? line.slice(1) : line).trim()
       const parts = body.split(/\s{2,}/)
+      const versionNum = Number(parts[2] ?? 2)
       return {
         isDefault,
         name: parts[0] ?? '',
         state: parts[1] ?? 'Unknown',
-        version: Number(parts[2] ?? 2),
+        // 非法/缺失版本号一律归一为 2，杜绝 NaN 流入领域模型
+        version: versionNum === 1 ? 1 : 2,
       }
     })
     .filter((d) => d.name !== '')
@@ -105,13 +108,18 @@ export function spawnWsl(args: string[], opts: SpawnWslOptions): { kill: () => v
   const makeHandler = () => {
     let pending = Buffer.alloc(0)
     let lineBuf = ''
+    let first = true
     return {
       push(chunk: Buffer) {
         pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk])
         const usable = pending.length - (pending.length % 2)
         if (usable <= 0) return
-        const text = pending.subarray(0, usable).toString('utf16le').replace(/\0/g, '')
+        let text = pending.subarray(0, usable).toString('utf16le').replace(/\0/g, '')
         pending = pending.subarray(usable)
+        if (first) {
+          first = false
+          text = text.replace(/^\uFEFF/, '')
+        }
         lineBuf += text
         const lines = lineBuf.split(/\r?\n/)
         lineBuf = lines.pop() ?? ''
@@ -119,7 +127,7 @@ export function spawnWsl(args: string[], opts: SpawnWslOptions): { kill: () => v
       },
       flush() {
         if (pending.length > 0) {
-          lineBuf += pending.toString('utf16le').replace(/\0/g, '')
+          // 残缺 1 字节无法构成 UTF-16 单元，丢弃（review m8）
           pending = Buffer.alloc(0)
         }
         if (lineBuf.trim() !== '') opts.onLine(lineBuf)

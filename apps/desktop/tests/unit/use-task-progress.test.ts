@@ -15,13 +15,8 @@ const wslAPI = {
 ;(globalThis as any).window = { wslAPI }
 
 const { useTasksStore } = await import('../../src/renderer/stores/tasks')
-const {
-  attachTaskProgress,
-  useTaskProgress,
-  formatElapsed,
-  taskTypeLabel,
-  taskStatusLabel,
-} = await import('../../src/renderer/composables/useTaskProgress')
+const { attachTaskProgress, useTaskProgress, formatElapsed, taskTypeLabel, taskStatusLabel } =
+  await import('../../src/renderer/composables/useTaskProgress')
 const { createPinia, setActivePinia } = await import('pinia')
 const { ref } = await import('vue')
 
@@ -97,7 +92,13 @@ describe('useTaskProgress', () => {
     expect(view.percent.value).toBe(42.4)
     expect(view.percentLabel.value).toBe('42%')
 
-    store.applyProgress({ taskId: 'abc', type: 'export', percent: 100, message: '完成', status: 'success' })
+    store.applyProgress({
+      taskId: 'abc',
+      type: 'export',
+      percent: 100,
+      message: '完成',
+      status: 'success',
+    })
     expect(view.isRunning.value).toBe(false)
     expect(view.isDone.value).toBe(true)
 

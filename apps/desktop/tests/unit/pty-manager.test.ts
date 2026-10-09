@@ -79,14 +79,7 @@ describe('PtyManager', () => {
       cols: 100,
       rows: 30,
     })
-    expect(spawned[0]!.args).toEqual([
-      '-d',
-      'Debian',
-      '--cd',
-      '/home/me',
-      '-e',
-      '/bin/zsh',
-    ])
+    expect(spawned[0]!.args).toEqual(['-d', 'Debian', '--cd', '/home/me', '-e', '/bin/zsh'])
   })
 
   it('rejects illegal distro name and shell', () => {
@@ -179,5 +172,24 @@ describe('PtyManager', () => {
   it('cwd empty skips --cd', () => {
     pty.create({ distro: 'U', cwd: '  ', cols: 80, rows: 24 })
     expect(spawned[0]!.args).toEqual(['-d', 'U', '-e', '/bin/bash'])
+  })
+
+  it('defaultShell 走配置函数 / 字符串（review M21）', () => {
+    const fnPty = createPtyManager(logger(), events, spawnFn, { defaultShell: () => '/bin/sh' })
+    fnPty.create({ distro: 'U', cols: 80, rows: 24 })
+    expect(spawned[0]!.args).toContain('/bin/sh')
+
+    const strPty = createPtyManager(logger(), events, spawnFn, { defaultShell: '/bin/zsh' })
+    strPty.create({ distro: 'U', cols: 80, rows: 24 })
+    expect(spawned[1]!.args).toContain('/bin/zsh')
+
+    const emptyPty = createPtyManager(logger(), events, spawnFn, { defaultShell: () => '  ' })
+    emptyPty.create({ distro: 'U', cols: 80, rows: 24 })
+    expect(spawned[2]!.args).toContain('/bin/bash')
+  })
+
+  it('rejects shell 伪参数与控制字符（review M22）', () => {
+    expect(() => pty.create({ distro: 'U', shell: '--evil', cols: 80, rows: 24 })).toThrow()
+    expect(() => pty.create({ distro: 'U', shell: 'a\u0000b', cols: 80, rows: 24 })).toThrow()
   })
 })

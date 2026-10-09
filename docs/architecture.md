@@ -47,9 +47,10 @@ Renderer ── io:export/import/move ──▶ TaskRunner.start(lockKey=发行�
 
 ## 安全
 
-| 层 | 措施 |
-|---|---|
-| 渲染进程 | `contextIsolation` + `sandbox` + 零 Node 权限 |
-| IPC | 通道白名单 + zod 入参校验 |
-| 命令执行 | 参数数组化 + `-e` 分界 + 动作白名单 |
-| 提权 | 独立 ElevationHelper 进程 + 结构化请求 |
+| 层       | 措施                                                                                                                                      |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 渲染进程 | `contextIsolation` + `sandbox` + 零 Node 权限                                                                                             |
+| IPC      | 通道白名单 + zod 入参校验（全部带参通道强制登记 schema，契约测试守护）                                                                    |
+| 命令执行 | 参数数组化 + `-e` 分界 + 动作白名单                                                                                                       |
+| 路径     | 控制字符/绝对路径（safeResolve）拒绝；`app:openPath` 仅允许目录（防文件关联执行）                                                         |
+| 提权     | 独立 ElevationHelper 进程 + 结构化请求（**M7 规划，尚未实现**；当前 `--manage --move` 等以当前权限执行，失败给 `PERMISSION_DENIED` 提示） |

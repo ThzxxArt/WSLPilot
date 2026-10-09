@@ -6,6 +6,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { TERMINAL_LIGHT_THEME, type TerminalFontPrefs, DEFAULT_TERMINAL_PREFS } from './theme'
+import { useSettingsStore } from '../../stores/settings'
 
 const props = defineProps({
   ptyId: { type: String, required: true },
@@ -22,14 +23,16 @@ const props = defineProps({
 
 const emit = defineEmits<{
   ready: [term: Terminal]
-  cursorMove: [pos: { col: number; row: number }]
+  cursorMove: [pos: { col: number; row: number; ptyId: string }]
 }>()
 
 const host = ref<HTMLElement | null>(null)
+const settings = useSettingsStore()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
 let ro: ResizeObserver | null = null
+let fitTimer: number | undefined
 let unsubs: Array<() => void> = []
 
 function applyPrefs(t: Terminal, p: Partial<TerminalFontPrefs>) {
@@ -88,6 +91,7 @@ onMounted(() => {
     emit('cursorMove', {
       col: t.buffer.active.cursorX + 1,
       row: t.buffer.active.cursorY + 1,
+      ptyId: props.ptyId,
     })
   })
 
@@ -104,15 +108,20 @@ onMounted(() => {
   ro = new ResizeObserver(() => doFit())
   ro.observe(host.value)
 
-  setTimeout(doFit, 50)
+  fitTimer = window.setTimeout(doFit, 50)
   emit('ready', t)
 })
 
 onBeforeUnmount(() => {
+  if (fitTimer !== undefined) {
+    window.clearTimeout(fitTimer)
+    fitTimer = undefined
+  }
   for (const u of unsubs) u()
   unsubs = []
   ro?.disconnect()
   ro = null
+  search = null
   try {
     term?.dispose()
   } catch {
@@ -171,10 +180,10 @@ function findPrevious(text: string) {
 }
 
 function zoom(delta: number) {
-  if (!term) return
-  const next = Math.min(32, Math.max(8, (term.options.fontSize ?? 14) + delta))
-  term.options.fontSize = next
-  doFit()
+  // 字号统一走 settings：prefs 驱动 term，工具栏显示同步（review M10）
+  const current = term?.options.fontSize ?? settings.terminalFontSize
+  const next = Math.min(32, Math.max(8, current + delta))
+  void settings.setTerminalFontSize(next)
 }
 
 function scrollLineUp() {
@@ -201,10 +210,7 @@ defineExpose({
 </script>
 
 <template>
-  <div
-    ref="host"
-    class="xterm-host"
-  />
+  <div ref="host" class="xterm-host" />
 </template>
 
 <style scoped>
@@ -214,7 +220,7 @@ defineExpose({
   min-height: 120px;
   padding: 6px 8px;
   border-radius: var(--radius-md);
-  background: #FBFCFE;
+  background: #fbfcfe;
   border: 1px solid var(--color-border-subtle);
   overflow: hidden;
 }

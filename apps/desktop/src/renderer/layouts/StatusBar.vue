@@ -43,11 +43,7 @@ function openTasks() {
       <span class="muted">就绪</span>
       <template v-if="runningTask">
         <span class="sep">·</span>
-        <button
-          class="task-chip"
-          :title="runningTask.message"
-          @click="openTasks"
-        >
+        <button class="task-chip" :title="runningTask.message" @click="openTasks">
           <span class="task-pulse" />
           {{ taskLabel }}
         </button>

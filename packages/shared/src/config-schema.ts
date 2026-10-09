@@ -132,7 +132,9 @@ export const uiStateFileSchema = z.object({
   lastSelectedDistro: z.string().default(''),
   sidebarCollapsed: z.boolean().default(false),
   activeView: z.string().default('dashboard'),
-  tableSort: z.object({ key: z.string().default('name'), dir: z.enum(['asc', 'desc']).default('asc') }).default({}),
+  tableSort: z
+    .object({ key: z.string().default('name'), dir: z.enum(['asc', 'desc']).default('asc') })
+    .default({}),
   recentCommands: z.array(z.string()).default([]),
 })
 
@@ -154,9 +156,10 @@ export const stateFileSchema = z.object({
     .default({}),
   lastTaskResult: z
     .object({
-      type: z.string(),
+      // 与 types.ts 联合类型对齐（review M8）：zod 是唯一运行时校验器
+      type: z.enum(['install', 'export', 'import', 'move', 'convert', 'action']),
       distro: z.string(),
-      status: z.string(),
+      status: z.enum(['running', 'success', 'failed', 'canceled']),
       finishedAt: z.string(),
     })
     .optional(),
@@ -170,6 +173,19 @@ export const CONFIG_SCHEMAS = {
   uiState: uiStateFileSchema,
   state: stateFileSchema,
 } as const
+
+/**
+ * 各配置文件当前 schema 版本 — 唯一事实源（review M8）。
+ * constants / config-service 的目标版本一律引用此处，禁止另抄一份。
+ */
+export const SCHEMA_VERSIONS = {
+  settings: 2,
+  distros: 1,
+  actions: 1,
+  network: 1,
+  uiState: 1,
+  state: 1,
+} as const satisfies Record<keyof typeof CONFIG_SCHEMAS, number>
 
 export type ConfigKeyOf = keyof typeof CONFIG_SCHEMAS
 

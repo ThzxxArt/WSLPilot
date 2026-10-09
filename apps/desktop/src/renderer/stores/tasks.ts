@@ -27,7 +27,12 @@ export interface TaskEntry {
 /** 单任务日志上限（渲染侧防内存膨胀） */
 export const MAX_TASK_LOGS = 2000
 
-function emptyEntry(taskId: string, type: TaskType, distro: string | undefined, message: string): TaskEntry {
+function emptyEntry(
+  taskId: string,
+  type: TaskType,
+  distro: string | undefined,
+  message: string,
+): TaskEntry {
   return {
     taskId,
     type,
@@ -78,11 +83,30 @@ export const useTasksStore = defineStore('tasks', {
         e.finishedAt = Date.now()
         if (p.status === 'failed') e.error = p.message
         if (p.status === 'canceled') e.error = e.error ?? '任务已取消'
+        this.trimFinished()
       }
     },
 
+    /** 保留最近 KEEP_FINISHED 条终态记录，防无界增长（review M7） */
+    trimFinished() {
+      const KEEP_FINISHED = 10
+      const finished = this.entries.filter((t) => t.status !== 'running')
+      const overflow = finished.length - KEEP_FINISHED
+      if (overflow <= 0) return
+      const drop = new Set(
+        finished
+          .sort((a, b) => a.startedAt - b.startedAt)
+          .slice(0, overflow)
+          .map((t) => t.taskId),
+      )
+      this.entries = this.entries.filter((t) => !drop.has(t.taskId))
+    },
+
     /** invoke 返回 handle 后立即占位（事件到达前 UI 有即时反馈） */
-    track(handle: TaskHandle, meta: { type: TaskType; distro?: string; message: string }): TaskEntry {
+    track(
+      handle: TaskHandle,
+      meta: { type: TaskType; distro?: string; message: string },
+    ): TaskEntry {
       const existing = this.entries.find((x) => x.taskId === handle.taskId)
       if (existing) return existing
       const e = emptyEntry(handle.taskId, meta.type, meta.distro, meta.message)
@@ -117,6 +141,22 @@ export const useTasksStore = defineStore('tasks', {
       try {
         const handle = await window.wslAPI.io.move(req)
         return this.track(handle, { type: 'move', distro: req.name, message: `迁移 ${req.name}` })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 安装发行版（wsl --install） */
+    async startInstall(name?: string): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.install(name)
+        return this.track(handle, {
+          type: 'install',
+          distro: name,
+          message: name ? `安装 ${name}` : '安装 WSL',
+        })
       } catch (e) {
         this.lastError = toAppError(e)
         return null

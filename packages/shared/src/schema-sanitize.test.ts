@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import { sanitizeWithSchema } from '../src/schema-sanitize'
-import { appSettingsSchema, defaultConfig } from '../src/config-schema'
+import { appSettingsSchema, defaultConfig, stateFileSchema } from '../src/config-schema'
 
 describe('sanitizeWithSchema', () => {
   it('returns valid data unchanged', () => {
@@ -48,5 +48,42 @@ describe('sanitizeWithSchema', () => {
     const out = sanitizeWithSchema(schema, { a: 'bad', b: 'ok' }, { a: 1, b: 'x' })
     expect(out.a).toBe(1)
     expect(out.b).toBe('ok')
+  })
+
+  it('record 字段逐键清洗：合法键保留、非法键丢弃（review C2 回归）', () => {
+    const data = {
+      $schemaVersion: 1,
+      lastScanAt: 'T',
+      lastMetrics: {
+        good: {
+          memUsedKB: 1,
+          memTotalKB: 2,
+          diskUsedKB: 0,
+          diskTotalKB: 0,
+          cpuPercent: 1,
+          sampledAt: 'x',
+        },
+        bad: { memUsedKB: 'x' },
+      },
+    }
+    const out = sanitizeWithSchema(stateFileSchema, data, defaultConfig('state')) as any
+    expect(Object.keys(out.lastMetrics)).toEqual(['good'])
+    expect(out.lastMetrics.good.memUsedKB).toBe(1)
+    expect(out.lastScanAt).toBe('T')
+  })
+
+  it('record 中 null/坏值只丢该键，不清空整表（review C2 回归）', () => {
+    const out = sanitizeWithSchema(
+      stateFileSchema,
+      {
+        lastMetrics: {
+          a: { memUsedKB: 1, memTotalKB: 2, cpuPercent: 1, sampledAt: 'x' },
+          b: null,
+          c: { memUsedKB: 3, memTotalKB: 4, cpuPercent: 2, sampledAt: 'y' },
+        },
+      },
+      defaultConfig('state'),
+    ) as any
+    expect(Object.keys(out.lastMetrics).sort()).toEqual(['a', 'c'])
   })
 })

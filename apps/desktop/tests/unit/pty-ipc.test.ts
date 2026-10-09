@@ -58,7 +58,12 @@ function makeDeps() {
       setDefault: vi.fn(async () => {}),
       getVersion: vi.fn(async () => ({ raw: '', wslVersion: '', kernelVersion: '' })),
       sampleMetrics: vi.fn(async () => ({
-        memUsedKB: 0, memTotalKB: 0, diskUsedKB: 0, diskTotalKB: 0, cpuPercent: 0, sampledAt: '',
+        memUsedKB: 0,
+        memTotalKB: 0,
+        diskUsedKB: 0,
+        diskTotalKB: 0,
+        cpuPercent: 0,
+        sampledAt: '',
       })),
     } as any,
     registry: { detail: vi.fn(async () => ({})), listGuids: vi.fn(async () => []) } as any,
@@ -124,6 +129,8 @@ describe('pty IPC handlers', () => {
   it('rejects missing ptyId / distro', async () => {
     const { wrapped } = register(makeCtx())
     await expect(wrapped.get(CH.ptyInput)({}, { ptyId: '', data: 'x' })).rejects.toThrow()
-    await expect(wrapped.get(CH.ptyCreate)({}, { distro: '', cols: 80, rows: 24 })).rejects.toThrow()
+    await expect(
+      wrapped.get(CH.ptyCreate)({}, { distro: '', cols: 80, rows: 24 }),
+    ).rejects.toThrow()
   })
 })

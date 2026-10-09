@@ -13,11 +13,12 @@
     "dev": "npm run dev --workspace @wslpilot/desktop",
     "build": "npm run build --workspaces --if-present && npm run package --workspace @wslpilot/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint . --ext .ts,.vue && stylelint \"**/*.{scss,css,vue}\"",
+    "lint": "eslint . --ext .ts,.vue,.mjs && stylelint \"**/*.{scss,css,vue}\"",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:component": "vitest run -c vitest.component.config.ts",
+    "test:component": "vitest run -c vitest.component.config.ts --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "smoke:product": "node scripts/smoke-product.mjs",
@@ -25,6 +26,10 @@
     "postinstall": "npm run tokens",
     "changeset": "changeset",
     "release": "changeset version && npm run build"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=12"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
@@ -34,7 +39,6 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "@vitest/coverage-v8": "^2.1.8",
     "@vue/test-utils": "^2.4.6",
-    "electron-rebuild": "^3.2.9",
     "eslint": "^8.57.1",
     "eslint-plugin-vue": "^9.32.0",
     "happy-dom": "^15.11.7",

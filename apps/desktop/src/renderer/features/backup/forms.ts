@@ -8,7 +8,12 @@ import type {
   IoImportRequest,
   IoMoveRequest,
 } from '@wslpilot/shared'
-import { exportFileName, previewExportCommand, previewImportCommand, previewMoveCommand } from '@wslpilot/shared'
+import {
+  exportFileName,
+  previewExportCommand,
+  previewImportCommand,
+  previewMoveCommand,
+} from '@wslpilot/shared'
 
 export type WizardMode = 'export' | 'import' | 'move'
 
@@ -111,9 +116,13 @@ export function exportCommandPreview(form: ExportForm): string {
 }
 
 export function validateImportForm(form: ImportForm): string | null {
-  if (!isValidDistroName(form.name)) return '请填写合法的新发行版名称（不能包含 \\ / : * ? " < > |）'
+  if (!isValidDistroName(form.name))
+    return '请填写合法的新发行版名称（不能包含 \\ / : * ? " < > |）'
   const err = requireField(form.archivePath, '备份文件路径')
   if (err) return err
+  if (form.inPlace && form.format !== 'vhd') {
+    return '就地导入仅支持 vhd（.vhdx）文件，请改用归档导入'
+  }
   if (!form.inPlace) return requireField(form.installPath, '安装位置')
   return null
 }
@@ -160,14 +169,20 @@ export function buildMoveRequest(form: MoveForm): IoMoveRequest {
   }
 }
 
-export function moveSummary(form: MoveForm, opts: { willTerminate: boolean; autoBackup: boolean }): SummaryRow[] {
+export function moveSummary(
+  form: MoveForm,
+  opts: { willTerminate: boolean; autoBackup: boolean },
+): SummaryRow[] {
   const rows: SummaryRow[] = [
     { label: '操作', value: '迁移磁盘' },
     { label: '发行版', value: form.name || '—' },
     { label: '迁移到', value: form.path || '—' },
   ]
   if (opts.willTerminate) {
-    rows.push({ label: '运行中处理', value: form.terminateFirst ? '先终止（terminate）再迁移' : '—（将报错中止）' })
+    rows.push({
+      label: '运行中处理',
+      value: form.terminateFirst ? '先终止（terminate）再迁移' : '—（将报错中止）',
+    })
   }
   rows.push({
     label: '迁移前自动备份',

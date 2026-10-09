@@ -26,3 +26,23 @@ export function formatBytes(bytes: number): string {
   }
   return `${i === 0 ? v : v.toFixed(1)}${units[i]}`
 }
+
+/** WSL 发行版状态中文文案（唯一事实源，renderer 与 ui 组件共用） */
+export function stateLabel(s: string): string {
+  switch (s) {
+    case 'Running':
+      return '运行中'
+    case 'Stopped':
+      return '已停止'
+    case 'Installing':
+      return '安装中'
+    case 'Uninstalling':
+      return '卸载中'
+    case 'Converting':
+      return '转换中'
+    case 'Unknown':
+      return '未知'
+    default:
+      return s || '未知'
+  }
+}

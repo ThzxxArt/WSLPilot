@@ -29,13 +29,17 @@ export function logsDir(userDataDir: string): string {
 }
 
 /**
- * 规范化并校验路径，拒绝 `..` 逃逸。
+ * 规范化并校验路径，拒绝 `..` 逃逸与绝对路径输入（review m5）。
  * base 为允许的根目录。
  */
 export function safeResolve(base: string, relative: string): string {
   const normalized = relative.replace(/\\/g, '/')
   if (normalized.includes('\0')) {
     throw new Error('路径包含非法字符')
+  }
+  // 绝对路径 / 盘符 / UNC 输入静默"降级为相对"语义意外 — 显式拒绝
+  if (/^([a-zA-Z]:)?\//.test(normalized) || normalized.startsWith('//')) {
+    throw new Error('不允许绝对路径')
   }
   const parts = normalized.split('/').filter((p) => p !== '' && p !== '.')
   const stack: string[] = []
@@ -50,9 +54,14 @@ export function safeResolve(base: string, relative: string): string {
   return join(base, ...stack)
 }
 
-/** 展开 %USERPROFILE% 等 Windows 风格环境变量 */
+/**
+ * 展开 %USERPROFILE% 等 Windows 风格环境变量。
+ * 大小写不敏感（Windows 环境变量语义）；未知变量原样保留。
+ */
 export function expandEnv(input: string): string {
   return input.replace(/%([^%]+)%/g, (match, name: string) => {
-    return process.env[name.toUpperCase()] ?? match
+    const upper = name.toUpperCase()
+    const direct = process.env[upper] ?? process.env[name]
+    return direct ?? match
   })
 }

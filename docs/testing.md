@@ -22,14 +22,14 @@
 
 ### 1. 单元测试（`npm test`）
 
-| 模块 | 覆盖点 |
-|---|---|
-| `exec-wsl` | `parseDistroList`（含中文、`*` 默认标记、多空格） |
-| `jsonc` | 解析容错、错误行号、最小编辑保留注释 |
-| `atomic-write` | 原子替换、崩溃不留半截文件 |
-| `config-schema` | zod 校验、默认值填充、部分数据合并 |
-| `config-migrations` | v1→v2 迁移链 |
-| `errors` | 错误码目录、结构化序列化 |
+| 模块                | 覆盖点                                            |
+| ------------------- | ------------------------------------------------- |
+| `exec-wsl`          | `parseDistroList`（含中文、`*` 默认标记、多空格） |
+| `jsonc`             | 解析容错、错误行号、最小编辑保留注释              |
+| `atomic-write`      | 原子替换、崩溃不留半截文件                        |
+| `config-schema`     | zod 校验、默认值填充、部分数据合并                |
+| `config-migrations` | v1→v2 迁移链                                      |
+| `errors`            | 错误码目录、结构化序列化                          |
 
 ### 2. IPC 契约测试
 
@@ -47,51 +47,51 @@ expect(() => ipcSchema.configSet.parse({ fileKey: 'evil', patch: {} })).toThrow(
 
 覆盖：StatusDot、Sparkline、MetricCard、DistroCard（启停事件、状态中文、默认禁用菜单）。
 
-组件覆盖率门禁：lines/statements/branches ≥70%，functions ≥50%（`vitest.component.config.ts`）。
+组件覆盖率门禁：lines/statements/branches/functions ≥70%（`vitest.component.config.ts`，由 `npm run test:component --coverage` 强制执行）。
 
-### 4. 视觉回归
+### 4. 视觉回归（规划中）
 
-Playwright 截图对比，保证浅色主题渲染一致性（关键页面）。
+Playwright 截图对比，保证浅色主题渲染一致性（关键页面）。当前尚未落地，属 M7 打磨项。
 
 ### 5. 端到端（`npm run test:e2e`）
 
-Playwright + Electron：
+Playwright + Electron（`electron.launch`，Windows）：
 
 - 启动、窗口显示
-- 列出（模拟）发行版
-- 打开终端
-- 改设置并落盘到 `settings.jsonc`
+- 侧栏导航（驾驶舱 / 终端 / 备份迁移）关键元素可见性
 
 ## 运行
 
 ```bash
 npm test               # 单元 + 集成
 npm run test:coverage  # 单元 + 覆盖率（硬门禁 ≥85%）
-npm run test:component # 组件
+npm run test:component # 组件 + 覆盖率（硬门禁 ≥70%）
 npm run test:e2e       # E2E（需 Windows）
 npm run test:watch     # 监听模式
 ```
 
 ## 覆盖率门禁（硬性）
 
-| 指标 | 阈值 | 说明 |
-|---|---|---|
-| Lines | **≥ 85%** | 低于则 `npm run test:coverage` 与 CI **直接失败** |
-| Statements | **≥ 85%** | 同上 |
-| Branches | **≥ 85%** | 同上 |
-| Functions | **≥ 85%** | 同上 |
+| 指标       | 阈值      | 说明                                              |
+| ---------- | --------- | ------------------------------------------------- |
+| Lines      | **≥ 85%** | 低于则 `npm run test:coverage` 与 CI **直接失败** |
+| Statements | **≥ 85%** | 同上                                              |
+| Branches   | **≥ 85%** | 同上                                              |
+| Functions  | **≥ 85%** | 同上                                              |
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
 **当前基线（M4）**：Lines 94%+ / Branches 85%+ / Functions 95%+。
 
 **覆盖范围**：
+
 - `packages/shared/src/**`（类型契约、schema、错误、令牌、备份命名/命令预览）
 - `packages/kit/src/**`（jsonc、atomic-write、exec-wsl、paths、logger）
 - `apps/desktop/src/main/**`（ConfigService、TaskRunner、IoService、IPC、tray、window）
 - `apps/desktop/src/renderer/stores|composables|features/**`（含备份向导表单纯逻辑）
 
 **不在覆盖率门禁内**（有说明）：
+
 - `types.ts`（纯类型，无运行时逻辑）
 - `config-migrations.ts`（迁移链，随 schema 版本演进单独测）
 - `updater/` `elevation/`（M7 提权/更新，尚未实现）

@@ -32,10 +32,7 @@ function asId(arg: unknown): string {
   return id
 }
 
-export function registerPtyHandlers(
-  add: AddFn,
-  deps: { pty: PtyManager },
-): void {
+export function registerPtyHandlers(add: AddFn, deps: { pty: PtyManager }): void {
   const { pty } = deps
 
   add(CH.ptyCreate, (_c, arg: never) => {

@@ -18,7 +18,10 @@ export type RegQuery = (args: string[]) => Promise<string>
 /** 从 reg query 输出中读取 REG_* 值 */
 export function pickRegValue(out: string, name: string): string | undefined {
   const re = new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.+)$`, 'im')
-  return re.exec(out)?.[1]?.trim()
+  const raw = re.exec(out)?.[1]?.trim()
+  if (raw === undefined) return undefined
+  // REG_SZ 可能带引号，统一剥掉
+  return raw.replace(/^"(.*)"$/, '$1')
 }
 
 /** REG_DWORD 十六进制（0x…）或十进制 → number */
@@ -68,7 +71,10 @@ export async function defaultRegQuery(args: string[]): Promise<string> {
     : String(stdout ?? '')
 }
 
-export function createRegistryService(logger: Logger, regQuery: RegQuery = defaultRegQuery): RegistryService {
+export function createRegistryService(
+  logger: Logger,
+  regQuery: RegQuery = defaultRegQuery,
+): RegistryService {
   async function query(args: string[]): Promise<string> {
     try {
       return await regQuery(args)
@@ -99,8 +105,10 @@ export function createRegistryService(logger: Logger, regQuery: RegQuery = defau
   return {
     async detail(name) {
       const guids = await listGuids()
+      const lower = name.toLowerCase()
       for (const g of guids) {
-        if (g.distributionName === name) {
+        // 发行版名不区分大小写（review M11）
+        if (g.distributionName.toLowerCase() === lower) {
           return readGuid(g.guid)
         }
       }

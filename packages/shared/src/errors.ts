@@ -51,17 +51,14 @@ export class WslPilotError extends Error implements AppError {
 }
 
 export function isAppError(e: unknown): e is AppError {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    'message' in e &&
-    'recoverable' in e
-  )
+  return typeof e === 'object' && e !== null && 'code' in e && 'message' in e && 'recoverable' in e
 }
 
 /** 错误码 → 默认中文文案与建议 */
-export const ERROR_CATALOG: Record<ErrorCode, { message: string; suggestion?: string; recoverable: boolean }> = {
+export const ERROR_CATALOG: Record<
+  ErrorCode,
+  { message: string; suggestion?: string; recoverable: boolean }
+> = {
   WSL_NOT_INSTALLED: {
     message: '系统未启用 WSL',
     suggestion: '点击「一键安装 WSL」或运行 wsl --install',
@@ -178,7 +175,7 @@ export function deserializeIpcError(e: unknown): AppError | null {
     const payload = raw.slice(idx + IPC_ERROR_PREFIX.length)
     // 直接解析
     try {
-      return JSON.parse(payload) as AppError
+      return validateAppError(JSON.parse(payload))
     } catch {
       /* fallthrough */
     }
@@ -187,7 +184,7 @@ export function deserializeIpcError(e: unknown): AppError | null {
     const end = payload.lastIndexOf('}')
     if (start >= 0 && end > start) {
       try {
-        return JSON.parse(payload.slice(start, end + 1)) as AppError
+        return validateAppError(JSON.parse(payload.slice(start, end + 1)))
       } catch {
         return null
       }
@@ -195,9 +192,30 @@ export function deserializeIpcError(e: unknown): AppError | null {
     return null
   }
   if (e && typeof e === 'object' && 'code' in e && 'message' in e && 'recoverable' in e) {
-    return e as AppError
+    return validateAppError(e)
   }
   return null
+}
+
+const ERROR_CODES = new Set<string>(Object.keys(ERROR_CATALOG))
+
+/**
+ * 反序列化结果结构校验（review M9）：畸形/伪造 payload 不可信，拒绝后走 UNKNOWN 兜底。
+ */
+function validateAppError(value: unknown): AppError | null {
+  if (value === null || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  if (typeof v.code !== 'string' || !ERROR_CODES.has(v.code)) return null
+  if (typeof v.message !== 'string' || v.message === '') return null
+  if (typeof v.recoverable !== 'boolean') return null
+  return {
+    code: v.code as ErrorCode,
+    message: v.message,
+    detail: typeof v.detail === 'string' ? v.detail : undefined,
+    rawCommand: typeof v.rawCommand === 'string' ? v.rawCommand : undefined,
+    recoverable: v.recoverable,
+    suggestion: typeof v.suggestion === 'string' ? v.suggestion : undefined,
+  }
 }
 
 /** 任意 catch 结果 → 用户可读 AppError */
@@ -208,6 +226,36 @@ export function toAppError(e: unknown): AppError {
       detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
     }).toJSON()
   )
+}
+
+/**
+ * 统一的用户可读错误提取（review C1）。
+ * 消费端禁止 `e instanceof Error ? e.message : '...'`——AppError 是纯对象，
+ * instanceof 恒 false 会把真实原因吞掉。一律用本函数。
+ */
+export function describeError(
+  e: unknown,
+  fallback = '操作失败',
+): { message: string; suggestion?: string } {
+  if (isAppError(e)) {
+    return {
+      message: e.message || fallback,
+      suggestion: e.suggestion,
+    }
+  }
+  if (e instanceof Error && e.message) {
+    return { message: e.message }
+  }
+  if (typeof e === 'string' && e) {
+    return { message: e }
+  }
+  return { message: fallback }
+}
+
+/** 展示用单行文案：message + suggestion */
+export function formatErrorLine(e: unknown, fallback = '操作失败'): string {
+  const { message, suggestion } = describeError(e, fallback)
+  return suggestion ? `${message} — ${suggestion}` : message
 }
 
 /**

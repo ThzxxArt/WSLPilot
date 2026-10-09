@@ -16,8 +16,10 @@ import { useDistrosStore } from '../stores/distros'
 import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
+import { errorLine } from '../composables/useAppError'
 import { DistroCard, StatusDot } from '@ui/components'
 import { stateLabel } from '../composables/state-label'
+import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,6 +31,8 @@ const settings = useSettingsStore()
 const viewMode = ref<'card' | 'table'>('card')
 const search = ref('')
 const tagFilter = ref<string | null>(null)
+const detailOpen = ref(false)
+const detailName = ref('')
 
 onMounted(() => {
   void distros.refresh()
@@ -80,7 +84,7 @@ async function act(fn: () => Promise<void>, ok: string) {
     await distros.refresh()
     await metrics.sample()
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '操作失败')
+    message.error(errorLine(e))
   }
 }
 
@@ -97,7 +101,18 @@ function onOpenTerminal(name: string) {
   void router.push({ path: '/terminal', query: { distro: name } })
 }
 function onMore(name: string) {
-  search.value = name
+  detailName.value = name
+  detailOpen.value = true
+}
+
+function clearFilters() {
+  search.value = ''
+  tagFilter.value = null
+}
+
+function onDetailTerminal(name: string) {
+  detailOpen.value = false
+  void router.push({ path: '/terminal', query: { distro: name } })
 }
 </script>
 
@@ -106,9 +121,7 @@ function onMore(name: string) {
     <header class="page-header">
       <div>
         <h1>发行版</h1>
-        <p class="sub">
-          来自 <code>wsl --list --verbose</code> · 实时状态 · 点击卡片可启停
-        </p>
+        <p class="sub">来自 <code>wsl --list --verbose</code> · 实时状态 · 点击卡片可启停</p>
       </div>
       <div class="toolbar">
         <n-input
@@ -125,27 +138,14 @@ function onMore(name: string) {
           class="tag-select"
         />
         <n-radio-group v-model:value="viewMode">
-          <n-radio-button value="card">
-            卡片
-          </n-radio-button>
-          <n-radio-button value="table">
-            表格
-          </n-radio-button>
+          <n-radio-button value="card"> 卡片 </n-radio-button>
+          <n-radio-button value="table"> 表格 </n-radio-button>
         </n-radio-group>
-        <n-button
-          secondary
-          :loading="distros.loading"
-          @click="distros.refresh()"
-        >
-          刷新
-        </n-button>
+        <n-button secondary :loading="distros.loading" @click="distros.refresh()"> 刷新 </n-button>
       </div>
     </header>
 
-    <p
-      v-if="distros.lastError"
-      class="error-banner"
-    >
+    <p v-if="distros.lastError" class="error-banner">
       {{ distros.lastError.message }}
       <span v-if="distros.lastError.suggestion"> — {{ distros.lastError.suggestion }}</span>
     </p>
@@ -156,30 +156,15 @@ function onMore(name: string) {
         :description="search || tagFilter ? '没有匹配的发行版' : '尚未检测到发行版'"
       >
         <template #extra>
-          <n-button
-            v-if="search || tagFilter"
-            size="small"
-            secondary
-            @click="search = ''; tagFilter = null"
-          >
+          <n-button v-if="search || tagFilter" size="small" secondary @click="clearFilters">
             清除筛选
           </n-button>
-          <n-button
-            v-else
-            size="small"
-            secondary
-            @click="distros.refresh()"
-          >
-            重新扫描
-          </n-button>
+          <n-button v-else size="small" secondary @click="distros.refresh()"> 重新扫描 </n-button>
         </template>
       </n-empty>
 
       <!-- 卡片网格 -->
-      <div
-        v-else-if="viewMode === 'card'"
-        class="grid"
-      >
+      <div v-else-if="viewMode === 'card'" class="grid">
         <DistroCard
           v-for="d in filtered"
           :key="d.name"
@@ -194,10 +179,7 @@ function onMore(name: string) {
       </div>
 
       <!-- 紧凑表格 -->
-      <table
-        v-else
-        class="table"
-      >
+      <table v-else class="table">
         <thead>
           <tr>
             <th>状态</th>
@@ -209,28 +191,17 @@ function onMore(name: string) {
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="d in filtered"
-            :key="d.name"
-          >
+          <tr v-for="d in filtered" :key="d.name">
             <td>
               <span class="status-cell">
-                <StatusDot
-                  :state="d.state"
-                  :size="8"
-                />
+                <StatusDot :state="d.state" :size="8" />
                 {{ stateLabelFn(d.state) }}
               </span>
             </td>
             <td>
               <span class="name-cell">
                 {{ d.name }}
-                <n-tag
-                  v-if="d.isDefault"
-                  size="tiny"
-                  :bordered="false"
-                  type="info"
-                >默认</n-tag>
+                <n-tag v-if="d.isDefault" size="tiny" :bordered="false" type="info">默认</n-tag>
               </span>
             </td>
             <td>{{ d.meta?.alias || '—' }}</td>
@@ -244,10 +215,7 @@ function onMore(name: string) {
               >
                 {{ t }}
               </n-tag>
-              <span
-                v-if="!(d.meta?.tags ?? []).length"
-                class="muted"
-              >—</span>
+              <span v-if="!(d.meta?.tags ?? []).length" class="muted">—</span>
             </td>
             <td>
               <div class="row-actions">
@@ -284,6 +252,12 @@ function onMore(name: string) {
         </tbody>
       </table>
     </n-spin>
+
+    <DistroDetailModal
+      v-model:show="detailOpen"
+      :distro-name="detailName"
+      @open-terminal="onDetailTerminal"
+    />
   </div>
 </template>
 

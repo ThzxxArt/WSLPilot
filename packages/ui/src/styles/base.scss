@@ -28,8 +28,18 @@ html {
 
 body {
   overflow: hidden;
-  user-select: none;
+
+  /* 默认允许选择：日志/错误/路径必须可复制（review M9）。
+     交互外壳（标题栏/侧栏/按钮区）单独禁用。 */
   cursor: default;
+}
+
+input,
+textarea {
+  cursor: text;
+  user-select: text;
+  font: inherit;
+  color: inherit;
 }
 
 img,
@@ -43,12 +53,7 @@ button {
   border: none;
   background: none;
   cursor: pointer;
-  color: inherit;
-}
-
-input,
-textarea {
-  font: inherit;
+  user-select: none;
   color: inherit;
 }
 

@@ -30,17 +30,9 @@ function toggle() {
 </script>
 
 <template>
-  <aside
-    class="sidebar"
-    :class="{ collapsed }"
-  >
+  <aside class="sidebar" :class="{ collapsed }">
     <nav class="nav">
-      <n-tooltip
-        v-for="item in navItems"
-        :key="item.name"
-        placement="right"
-        :disabled="!collapsed"
-      >
+      <n-tooltip v-for="item in navItems" :key="item.name" placement="right" :disabled="!collapsed">
         <template #trigger>
           <button
             class="nav-item"
@@ -49,25 +41,15 @@ function toggle() {
             @click="go(item.name)"
           >
             <span class="nav-icon">{{ item.icon }}</span>
-            <span
-              v-if="!collapsed"
-              class="nav-title"
-            >{{ item.title }}</span>
+            <span v-if="!collapsed" class="nav-title">{{ item.title }}</span>
           </button>
         </template>
         {{ item.title }}
       </n-tooltip>
     </nav>
 
-    <button
-      class="collapse-btn"
-      :aria-label="collapsed ? '展开侧栏' : '折叠侧栏'"
-      @click="toggle"
-    >
-      <span
-        class="chevron"
-        :class="{ flipped: collapsed }"
-      >‹</span>
+    <button class="collapse-btn" :aria-label="collapsed ? '展开侧栏' : '折叠侧栏'" @click="toggle">
+      <span class="chevron" :class="{ flipped: collapsed }">‹</span>
     </button>
   </aside>
 </template>
@@ -80,6 +62,7 @@ function toggle() {
   padding: 12px 10px;
   background: var(--color-bg-surface);
   border-right: 1px solid var(--color-border-subtle);
+  user-select: none;
   transition: width var(--dur-base) var(--ease-standard);
 }
 

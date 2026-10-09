@@ -62,5 +62,26 @@ describe('paths', () => {
     it('leaves unknown vars intact', () => {
       expect(expandEnv('%NOPE_NOT_SET%/x')).toBe('%NOPE_NOT_SET%/x')
     })
+
+    it('大小写不敏感（Windows 环境变量语义）', () => {
+      process.env.WSLPILOT_TEST_VAR = 'yes'
+      expect(expandEnv('%wslpilot_test_var%/x')).toBe('yes/x')
+      expect(expandEnv('%WSLPilot_Test_Var%/x')).toBe('yes/x')
+      delete process.env.WSLPILOT_TEST_VAR
+    })
+  })
+
+  describe('safeResolve 拒绝绝对路径输入（review m5）', () => {
+    it('rejects absolute / drive / UNC inputs', () => {
+      expect(() => safeResolve('/base', '/etc/passwd')).toThrow(/绝对路径/)
+      expect(() => safeResolve('/base', 'C:\\evil\\x')).toThrow(/绝对路径/)
+      expect(() => safeResolve('/base', '//server/share')).toThrow(/绝对路径/)
+      expect(() => safeResolve('/base', '\\\\server\\share')).toThrow(/绝对路径/)
+    })
+
+    it('still resolves relative paths and blocks traversal', () => {
+      expect(safeResolve('/base', 'a/b')).toBe(join('/base', 'a', 'b'))
+      expect(() => safeResolve('/base', '../x')).toThrow(/逃逸/)
+    })
   })
 })

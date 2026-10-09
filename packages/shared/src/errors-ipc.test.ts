@@ -5,6 +5,8 @@ import {
   toAppError,
   createAppError,
   isAppError,
+  describeError,
+  formatErrorLine,
 } from '../src/errors'
 
 describe('IPC 错误序列化协议', () => {
@@ -88,5 +90,35 @@ describe('IPC 错误序列化协议', () => {
     expect(isAppError(createAppError('IO_ERROR').toJSON())).toBe(true)
     expect(isAppError(null)).toBe(false)
     expect(isAppError({ code: 'X' })).toBe(false)
+  })
+
+  it('deserialize 校验结构：未知错误码/缺字段的伪造 payload 拒绝（review M9）', () => {
+    expect(
+      deserializeIpcError('WSLPILOT:{"code":"HACK","message":"x","recoverable":true}'),
+    ).toBeNull()
+    expect(
+      deserializeIpcError('WSLPILOT:{"code":"IO_ERROR","message":"","recoverable":true}'),
+    ).toBeNull()
+    expect(
+      deserializeIpcError('WSLPILOT:{"code":"IO_ERROR","message":"x","recoverable":"yes"}'),
+    ).toBeNull()
+    expect(deserializeIpcError('WSLPILOT:{"code":"IO_ERROR","message":"x"}')).toBeNull()
+    const ok = deserializeIpcError('WSLPILOT:{"code":"IO_ERROR","message":"x","recoverable":true}')
+    expect(ok?.code).toBe('IO_ERROR')
+    expect(deserializeIpcError('WSLPILOT:[1,2,3]')).toBeNull()
+  })
+
+  it('describeError 提取 message/suggestion（review C1 根治）', () => {
+    const appErr = createAppError('DISTRO_RUNNING').toJSON()
+    expect(describeError(appErr)).toEqual({
+      message: appErr.message,
+      suggestion: appErr.suggestion,
+    })
+    expect(describeError(new Error('boom')).message).toBe('boom')
+    expect(describeError('text').message).toBe('text')
+    expect(describeError(null, '兜底').message).toBe('兜底')
+    expect(formatErrorLine(appErr)).toContain('—')
+    expect(formatErrorLine(new Error('x'))).toBe('x')
+    expect(formatErrorLine(undefined, 'f')).toBe('f')
   })
 })

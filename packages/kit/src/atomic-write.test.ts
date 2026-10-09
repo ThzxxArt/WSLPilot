@@ -43,4 +43,22 @@ describe('atomicWrite', () => {
     await atomicWrite(file, '{"中文":"注释"}')
     expect(await fs.readFile(file, 'utf8')).toBe('{"中文":"注释"}')
   })
+
+  it('失败路径不留 tmp 并向上抛（review M7 回归）', async () => {
+    const file = join(dir, 'sub', 'x.jsonc')
+    // 目标是目录 → rename 必败
+    await fs.mkdir(file, { recursive: true })
+    await expect(atomicWrite(file, 'v')).rejects.toThrow()
+    const entries = await fs.readdir(join(dir, 'sub'))
+    expect(entries.filter((e) => e.includes('.tmp'))).toHaveLength(0)
+    // 目标内容未被破坏（仍是目录）
+    expect((await fs.stat(file)).isDirectory()).toBe(true)
+  })
+
+  it('rename EPERM 时重试一次后成功', async () => {
+    const file = join(dir, 'retry.jsonc')
+    await atomicWrite(file, 'first')
+    await atomicWrite(file, 'second')
+    expect(await fs.readFile(file, 'utf8')).toBe('second')
+  })
 })

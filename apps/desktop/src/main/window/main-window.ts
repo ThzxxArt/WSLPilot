@@ -68,9 +68,18 @@ export async function createMainWindow(
 
   // 持久化窗口状态（防抖：移动/缩放时每 500ms 落盘一次）
   let saveTimer: NodeJS.Timeout | null = null
+  const clearSaveTimer = () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+  }
   const persistState = () => {
-    if (saveTimer) clearTimeout(saveTimer)
+    clearSaveTimer()
     saveTimer = setTimeout(() => {
+      saveTimer = null
+      // 窗口可能在防抖期间销毁（review M2）
+      if (win.isDestroyed()) return
       const isMax = win.isMaximized()
       const bounds = isMax ? win.getNormalBounds() : win.getBounds()
       void configService
@@ -90,6 +99,7 @@ export async function createMainWindow(
   win.on('move', persistState)
   win.on('maximize', persistState)
   win.on('unmaximize', persistState)
+  win.on('closed', clearSaveTimer)
 
   // 外部链接：仅允许 http/https，且用系统浏览器打开
   win.webContents.setWindowOpenHandler(({ url }) => {

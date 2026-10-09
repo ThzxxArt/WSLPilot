@@ -1,4 +1,10 @@
-import { parse as parseJsonc, modify, applyEdits, type ParseError, printParseErrorCode } from 'jsonc-parser'
+import {
+  parse as parseJsonc,
+  modify,
+  applyEdits,
+  type ParseError,
+  printParseErrorCode,
+} from 'jsonc-parser'
 import { createAppError } from '@wslpilot/shared'
 
 export interface JsoncParseResult<T = unknown> {
@@ -46,14 +52,20 @@ export interface LeafPatch {
   value: unknown
 }
 
-/** 把嵌套 patch 打平成叶子路径列表（数组整体作为一个叶子） */
+/** 把嵌套 patch 打平成叶子路径列表（数组/空对象整体作为一个叶子） */
 export function collectLeafPaths(obj: unknown, prefix: (string | number)[] = []): LeafPatch[] {
   if (obj === undefined) return []
   if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
     return [{ path: prefix, value: obj }]
   }
+  const entries = Object.entries(obj as Record<string, unknown>)
+  // 空对象：嵌套层作为叶子写入（把字段清成 {}）；
+  // 根层（prefix 空）是 no-op——`patch({})` 不得清空整文件（review M6 修正）
+  if (entries.length === 0) {
+    return prefix.length === 0 ? [] : [{ path: prefix, value: obj }]
+  }
   const results: LeafPatch[] = []
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+  for (const [k, v] of entries) {
     if (v === undefined) continue
     results.push(...collectLeafPaths(v, [...prefix, k]))
   }
@@ -81,7 +93,8 @@ export function stringifyJsonc(value: unknown, header?: string): string {
 
 export function parseOrThrow<T = unknown>(text: string, fileName: string): T {
   const result = parseJsoncSafe<T>(text)
-  if (!result.data || result.errors.length > 0) {
+  // 根值合法 falsy（0/null/false）不算失败（review m1）
+  if (result.data === undefined || result.errors.length > 0) {
     throw createAppError('CONFIG_INVALID', {
       message: `配置文件 ${fileName} 解析失败`,
       detail: result.errorMessage,

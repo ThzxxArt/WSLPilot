@@ -5,9 +5,7 @@
 <template>
   <div class="page">
     <h1>网络</h1>
-    <p class="sub">
-      M6 将在此提供端口转发规则与代理配置。
-    </p>
+    <p class="sub">M6 将在此提供端口转发规则与代理配置。</p>
   </div>
 </template>
 

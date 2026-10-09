@@ -22,10 +22,7 @@ type AddFn = (
  * 进度经 `task:progress` 事件推送，`task:cancel` 可取消。
  * 同一发行版的写类任务由 TaskRunner lockKey 串行化。
  */
-export function registerIoHandlers(
-  add: AddFn,
-  deps: { io: IoService; tasks: TaskRunner },
-): void {
+export function registerIoHandlers(add: AddFn, deps: { io: IoService; tasks: TaskRunner }): void {
   const { io, tasks } = deps
 
   add(CH.ioExport, (_c, arg: never): TaskHandle => {
@@ -34,7 +31,8 @@ export function registerIoHandlers(
       type: 'export',
       distro: o.name,
       message: `导出 ${o.name}`,
-      lockKey: o.name,
+      // 发行版名不区分大小写，锁键必须归一（review M11）
+      lockKey: o.name.toLowerCase(),
       run: (ctl) => io.runExport(o, ctl).then(() => undefined),
     })
   })
@@ -45,7 +43,7 @@ export function registerIoHandlers(
       type: 'import',
       distro: o.name,
       message: `导入 ${o.name}`,
-      lockKey: o.name,
+      lockKey: o.name.toLowerCase(),
       run: (ctl) => io.runImport(o, ctl),
     })
   })
@@ -56,7 +54,7 @@ export function registerIoHandlers(
       type: 'move',
       distro: o.name,
       message: `迁移 ${o.name}`,
-      lockKey: o.name,
+      lockKey: o.name.toLowerCase(),
       run: (ctl) => io.runMove(o, ctl),
     })
   })
@@ -64,6 +62,11 @@ export function registerIoHandlers(
   add(CH.ioListBackups, async (_c, arg: never): Promise<BackupFileInfo[]> => {
     const o = (arg ?? {}) as { dir?: string }
     return io.listBackups(o.dir)
+  })
+
+  add(CH.ioCleanupBackups, async (_c, arg: never): Promise<{ removed: number }> => {
+    const o = (arg ?? {}) as { dir?: string; keep?: number }
+    return io.cleanupBackups(o.dir, typeof o.keep === 'number' ? o.keep : 5)
   })
 
   add(CH.taskCancel, (_c, taskId: never): boolean => {

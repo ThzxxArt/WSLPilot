@@ -5,6 +5,9 @@ import type { Logger } from '@wslpilot/kit'
 
 const req = createRequire(__filename)
 
+// eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+const SHELL_CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
 export interface PtyCreateOptions {
   distro: string
   shell?: string
@@ -49,6 +52,11 @@ export interface PtyEvents {
   onExit: (ptyId: string, code: number) => void
 }
 
+export interface PtyManagerOptions {
+  /** 默认 shell（settings.wsl.defaultShell）；空则回退 /bin/bash */
+  defaultShell?: string | (() => string)
+}
+
 export interface PtyManager {
   create(opts: PtyCreateOptions): PtySessionInfo
   input(ptyId: string, data: string): void
@@ -60,7 +68,10 @@ export interface PtyManager {
   count(): number
 }
 
-function getOrThrow(sessions: Map<string, { proc: PtyProcessLike; info: PtySessionInfo }>, id: string) {
+function getOrThrow(
+  sessions: Map<string, { proc: PtyProcessLike; info: PtySessionInfo }>,
+  id: string,
+) {
   const s = sessions.get(id)
   if (!s) {
     throw createAppError('TASK_FAILED', { message: `终端会话不存在或已关闭：${id}` })
@@ -79,19 +90,24 @@ export function createPtyManager(
   logger: Logger,
   events: PtyEvents,
   spawnFn?: PtySpawnFn,
+  options?: PtyManagerOptions,
 ): PtyManager {
   const sessions = new Map<string, { proc: PtyProcessLike; info: PtySessionInfo }>()
 
   // 默认 spawn：createRequire 加载 node-pty（asarUnpack 后路径稳定）
   const spawn: PtySpawnFn =
     spawnFn ??
-    ((file, args, options) => {
+    ((file, args, spawnOptions) => {
       const pty = req('node-pty') as typeof import('node-pty')
-      return pty.spawn(file, args, options as never) as unknown as PtyProcessLike
+      return pty.spawn(file, args, spawnOptions as never) as unknown as PtyProcessLike
     })
 
   function defaultShell(): string {
-    return '/bin/bash'
+    // 尊重 settings.wsl.defaultShell（设计书 §6.3 — review M21）
+    const configured =
+      typeof options?.defaultShell === 'function' ? options.defaultShell() : options?.defaultShell
+    const s = configured?.trim()
+    return s || '/bin/bash'
   }
 
   return {
@@ -103,8 +119,13 @@ export function createPtyManager(
       }
       const distro = assertSafeDistroName(opts.distro)
       const shell = opts.shell?.trim() || defaultShell()
-      // shell 走 -e 分界，仅作为程序路径；拒绝空
-      if (!shell || shell.includes('..')) {
+      // shell 走 -e 分界，仅作为程序路径；拒绝逃逸/控制字符/伪参数（review M22）
+      if (
+        !shell ||
+        shell.includes('..') ||
+        shell.startsWith('-') ||
+        SHELL_CONTROL_CHARS.test(shell)
+      ) {
         throw createAppError('TASK_FAILED', { message: `非法的 shell：${shell}` })
       }
 

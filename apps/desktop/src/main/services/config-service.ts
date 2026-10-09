@@ -30,7 +30,7 @@ export type ConfigConflictAction = 'reload' | 'overwrite' | 'ignore'
 
 export interface ConfigService {
   load<K extends ConfigKey>(key: K): Promise<ConfigMap[K]>
-  /** 同步读缓存（close 等事件必须同步决策） */
+  /** 同步读缓存（close 等事件必须同步决策）。返回值已冻结，禁止原地修改 */
   loadSync<K extends ConfigKey>(key: K): ConfigMap[K]
   patch<K extends ConfigKey>(key: K, patch: DeepPartial<ConfigMap[K]>): Promise<ConfigMap[K]>
   replace<K extends ConfigKey>(key: K, value: ConfigMap[K]): Promise<void>
@@ -43,6 +43,8 @@ export interface ConfigService {
   onChange(key: ConfigKey, cb: () => void): () => void
   resolveConflict(key: ConfigKey, action: ConfigConflictAction): Promise<ConfigMap[ConfigKey]>
   getConflict(key: ConfigKey): { fileKey: ConfigKey; detail: string } | null
+  /** 等待全部写入落盘（退出前调用） */
+  flush(): Promise<void>
   readonly userDataDir: string
   dispose(): void
 }
@@ -84,7 +86,10 @@ function hashText(s: string): string {
   return createHash('sha256').update(s).digest('hex')
 }
 
-export async function createConfigService(userDataDir: string, logger: Logger): Promise<ConfigService> {
+export async function createConfigService(
+  userDataDir: string,
+  logger: Logger,
+): Promise<ConfigService> {
   const cache = new Map<ConfigKey, ConfigMap[ConfigKey]>()
   const listeners = new Map<ConfigKey, Set<() => void>>()
   const conflicts = new Map<ConfigKey, { fileKey: ConfigKey; detail: string }>()
@@ -158,18 +163,19 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
   }
 
   async function backupFile(key: ConfigKey, suffix?: string): Promise<void> {
+    // state/uiState 是机器高频写入的轻量缓存，不进备份轮转（review M14）
+    if (key === 'state' || key === 'uiState') return
     try {
       const src = filePath(key)
       const backupDir = join(userDataDir, 'backups')
       await fs.mkdir(backupDir, { recursive: true })
       const name = CONFIG_FILE_NAMES[key].replace(/\.jsonc$/, '')
-      const stamp = suffix ?? new Date().toISOString().replace(/[:.]/g, '-')
-      const dest = join(backupDir, `${name}.bak.${stamp}.jsonc`)
+      // 时间戳必须打头，字典序才等于时间序（review M15）
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const dest = join(backupDir, `${name}.bak.${stamp}${suffix ? `.${suffix}` : ''}.jsonc`)
       await fs.copyFile(src, dest)
 
-      const files = (await fs.readdir(backupDir))
-        .filter((f) => f.startsWith(`${name}.bak.`))
-        .sort()
+      const files = (await fs.readdir(backupDir)).filter((f) => f.startsWith(`${name}.bak.`)).sort()
       while (files.length > CONFIG_BACKUP_KEEP) {
         const oldest = files.shift()
         if (oldest) await fs.unlink(join(backupDir, oldest)).catch(() => {})
@@ -181,7 +187,15 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
 
   function notify(key: ConfigKey): void {
     const set = listeners.get(key)
-    if (set) for (const cb of set) cb()
+    if (!set) return
+    for (const cb of set) {
+      // 单个监听器抛错不得中断其余监听器或反噬写路径（review M3）
+      try {
+        cb()
+      } catch (e) {
+        logger.warn('config listener failed', { key, error: String(e) })
+      }
+    }
   }
 
   async function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
@@ -190,16 +204,29 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     return next
   }
 
+  /**
+   * 落盘（唯一写入口）。写前验证最终文本可解析——
+   * 绝不把损坏内容写回磁盘（review C4 最后一道墙）。
+   * cache/notify 由调用方统一收尾，避免双广播（review M13）。
+   */
   async function writeContent(key: ConfigKey, content: string): Promise<void> {
+    const check = parseJsoncSafe(content)
+    if (check.errors.length > 0 || check.data === undefined) {
+      throw createAppError('CONFIG_INVALID', {
+        message: `${CONFIG_FILE_NAMES[key]} 写回内容非法，已拒绝写入`,
+        detail: check.errorMessage,
+      })
+    }
     await backupFile(key)
     await atomicWrite(filePath(key), content)
     lastSelfWriteHash.set(key, hashText(content))
-    cache.set(key, await parseAndSanitize(key, content))
     conflicts.delete(key)
-    notify(key)
   }
 
-  async function parseAndSanitize<K extends ConfigKey>(key: K, text: string): Promise<ConfigMap[K]> {
+  async function parseAndSanitize<K extends ConfigKey>(
+    key: K,
+    text: string,
+  ): Promise<ConfigMap[K]> {
     const parsed = parseJsoncSafe(text)
     const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
     const defaults = defaultConfig(key as any) as Record<string, unknown>
@@ -275,25 +302,31 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
     userDataDir,
 
     async load<K extends ConfigKey>(key: K): Promise<ConfigMap[K]> {
-      return cache.get(key) as ConfigMap[K]
+      return Object.freeze(cache.get(key)) as ConfigMap[K]
     },
 
     loadSync<K extends ConfigKey>(key: K): ConfigMap[K] {
-      return cache.get(key) as ConfigMap[K]
+      return Object.freeze(cache.get(key)) as ConfigMap[K]
     },
 
     /**
      * 合并写回。对原文做最小叶子编辑（modifyJsonc），保留用户注释。
      * 磁盘上非法字段先 sanitize，与读路径一致，避免 ZodError 锁死写回。
      */
-    async patch<K extends ConfigKey>(key: K, patch: DeepPartial<ConfigMap[K]>): Promise<ConfigMap[K]> {
+    async patch<K extends ConfigKey>(
+      key: K,
+      patch: DeepPartial<ConfigMap[K]>,
+    ): Promise<ConfigMap[K]> {
       return enqueueWrite(async () => {
         const originalText = await readRaw(key)
         const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
 
         // 读磁盘 → 清洗非法字段 → 再合并 patch（I3）
         const onDisk = await parseAndSanitize(key, originalText)
-        const merged = deepMerge(onDisk as Record<string, unknown>, patch as Record<string, unknown>)
+        const merged = deepMerge(
+          onDisk as Record<string, unknown>,
+          patch as Record<string, unknown>,
+        )
 
         const validated = schema.safeParse(merged)
         if (!validated.success) {
@@ -309,9 +342,12 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         // 注释保留：只对 patch 叶子做 modify
         const cleanPatch = deepMerge({}, patch as Record<string, unknown>)
         const nextText = applyPatchJsonc(originalText, cleanPatch as Record<string, unknown>)
-        const writeText = nextText.trim()
-          ? nextText
-          : stringifyJsonc(validated.data)
+        // 打补丁后文本必须可解析；原文损坏时整文件序列化保住数据（review C4）
+        const probe = parseJsoncSafe(nextText)
+        const writeText =
+          nextText.trim() && probe.errors.length === 0 && probe.data !== undefined
+            ? nextText
+            : stringifyJsonc(validated.data)
         await writeContent(key, writeText)
         // cache 用 validated
         cache.set(key, validated.data as ConfigMap[K])
@@ -328,7 +364,10 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         if (!validated.success) {
           throw createAppError('CONFIG_INVALID', {
             message: `${CONFIG_FILE_NAMES[key]} 校验失败`,
-            detail: validated.error.issues.slice(0, 5).map((i) => i.message).join('; '),
+            detail: validated.error.issues
+              .slice(0, 5)
+              .map((i) => i.message)
+              .join('; '),
           })
         }
         await writeContent(key, stringifyJsonc(validated.data))
@@ -337,6 +376,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
       })
     },
 
+    /**
+     * 读-改-写。写回时对用户可编辑文件做最小叶子编辑保留注释
+     * （设计书 §9.3：绝不静默丢弃用户注释 — review M7）；
+     * state/uiState 是机器缓存，整文件序列化。
+     */
     async update(key, fn) {
       return enqueueWrite(async () => {
         const current = cache.get(key) as ConfigMap[typeof key]
@@ -346,10 +390,25 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         if (!validated.success) {
           throw createAppError('CONFIG_INVALID', {
             message: `${CONFIG_FILE_NAMES[key]} 校验失败`,
-            detail: validated.error.issues.slice(0, 5).map((i) => i.message).join('; '),
+            detail: validated.error.issues
+              .slice(0, 5)
+              .map((i) => i.message)
+              .join('; '),
           })
         }
-        await writeContent(key, stringifyJsonc(validated.data))
+        const isMachineFile = key === 'state' || key === 'uiState'
+        let writeText: string
+        if (isMachineFile) {
+          writeText = stringifyJsonc(validated.data)
+        } else {
+          const originalText = await readRaw(key)
+          const probe = parseJsoncSafe(originalText)
+          writeText =
+            probe.errors.length === 0 && probe.data !== undefined
+              ? applyPatchJsonc(originalText, validated.data as unknown as Record<string, unknown>)
+              : stringifyJsonc(validated.data)
+        }
+        await writeContent(key, writeText)
         cache.set(key, validated.data as ConfigMap[typeof key])
         notify(key)
         return validated.data as ConfigMap[typeof key]
@@ -382,6 +441,7 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         if (action === 'overwrite') {
           const current = cache.get(key) as ConfigMap[ConfigKey]
           await writeContent(key, stringifyJsonc(current))
+          notify(key)
           return current
         }
 
@@ -394,6 +454,11 @@ export async function createConfigService(userDataDir: string, logger: Logger): 
         logger.info('config conflict resolved', { key, action })
         return sanitized
       })
+    },
+
+    /** 等待写队列清空（退出前调用，防丢最后一次写 — review M25） */
+    async flush(): Promise<void> {
+      await writeQueue.catch(() => {})
     },
 
     dispose() {

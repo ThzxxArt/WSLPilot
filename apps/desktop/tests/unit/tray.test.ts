@@ -81,7 +81,13 @@ describe('tray', () => {
   })
 
   it('creates tray with tooltip and context menu', () => {
-    const win = { webContents: { send: vi.fn() }, isMinimized: () => false, isDestroyed: () => false, show: vi.fn(), focus: vi.fn() }
+    const win = {
+      webContents: { send: vi.fn() },
+      isMinimized: () => false,
+      isDestroyed: () => false,
+      show: vi.fn(),
+      focus: vi.fn(),
+    }
     const tray = createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
@@ -108,7 +114,14 @@ describe('tray', () => {
   })
 
   it('double-click shows window', () => {
-    const win = { isMinimized: () => true, isDestroyed: () => false, restore: vi.fn(), show: vi.fn(), focus: vi.fn(), webContents: { send: vi.fn() } }
+    const win = {
+      isMinimized: () => true,
+      isDestroyed: () => false,
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { send: vi.fn() },
+    }
     const tray = createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
@@ -121,7 +134,13 @@ describe('tray', () => {
   })
 
   it('menu navigate sends CH.appNavigate and shows window', () => {
-    const win = { isMinimized: () => false, isDestroyed: () => false, show: vi.fn(), focus: vi.fn(), webContents: { send: vi.fn() } }
+    const win = {
+      isMinimized: () => false,
+      isDestroyed: () => false,
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { send: vi.fn() },
+    }
     createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),

@@ -24,6 +24,7 @@ vi.mock('electron', () => {
     maximize = vi.fn()
     isMaximized = vi.fn(() => false)
     isMinimized = vi.fn(() => false)
+    isDestroyed = vi.fn(() => false)
     getBounds = vi.fn(() => ({ x: 10, y: 20, width: 900, height: 600 }))
     getNormalBounds = vi.fn(() => ({ x: 10, y: 20, width: 900, height: 600 }))
     show = vi.fn()
@@ -107,7 +108,10 @@ describe('main-window', () => {
   })
 
   it('falls back to defaults when saved bounds are off-screen', async () => {
-    await createMainWindow('/p.js', makeConfigService({ x: -99999, y: -99999, width: 500, height: 400 }))
+    await createMainWindow(
+      '/p.js',
+      makeConfigService({ x: -99999, y: -99999, width: 500, height: 400 }),
+    )
     const win = createdWindows[0]
     expect(win.opts.width).toBe(1180)
     expect(win.opts.height).toBe(760)

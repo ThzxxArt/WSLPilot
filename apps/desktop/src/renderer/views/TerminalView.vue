@@ -5,13 +5,11 @@ import { useRoute } from 'vue-router'
 import { useTerminalStore } from '../stores/terminal'
 import { useDistrosStore } from '../stores/distros'
 import { useSettingsStore } from '../stores/settings'
+import { errorLine } from '../composables/useAppError'
 import TerminalTabs from '../features/terminal/TerminalTabs.vue'
 import TerminalToolbar from '../features/terminal/TerminalToolbar.vue'
 import XtermPane from '../features/terminal/XtermPane.vue'
-import {
-  DEFAULT_TERMINAL_PREFS,
-  type TerminalFontPrefs,
-} from '../features/terminal/theme'
+import { DEFAULT_TERMINAL_PREFS, type TerminalFontPrefs } from '../features/terminal/theme'
 
 const route = useRoute()
 const terminal = useTerminalStore()
@@ -72,7 +70,11 @@ function tickElapsed() {
 
 onMounted(async () => {
   await Promise.all([distros.refresh(), terminal.loadLimits()])
-  if (terminal.sessions.length === 0 && defaultDistro.value) {
+  // query 意图优先（review M1）：已有该发行版会话则激活，否则新建
+  const wanted = route.query.distro
+  if (typeof wanted === 'string' && wanted) {
+    await openOrActivate(wanted)
+  } else if (terminal.sessions.length === 0 && defaultDistro.value) {
     await create(defaultDistro.value)
   } else if (terminal.activeId === '' && terminal.sessions.length > 0) {
     terminal.setActive(terminal.sessions[0]!.ptyId)
@@ -84,11 +86,21 @@ onUnmounted(() => {
   if (timer) window.clearInterval(timer)
 })
 
+/** 已有会话则激活，避免重复开标签（review M1） */
+async function openOrActivate(distro: string) {
+  const existing = terminal.sessions.find((s) => s.distro === distro && s.alive)
+  if (existing) {
+    terminal.setActive(existing.ptyId)
+    return
+  }
+  await create(distro)
+}
+
 watch(
   () => route.query.distro,
   async (d: unknown) => {
     if (typeof d === 'string' && d) {
-      await create(d)
+      await openOrActivate(d)
     }
   },
 )
@@ -114,7 +126,7 @@ async function close(id: string) {
     await terminal.kill(id)
     message.success('终端已关闭')
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '关闭终端失败')
+    message.error(errorLine(e, '关闭终端失败'))
   }
 }
 
@@ -145,7 +157,7 @@ function onCopy() {
 function onExport() {
   const s = terminal.active
   if (!s) return
-  const blob = new Blob([s.buffer], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([terminal.getBuffer(s.ptyId)], { type: 'text/plain;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   const safe = s.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
@@ -183,8 +195,10 @@ function onZoom(delta: number) {
   activePane()?.zoom(delta)
 }
 
-function onCursorMove(pos: { col: number; row: number }) {
-  cursorPos.value = pos
+function onCursorMove(pos: { col: number; row: number; ptyId?: string }) {
+  // 后台 pane 的光标移动不得污染状态栏坐标（review M11）
+  if (pos.ptyId && pos.ptyId !== terminal.activeId) return
+  cursorPos.value = { col: pos.col, row: pos.row }
 }
 
 // PTY 输出/退出订阅在 App.vue 应用级常驻（评审 I1）
@@ -200,9 +214,7 @@ onUnmounted(() => {
         <h1>终端</h1>
         <p class="sub">
           node-pty + xterm.js · 会话 {{ terminal.aliveCount }}/{{ terminal.maxSessions }}
-          <template v-if="terminal.active">
-            · {{ terminal.active.distro }}
-          </template>
+          <template v-if="terminal.active"> · {{ terminal.active.distro }} </template>
         </p>
       </div>
     </header>
@@ -246,23 +258,15 @@ onUnmounted(() => {
           :ref="(el) => setPaneRef(s.ptyId, el)"
           :pty-id="s.ptyId"
           :prefs="prefs"
-          :initial-buffer="s.buffer"
+          :initial-buffer="terminal.getBuffer(s.ptyId)"
           class="pane"
           @cursor-move="onCursorMove"
         />
       </div>
 
-      <n-empty
-        v-if="terminal.sessions.length === 0"
-        description="还没有终端会话"
-        class="empty"
-      >
+      <n-empty v-if="terminal.sessions.length === 0" description="还没有终端会话" class="empty">
         <template #extra>
-          <n-button
-            type="primary"
-            :disabled="!defaultDistro"
-            @click="create(defaultDistro)"
-          >
+          <n-button type="primary" :disabled="!defaultDistro" @click="create(defaultDistro)">
             打开 {{ defaultDistro || '终端' }}
           </n-button>
         </template>
@@ -273,10 +277,7 @@ onUnmounted(() => {
       <span>行 {{ cursorPos.row }} · 列 {{ cursorPos.col }}</span>
       <span>UTF-8</span>
       <span>会话时长 {{ elapsed }}</span>
-      <span
-        v-if="terminal.active && !terminal.active.alive"
-        class="dead"
-      >
+      <span v-if="terminal.active && !terminal.active.alive" class="dead">
         已退出（代码 {{ terminal.active.exitCode }}）
       </span>
     </footer>

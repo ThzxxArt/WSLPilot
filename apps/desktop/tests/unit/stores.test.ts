@@ -204,6 +204,20 @@ describe('useSettingsStore', () => {
       backup: { autoBackupBeforeDestructive: false },
     })
   })
+
+  it('load 失败降级默认值并记录 lastError（review C11 回归）', async () => {
+    wslAPI.config.get.mockRejectedValue(
+      new Error('WSLPILOT:{"code":"CONFIG_INVALID","message":"配置损坏","recoverable":true}'),
+    )
+    wslAPI.app.getVersion.mockRejectedValue(new Error('boom'))
+    const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+    const s = useSettingsStore()
+    await s.load()
+    expect(s.loaded).toBe(true)
+    expect(s.lastError?.code).toBe('CONFIG_INVALID')
+    expect(s.accent).toBe('aurora')
+    expect(s.version).toBe('')
+  })
 })
 
 describe('useMetricsStore', () => {
@@ -239,7 +253,12 @@ describe('useMetricsStore', () => {
 
   it('sampleDistro returns metrics on success', async () => {
     wslAPI.metrics.sample.mockResolvedValue({
-      memUsedKB: 1, memTotalKB: 2, diskUsedKB: 3, diskTotalKB: 4, cpuPercent: 5, sampledAt: 'T',
+      memUsedKB: 1,
+      memTotalKB: 2,
+      diskUsedKB: 3,
+      diskTotalKB: 4,
+      cpuPercent: 5,
+      sampledAt: 'T',
     })
     const s = useMetricsStore()
     const m = await s.sampleDistro('A')
@@ -311,7 +330,17 @@ describe('useDistrosStore edges', () => {
         state: 'Running',
         version: 2,
         isDefault: false,
-        meta: { name: 'A', alias: '', tags: [], color: '', icon: '', note: '', startupCwd: '~', pinned: true, quickActions: [] },
+        meta: {
+          name: 'A',
+          alias: '',
+          tags: [],
+          color: '',
+          icon: '',
+          note: '',
+          startupCwd: '~',
+          pinned: true,
+          quickActions: [],
+        },
       },
     ])
     const s = useDistrosStore()

@@ -18,8 +18,9 @@ import { expandEnv, getRawCommand, runWsl, spawnWsl, type Logger } from '@wslpil
 import type { WslService } from './wsl-service'
 import type { RegistryService } from './registry-service'
 import type { TaskControl } from './task-runner'
+import { spawnWslTask, type SpawnWslFn } from './spawn-task'
 
-export type SpawnWslFn = typeof spawnWsl
+export type { SpawnWslFn }
 
 export interface IoSettingsReader {
   loadSync(key: 'settings'): {
@@ -47,6 +48,8 @@ export interface IoService {
   runImport(req: IoImportRequest, ctl: TaskControl): Promise<void>
   runMove(req: IoMoveRequest, ctl: TaskControl): Promise<void>
   listBackups(dir?: string): Promise<BackupFileInfo[]>
+  /** 按保留份数清理全部旧备份（清理按钮 — 零半成品） */
+  cleanupBackups(dir: string | undefined, keep: number): Promise<{ removed: number }>
   /** 解析备份默认目录（展开 %USERPROFILE% 等） */
   resolveBackupDir(): string
   /** 备份文件轮转：按命名规范保留最近 keep 份 */
@@ -55,13 +58,20 @@ export interface IoService {
 
 // ─────────────────────── 纯函数助手（可单测） ───────────────────────
 
-/** 规范化目标文件路径：展开环境变量 → 绝对路径 → 缺扩展名时补齐 */
+/** 规范化目标文件路径：展开环境变量 → 绝对路径 → 纠正/补齐扩展名（review M12） */
 export function resolveTargetFile(input: string, format: BackupFormat): string {
   const expanded = expandEnv(String(input ?? '').trim())
   let p = resolve(expanded)
+  const want = format === 'vhd' ? '.vhdx' : '.tar'
   const lower = p.toLowerCase()
+  if (format === 'vhd' && lower.endsWith('.tar')) {
+    return `${p.slice(0, -4)}${want}`
+  }
+  if (format === 'tar' && (lower.endsWith('.vhdx') || lower.endsWith('.vhd'))) {
+    return p.replace(/\.(vhdx|vhd)$/i, want)
+  }
   const hasExt = lower.endsWith('.tar') || lower.endsWith('.vhdx') || lower.endsWith('.vhd')
-  if (!hasExt) p = `${p}.${format === 'vhd' ? 'vhdx' : 'tar'}`
+  if (!hasExt) p = `${p}${want}`
   return p
 }
 
@@ -173,68 +183,18 @@ export function createIoService(deps: IoServiceDeps): IoService {
   }
 
   /**
-   * spawn 一条 wsl.exe 长命令：流式日志 → ctl，支持取消（kill）。
+   * spawn 一条 wsl.exe 长命令：流式日志 → ctl，支持取消（kill）与无输出看门狗。
+   * 统一走 spawn-task 共享实现（取消语义 / 看门狗见 spawn-task.ts）。
    */
   function spawnTask(args: string[], ctl: TaskControl): Promise<void> {
-    const rawCommand = getRawCommand('wsl.exe', args)
-    ctl.log(`$ ${rawCommand}`)
-    return new Promise<void>((resolvePromise, rejectPromise) => {
-      let settled = false
-      const tail: string[] = []
-      const done = (fn: () => void) => {
-        if (settled) return
-        settled = true
-        fn()
-      }
-      let handle: { kill(): void } | null = null
-      try {
-        handle = spawnFn(args, {
-          onLine: (line) => {
-            tail.push(line)
-            if (tail.length > 20) tail.shift()
-            ctl.log(line)
-          },
-          onExit: (code) => {
-            if (ctl.isCanceled()) {
-              done(() => rejectPromise(createAppError('TASK_CANCELED', { message: '任务已取消' })))
-              return
-            }
-            if (code === 0) {
-              done(resolvePromise)
-              return
-            }
-            done(() =>
-              rejectPromise(
-                createAppError('TASK_FAILED', {
-                  message: `命令执行失败（exit ${code}）`,
-                  detail: tail.join('\n'),
-                  rawCommand,
-                }),
-              ),
-            )
-          },
-          onError: (err) => {
-            done(() =>
-              rejectPromise(
-                createAppError('TASK_FAILED', {
-                  message: `无法启动 wsl.exe：${err.message}`,
-                  detail: tail.join('\n'),
-                  rawCommand,
-                }),
-              ),
-            )
-          },
-        })
-        ctl.onCancel(() => handle?.kill())
-      } catch (e) {
-        done(() => rejectPromise(e instanceof Error ? e : new Error(String(e))))
-      }
-    })
+    return spawnWslTask(args, ctl, logger, spawnFn)
   }
 
+  /** 发行版名查找：WSL 名称不区分大小写（review M11） */
   async function findDistro(name: string) {
     const list = await wsl.list()
-    return list.find((d) => d.name === name) ?? null
+    const lower = name.toLowerCase()
+    return list.find((d) => d.name.toLowerCase() === lower) ?? null
   }
 
   async function runExport(req: IoExportRequest, ctl: TaskControl): Promise<BackupFileInfo> {
@@ -255,8 +215,15 @@ export function createIoService(deps: IoServiceDeps): IoService {
 
     const outPath = assertSafeIoPath(req.path, '导出路径')
     const finalPath = resolveTargetFile(outPath, format)
-    if (dirname(finalPath) && !existsSync(dirname(finalPath))) {
-      await fs.mkdir(dirname(finalPath), { recursive: true })
+    const parent = dirname(finalPath)
+    if (parent && !existsSync(parent)) {
+      await fs.mkdir(parent, { recursive: true })
+    }
+    // 已存在文件不静默覆盖：改名保留为 .bak-<ts>（安全网 — review M12）
+    if (existsSync(finalPath)) {
+      const backupName = `${finalPath}.bak-${Date.now()}`
+      await fs.rename(finalPath, backupName).catch(() => {})
+      ctl.log(`目标已存在，原文件已保留为 ${basename(backupName)}`)
     }
 
     const args = ['--export', name, finalPath, ...(format === 'vhd' ? ['--vhd'] : [])]
@@ -377,7 +344,9 @@ export function createIoService(deps: IoServiceDeps): IoService {
     }
 
     const rawCommand = getRawCommand('wsl.exe', args)
-    const expected = srcStat.size
+    // 进度基数（review M19）：vhd 复制导入 1:1 可精确估算；
+    // tar 解包大小未知 → 不估算（percent=null，UI 走不确定进度环）
+    const expected = format === 'vhd' ? srcStat.size : 0
     ctl.report(0, `正在导入 ${name}`)
     // 导入进度：目标体量增长 ≈ 已解包体量
     const watchPath = inPlace ? '' : join(installPath, 'ext4.vhdx')
@@ -476,7 +445,9 @@ export function createIoService(deps: IoServiceDeps): IoService {
       })
     }
     const detail = await registry.detail(name).catch(() => ({}) as { basePath?: string })
-    if (detail.basePath && resolve(detail.basePath) === newPath) {
+    // Windows 路径比较：大小写与分隔符归一（review M20）
+    const norm = (s: string) => resolve(s).toLowerCase().replace(/\//g, '\\')
+    if (detail.basePath && norm(detail.basePath) === norm(newPath)) {
       throw createAppError('IO_ERROR', {
         message: '迁移目标与当前位置相同',
         suggestion: '请选择不同的磁盘位置',
@@ -525,8 +496,14 @@ export function createIoService(deps: IoServiceDeps): IoService {
       await spawnTask(args, ctl)
     } catch (e) {
       stop()
-      const detailText = e && typeof e === 'object' && 'detail' in e ? String((e as { detail?: string }).detail ?? '') : ''
-      if (/--manage|manage/i.test(detailText) && /invalid|unknown|not recognized|无效|无法识别/i.test(detailText)) {
+      const detailText =
+        e && typeof e === 'object' && 'detail' in e
+          ? String((e as { detail?: string }).detail ?? '')
+          : ''
+      if (
+        /--manage|manage/i.test(detailText) &&
+        /invalid|unknown|not recognized|无效|无法识别/i.test(detailText)
+      ) {
         throw createAppError('TASK_FAILED', {
           message: '当前 WSL 不支持 wsl --manage --move',
           detail: detailText,
@@ -556,7 +533,10 @@ export function createIoService(deps: IoServiceDeps): IoService {
     } catch {
       return 0
     }
-    const matched = entries.filter((f) => re.test(f)).sort().reverse() // 文件名含时间戳，字典序 = 时间序
+    const matched = entries
+      .filter((f) => re.test(f))
+      .sort()
+      .reverse() // 文件名含时间戳，字典序 = 时间序
     const limit = Math.max(1, Math.floor(keep) || 1)
     const toRemove = matched.slice(limit)
     for (const f of toRemove) {
@@ -594,5 +574,49 @@ export function createIoService(deps: IoServiceDeps): IoService {
     return out.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1)).slice(0, 50)
   }
 
-  return { runExport, runImport, runMove, listBackups, resolveBackupDir, rotateBackups }
+  async function cleanupBackups(
+    dir: string | undefined,
+    keep: number,
+  ): Promise<{ removed: number }> {
+    const targetDir = dir ? assertSafeIoPath(dir, '备份目录') : resolveBackupDir()
+    let entries: string[]
+    try {
+      entries = await fs.readdir(targetDir)
+    } catch {
+      return { removed: 0 }
+    }
+    // 按发行版名前缀分组（<name>_<stamp>.<ext>），逐组轮转
+    const groups = new Map<string, string[]>()
+    for (const f of entries) {
+      if (!isBackupFileName(f)) continue
+      const name = f.replace(/_[0-9]{8}-[0-9]{6}\.(tar|vhdx)$/i, '')
+      const list = groups.get(name) ?? []
+      list.push(f)
+      groups.set(name, list)
+    }
+    let removed = 0
+    const limit = Math.max(1, Math.floor(keep) || 1)
+    for (const files of groups.values()) {
+      files.sort().reverse()
+      for (const f of files.slice(limit)) {
+        try {
+          await fs.unlink(join(targetDir, f))
+          removed++
+        } catch {
+          /* 单文件失败忽略 */
+        }
+      }
+    }
+    return { removed }
+  }
+
+  return {
+    runExport,
+    runImport,
+    runMove,
+    listBackups,
+    cleanupBackups,
+    resolveBackupDir,
+    rotateBackups,
+  }
 }

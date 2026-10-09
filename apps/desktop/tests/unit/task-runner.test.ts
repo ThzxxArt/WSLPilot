@@ -90,7 +90,11 @@ describe('TaskRunner', () => {
             killed = true
           })
           ctl.onCancel(() => {
-            reject(new Error('WSLPILOT:{"code":"TASK_CANCELED","message":"任务已取消","recoverable":true}'))
+            reject(
+              new Error(
+                'WSLPILOT:{"code":"TASK_CANCELED","message":"任务已取消","recoverable":true}',
+              ),
+            )
           })
           setTimeout(resolve, 10_000)
         }),
@@ -147,8 +151,20 @@ describe('TaskRunner', () => {
       await new Promise((r) => setTimeout(r, ms))
       order.push(`${id}:end`)
     }
-    const a = runner.start({ type: 'export', distro: 'U', message: 'a', lockKey: 'U', run: makeRun('a', 30) })
-    const b = runner.start({ type: 'move', distro: 'U', message: 'b', lockKey: 'U', run: makeRun('b', 5) })
+    const a = runner.start({
+      type: 'export',
+      distro: 'U',
+      message: 'a',
+      lockKey: 'U',
+      run: makeRun('a', 30),
+    })
+    const b = runner.start({
+      type: 'move',
+      distro: 'U',
+      message: 'b',
+      lockKey: 'U',
+      run: makeRun('b', 5),
+    })
     await runner.waitFor(b.taskId)
     await runner.waitFor(a.taskId)
     expect(order).toEqual(['a:start', 'a:end', 'b:start', 'b:end'])
@@ -265,7 +281,9 @@ describe('TaskRunner', () => {
     runner.dispose()
     const rec = runner.get(handle.taskId)
     expect(rec?.status).toBe('canceled')
-    expect(() => runner.start({ type: 'export', message: 'x', run: async () => {} })).toThrow(/已关闭/)
+    expect(() => runner.start({ type: 'export', message: 'x', run: async () => {} })).toThrow(
+      /已关闭/,
+    )
   })
 
   it('report after settle is ignored', async () => {
@@ -328,7 +346,9 @@ describe('TaskRunner', () => {
               throw new Error('hook boom 2')
             })
             reject(
-              new Error('WSLPILOT:{"code":"TASK_CANCELED","message":"任务已取消","recoverable":true}'),
+              new Error(
+                'WSLPILOT:{"code":"TASK_CANCELED","message":"任务已取消","recoverable":true}',
+              ),
             )
           }, 5)
         }),

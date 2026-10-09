@@ -1,6 +1,6 @@
 # 设计系统 Design System
 
-> 唯一事实源：`packages/ui/src/tokens/` · 生成物：`packages/ui/src/styles/tokens.generated.scss`
+> 唯一事实源：`packages/shared/src/tokens.ts` · re-export 层：`packages/ui/src/tokens/` · 生成物：`packages/ui/src/styles/tokens.generated.scss`（由 `npm run tokens` 从唯一事实源生成）
 
 ## 三层令牌
 
@@ -22,13 +22,13 @@ Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变
 
 关键语义色：
 
-| 令牌 | 值 | 用途 |
-|---|---|---|
-| `--color-bg-canvas` | `#F7F8FB` | 画布底 |
-| `--color-bg-surface` | `#FFFFFF` | 卡片/面板 |
-| `--color-text-primary` | `#0F172A` | 主文字 |
-| `--color-accent` | `#6366F1` | 强调（随主题切换） |
-| `--color-danger` | `#DC2626` | 危险 |
+| 令牌                   | 值        | 用途               |
+| ---------------------- | --------- | ------------------ |
+| `--color-bg-canvas`    | `#F7F8FB` | 画布底             |
+| `--color-bg-surface`   | `#FFFFFF` | 卡片/面板          |
+| `--color-text-primary` | `#0F172A` | 主文字             |
+| `--color-accent`       | `#6366F1` | 强调（随主题切换） |
+| `--color-danger`       | `#DC2626` | 危险               |
 
 ## 字体
 
@@ -47,13 +47,13 @@ Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变
 
 ## 动效
 
-| 令牌 | 值 |
-|---|---|
-| `--dur-fast` | 140ms |
-| `--dur-base` | 220ms |
-| `--dur-slow` | 320ms |
-| `--ease-standard` | `cubic-bezier(.2, 0, 0, 1)` |
-| `--ease-spring` | `cubic-bezier(.34, 1.56, .64, 1)` |
+| 令牌              | 值                                |
+| ----------------- | --------------------------------- |
+| `--dur-fast`      | 140ms                             |
+| `--dur-base`      | 220ms                             |
+| `--dur-slow`      | 320ms                             |
+| `--ease-standard` | `cubic-bezier(.2, 0, 0, 1)`       |
+| `--ease-spring`   | `cubic-bezier(.34, 1.56, .64, 1)` |
 
 `prefers-reduced-motion` 或设置 `reduceMotion` 开启时，时长降为 `0.01ms`。
 
@@ -64,6 +64,6 @@ Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变
 
 ## 修改令牌
 
-1. 编辑 `scripts/gen-tokens.ts` 中的表
-2. 运行 `npm run tokens`
-3. 同步更新 `packages/ui/src/tokens/theme.ts`（TS 侧）
+1. 编辑 `packages/shared/src/tokens.ts`（唯一事实源）
+2. 运行 `npm run tokens`（重新生成 `tokens.generated.scss`）
+3. `packages/ui/src/tokens/` 为 re-export，无需手改；如新增语义令牌，同步 `packages/ui/src/naive/theme-overrides.ts` 映射

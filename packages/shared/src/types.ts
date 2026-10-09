@@ -2,7 +2,8 @@
 import type { AccentName } from './tokens'
 export type { AccentName }
 
-export type WslState = 'Running' | 'Stopped' | 'Installing' | 'Uninstalling' | 'Converting' | 'Unknown'
+export type WslState =
+  'Running' | 'Stopped' | 'Installing' | 'Uninstalling' | 'Converting' | 'Unknown'
 
 /** 来自 wsl.exe 实时查询的系统事实 */
 export interface DistroRuntime {

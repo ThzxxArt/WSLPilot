@@ -4,16 +4,16 @@
 > 技术栈：**TypeScript + Vue 3 + Electron**；持久化：**JSONC 配置文件**（**无数据库**）。
 > 设计基调：现代、精美、克制而富有反馈感的「仪表盘」级桌面体验。
 
-| 项目 | 说明 |
-|---|---|
-| 产品名称 | **WSLPilot**（WSL + Pilot，寓意"领航员"） |
-| 文档版本 | v2.0 |
-| 项目代号 | pilot |
-| 目标平台 | Windows 10 2004+ / Windows 11（x64 / arm64） |
-| 技术栈 | TypeScript 5 · Vue 3 · Electron · Vite · Pinia |
-| 持久化 | JSONC 配置文件（无任何数据库） |
-| 外部依赖 | wsl.exe · LxssManager · node-pty · xterm.js |
-| 许可 | MIT |
+| 项目     | 说明                                           |
+| -------- | ---------------------------------------------- |
+| 产品名称 | **WSLPilot**（WSL + Pilot，寓意"领航员"）      |
+| 文档版本 | v2.0                                           |
+| 项目代号 | pilot                                          |
+| 目标平台 | Windows 10 2004+ / Windows 11（x64 / arm64）   |
+| 技术栈   | TypeScript 5 · Vue 3 · Electron · Vite · Pinia |
+| 持久化   | JSONC 配置文件（无任何数据库）                 |
+| 外部依赖 | wsl.exe · LxssManager · node-pty · xterm.js    |
+| 许可     | MIT                                            |
 
 ---
 
@@ -58,15 +58,15 @@ Windows Subsystem for Linux 已成为开发者的标准工作环境，但其管�
 
 ### 1.3 设计目标
 
-| 维度 | 目标 |
-|---|---|
-| **易用性** | 常用动作（启停、设默认、安装、备份、迁移）≤ 3 次点击完成 |
-| **美观性** | 现代设计系统、流光质感、精细动效，达到"愿意截图分享"的视觉水准 |
-| **便捷性** | 全局命令面板（⌘K）、托盘快速操作、快捷键全覆盖 |
-| **透明性** | 所有持久化状态为人类可读 JSONC，路径可见、内容可改、可纳入 Git |
-| **安全性** | 渲染进程零 Node 权限，IPC 白名单，危险操作二次确认 |
-| **无数据库** | 不引入嵌入式数据库；配置文件天然适合"单人单机低频写"场景 |
-| **可扩展** | 配置 schema + 自定义动作（Actions）机制，用户可注入命令流 |
+| 维度         | 目标                                                           |
+| ------------ | -------------------------------------------------------------- |
+| **易用性**   | 常用动作（启停、设默认、安装、备份、迁移）≤ 3 次点击完成       |
+| **美观性**   | 现代设计系统、流光质感、精细动效，达到"愿意截图分享"的视觉水准 |
+| **便捷性**   | 全局命令面板（⌘K）、托盘快速操作、快捷键全覆盖                 |
+| **透明性**   | 所有持久化状态为人类可读 JSONC，路径可见、内容可改、可纳入 Git |
+| **安全性**   | 渲染进程零 Node 权限，IPC 白名单，危险操作二次确认             |
+| **无数据库** | 不引入嵌入式数据库；配置文件天然适合"单人单机低频写"场景       |
+| **可扩展**   | 配置 schema + 自定义动作（Actions）机制，用户可注入命令流      |
 
 ### 1.4 非目标（Non-Goals）
 
@@ -77,25 +77,25 @@ Windows Subsystem for Linux 已成为开发者的标准工作环境，但其管�
 
 ### 1.5 目标用户画像
 
-| 画像 | 特征 | 核心诉求 |
-|---|---|---|
-| **全栈开发者（主力）** | 日常在 WSL 中开发，有多个发行版 | 快速切换、备份迁移、终端集成 |
-| **数据/算法工程师** | 关注资源、GPU、USB 设备 | 资源限额可视化、设备绑定 |
-| **学习者 / 新手** | 刚接触 WSL，怕敲错命令 | 图形化引导、命令可见、安全提示 |
-| **极客 / 折腾党** | 喜欢手改配置、写自定义动作 | 配置可读可改、Actions 可扩展 |
+| 画像                   | 特征                            | 核心诉求                       |
+| ---------------------- | ------------------------------- | ------------------------------ |
+| **全栈开发者（主力）** | 日常在 WSL 中开发，有多个发行版 | 快速切换、备份迁移、终端集成   |
+| **数据/算法工程师**    | 关注资源、GPU、USB 设备         | 资源限额可视化、设备绑定       |
+| **学习者 / 新手**      | 刚接触 WSL，怕敲错命令          | 图形化引导、命令可见、安全提示 |
+| **极客 / 折腾党**      | 喜欢手改配置、写自定义动作      | 配置可读可改、Actions 可扩展   |
 
 ### 1.6 术语表
 
-| 术语 | 含义 |
-|---|---|
-| Distro / 发行版 | 一个已注册的 WSL Linux 发行版，注册表项以 GUID 标识 |
-| Lxss | 注册表根键 `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` |
-| `.wslconfig` | `%UserProfile%\.wslconfig`，全局配置，仅对 WSL2 生效 |
-| `wsl.conf` | 发行版内 `/etc/wsl.conf`，发行版级配置 |
-| vhdx | WSL2 发行版的虚拟磁盘（`ext4.vhdx`） |
-| 8 秒规则 | 发行版完全停止后约 8 秒，配置更改才真正生效 |
-| Action | 配置文件中声明的可复用命令流 |
-| Pilot | WSLPilot 中对"当前选中发行版"的称呼 |
+| 术语            | 含义                                                             |
+| --------------- | ---------------------------------------------------------------- |
+| Distro / 发行版 | 一个已注册的 WSL Linux 发行版，注册表项以 GUID 标识              |
+| Lxss            | 注册表根键 `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` |
+| `.wslconfig`    | `%UserProfile%\.wslconfig`，全局配置，仅对 WSL2 生效             |
+| `wsl.conf`      | 发行版内 `/etc/wsl.conf`，发行版级配置                           |
+| vhdx            | WSL2 发行版的虚拟磁盘（`ext4.vhdx`）                             |
+| 8 秒规则        | 发行版完全停止后约 8 秒，配置更改才真正生效                      |
+| Action          | 配置文件中声明的可复用命令流                                     |
+| Pilot           | WSLPilot 中对"当前选中发行版"的称呼                              |
 
 ---
 
@@ -157,28 +157,28 @@ WSLPilot 要求三层同时达标：功能层是地基，行为层是好用的�
 
 ## 3. 技术选型与理由
 
-| 层次 | 选型 | 理由 |
-|---|---|---|
-| 桌面壳 | **Electron** | Node 生态成熟，`node-pty` 原生模块免改造可用，`electron-builder` 打包方案完整 |
-| 语言 | **TypeScript 5** | CLI 输出解析与 IPC 契约需强类型，主/渲染共享类型 |
-| 渲染框架 | **Vue 3**（Composition API + `<script setup>`） | 响应式仪表盘贴合，生态组件齐全，SFC 组织清晰 |
-| 构建 | **Vite** + electron-vite | HMR 开发体验，产物清晰，构建快 |
-| 状态管理 | **Pinia** | 轻量，与 Vue3 深度集成，支持持久化插件 |
-| UI 组件库 | **Naive UI** | Vue 3 原生、TypeScript 友好、组件齐全、可深度定制；通过 `themeOverrides` 把设计令牌注入 Naive UI 主题 |
-| 样式方案 | **CSS 变量（设计令牌）+ SCSS + Naive UI 主题变量** | 设计令牌驱动 Naive UI 主题，业务样式用 SCSS，避免 CSS-in-JS 运行时开销 |
-| 图标 | **Iconify + Lucide**（按需） | 风格统一、可换色、体积可控 |
-| 动效 | **CSS Transition + Web Animations API + 可选 Motion One** | 轻量、GPU 加速、可降级 |
-| 终端 | **node-pty + xterm.js** | VS Code 集成终端同源，ConPTY 底层，真伪终端 |
-| 配置解析 | **jsonc-parser** | 支持注释/尾逗号，能返回语法错误位置 |
-| Schema 校验 | **zod** + 自研 JSONC 加载器 | 运行时校验 + 默认值 + 类型推导 |
-| 文件监听 | **chokidar** | 外部编辑器改动配置后热加载 |
-| 系统调用 | Node `execFile`（Buffer 模式） | 规避 shell 注入，UTF-16LE 解码 |
-| 注册表读取 | **registry-js** 或 `reg.exe` 封装 | 读取 Lxss 深层信息 |
-| 日志 | **pino** | 结构化文本日志（非数据库） |
-| 测试 | **Vitest + @vue/test-utils + Playwright** | 单元/组件/E2E 全覆盖 |
-| 打包 | **electron-builder**（NSIS + portable） | 安装包与免安装版 |
-| 代码质量 | **ESLint + Prettier + Stylelint + commitlint + husky** | 工程规范 |
-| 版本管理 | **changesets** | 多包版本与 changelog |
+| 层次        | 选型                                                      | 理由                                                                                                  |
+| ----------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 桌面壳      | **Electron**                                              | Node 生态成熟，`node-pty` 原生模块免改造可用，`electron-builder` 打包方案完整                         |
+| 语言        | **TypeScript 5**                                          | CLI 输出解析与 IPC 契约需强类型，主/渲染共享类型                                                      |
+| 渲染框架    | **Vue 3**（Composition API + `<script setup>`）           | 响应式仪表盘贴合，生态组件齐全，SFC 组织清晰                                                          |
+| 构建        | **Vite** + electron-vite                                  | HMR 开发体验，产物清晰，构建快                                                                        |
+| 状态管理    | **Pinia**                                                 | 轻量，与 Vue3 深度集成，支持持久化插件                                                                |
+| UI 组件库   | **Naive UI**                                              | Vue 3 原生、TypeScript 友好、组件齐全、可深度定制；通过 `themeOverrides` 把设计令牌注入 Naive UI 主题 |
+| 样式方案    | **CSS 变量（设计令牌）+ SCSS + Naive UI 主题变量**        | 设计令牌驱动 Naive UI 主题，业务样式用 SCSS，避免 CSS-in-JS 运行时开销                                |
+| 图标        | **Iconify + Lucide**（按需）                              | 风格统一、可换色、体积可控                                                                            |
+| 动效        | **CSS Transition + Web Animations API + 可选 Motion One** | 轻量、GPU 加速、可降级                                                                                |
+| 终端        | **node-pty + xterm.js**                                   | VS Code 集成终端同源，ConPTY 底层，真伪终端                                                           |
+| 配置解析    | **jsonc-parser**                                          | 支持注释/尾逗号，能返回语法错误位置                                                                   |
+| Schema 校验 | **zod** + 自研 JSONC 加载器                               | 运行时校验 + 默认值 + 类型推导                                                                        |
+| 文件监听    | **chokidar**                                              | 外部编辑器改动配置后热加载                                                                            |
+| 系统调用    | Node `execFile`（Buffer 模式）                            | 规避 shell 注入，UTF-16LE 解码                                                                        |
+| 注册表读取  | **registry-js** 或 `reg.exe` 封装                         | 读取 Lxss 深层信息                                                                                    |
+| 日志        | **pino**                                                  | 结构化文本日志（非数据库）                                                                            |
+| 测试        | **Vitest + @vue/test-utils + Playwright**                 | 单元/组件/E2E 全覆盖                                                                                  |
+| 打包        | **electron-builder**（NSIS + portable）                   | 安装包与免安装版                                                                                      |
+| 代码质量    | **ESLint + Prettier + Stylelint + commitlint + husky**    | 工程规范                                                                                              |
+| 版本管理    | **changesets**                                            | 多包版本与 changelog                                                                                  |
 
 ### 3.1 为什么"不用数据库"
 
@@ -495,12 +495,12 @@ WSLPilot/
 
 ### 5.1 包职责一览
 
-| 包 | 名称 | 职责 | 依赖 |
-|---|---|---|---|
-| `packages/shared` | `@wslpilot/shared` | 类型、通道名、zod schema、错误码、迁移 | 无 |
-| `packages/kit` | `@wslpilot/kit` | 主进程通用工具（exec、原子写、日志、路径） | shared |
-| `packages/ui` | `@wslpilot/ui` | 设计令牌、Naive UI 主题适配、业务组合组件 | naive-ui |
-| `apps/desktop` | `@wslpilot/desktop` | 主应用（main/preload/renderer） | 全部 |
+| 包                | 名称                | 职责                                       | 依赖     |
+| ----------------- | ------------------- | ------------------------------------------ | -------- |
+| `packages/shared` | `@wslpilot/shared`  | 类型、通道名、zod schema、错误码、迁移     | 无       |
+| `packages/kit`    | `@wslpilot/kit`     | 主进程通用工具（exec、原子写、日志、路径） | shared   |
+| `packages/ui`     | `@wslpilot/ui`      | 设计令牌、Naive UI 主题适配、业务组合组件  | naive-ui |
+| `apps/desktop`    | `@wslpilot/desktop` | 主应用（main/preload/renderer）            | 全部     |
 
 ### 5.2 关键工程脚本
 
@@ -510,10 +510,7 @@ WSLPilot/
   "name": "wslpilot",
   "private": true,
   "packageManager": "npm@10",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "dev": "npm run dev --workspace @wslpilot/desktop",
     "build": "npm run build --workspaces --if-present && npm run package --workspace @wslpilot/desktop",
@@ -524,8 +521,8 @@ WSLPilot/
     "test:e2e": "playwright test",
     "tokens": "tsx scripts/gen-tokens.ts",
     "changeset": "changeset",
-    "release": "changeset version && npm run build"
-  }
+    "release": "changeset version && npm run build",
+  },
 }
 ```
 
@@ -576,40 +573,40 @@ WSLPilot/
   "general": {
     "autoRefreshOnStart": true,
     "pollIntervalMs": 5000,
-    "locale": "system",                 // system | zh-CN | en-US
-    "theme": "light",                   // 固定浅色主题（不提供深色）
-    "accent": "aurora",                 // aurora | sunset | ocean | forest | custom
-    "closeBehavior": "minimizeToTray",  // minimizeToTray | quit
+    "locale": "system", // system | zh-CN | en-US
+    "theme": "light", // 固定浅色主题（不提供深色）
+    "accent": "aurora", // aurora | sunset | ocean | forest | custom
+    "closeBehavior": "minimizeToTray", // minimizeToTray | quit
     "launchAtLogin": false,
-    "reduceMotion": false               // 关闭/减弱动效
+    "reduceMotion": false, // 关闭/减弱动效
   },
   "wsl": {
     "defaultShell": "",
     "autoShutdownAfterConfigChange": false,
-    "installSource": "store"            // store | web
+    "installSource": "store", // store | web
   },
   "terminal": {
     "fontFamily": "Cascadia Mono, Consolas, monospace",
     "fontSize": 14,
     "lineHeight": 1.2,
-    "cursorStyle": "block",             // block | underline | bar
+    "cursorStyle": "block", // block | underline | bar
     "cursorBlink": true,
     "scrollback": 5000,
     "copyOnSelect": false,
-    "theme": "auto"                     // auto | follow-app | custom
+    "theme": "auto", // auto | follow-app | custom
   },
   "backup": {
     "defaultDir": "%USERPROFILE%\\WSL-Backups",
-    "format": "tar",                    // tar | vhd
+    "format": "tar", // tar | vhd
     "keepRecent": 5,
-    "autoBackupBeforeDestructive": true
+    "autoBackupBeforeDestructive": true,
   },
   "advanced": {
     "showRawCommand": false,
     "confirmDestructive": true,
-    "logLevel": "info",                 // trace | debug | info | warn | error
-    "hardwareAcceleration": true
-  }
+    "logLevel": "info", // trace | debug | info | warn | error
+    "hardwareAcceleration": true,
+  },
 }
 ```
 
@@ -620,7 +617,7 @@ WSLPilot/
   "$schemaVersion": 1,
   "distros": [
     {
-      "name": "Ubuntu-22.04",           // 以注册表名称为稳定键
+      "name": "Ubuntu-22.04", // 以注册表名称为稳定键
       "alias": "主力开发",
       "tags": ["work", "node", "python"],
       "color": "#E95420",
@@ -628,7 +625,7 @@ WSLPilot/
       "note": "日常开发使用，勿随意迁移",
       "startupCwd": "/home/me/project",
       "pinned": true,
-      "quickActions": ["update-all", "open-code"]
+      "quickActions": ["update-all", "open-code"],
     },
     {
       "name": "Debian",
@@ -639,9 +636,9 @@ WSLPilot/
       "note": "",
       "startupCwd": "~",
       "pinned": false,
-      "quickActions": []
-    }
-  ]
+      "quickActions": [],
+    },
+  ],
 }
 ```
 
@@ -658,13 +655,13 @@ WSLPilot/
       "label": "全量更新",
       "description": "apt update && apt upgrade",
       "icon": "refresh",
-      "scope": "distro",                // distro | global
+      "scope": "distro", // distro | global
       "program": "/usr/bin/bash",
       "args": ["-lc", "sudo apt update && sudo apt upgrade -y"],
       "user": "root",
       "cwd": "/",
       "terminal": true,
-      "confirm": true
+      "confirm": true,
     },
     {
       "id": "open-code",
@@ -675,7 +672,7 @@ WSLPilot/
       "args": ["."],
       "cwd": "${startupCwd}",
       "terminal": false,
-      "confirm": false
+      "confirm": false,
     },
     {
       "id": "sysinfo",
@@ -685,9 +682,9 @@ WSLPilot/
       "program": "/usr/bin/bash",
       "args": ["-lc", "uname -a && free -h && df -h /"],
       "terminal": false,
-      "confirm": false
-    }
-  ]
+      "confirm": false,
+    },
+  ],
 }
 ```
 
@@ -707,15 +704,15 @@ WSLPilot/
       "connectAddress": "127.0.0.1",
       "connectPort": 3000,
       "enabled": true,
-      "protocol": "tcp"                 // tcp | udp（udp 仅记录意图）
-    }
+      "protocol": "tcp", // tcp | udp（udp 仅记录意图）
+    },
   ],
   "proxy": {
     "useWindowsProxy": false,
     "httpProxy": "",
     "httpsProxy": "",
-    "noProxy": "localhost,127.0.0.1"
-  }
+    "noProxy": "localhost,127.0.0.1",
+  },
 }
 ```
 
@@ -729,7 +726,7 @@ WSLPilot/
   "sidebarCollapsed": false,
   "activeView": "dashboard",
   "tableSort": { "key": "name", "dir": "asc" },
-  "recentCommands": ["install", "export Ubuntu-22.04", "open terminal"]
+  "recentCommands": ["install", "export Ubuntu-22.04", "open terminal"],
 }
 ```
 
@@ -746,15 +743,15 @@ WSLPilot/
       "diskUsed": "12.3G",
       "diskTotal": "251G",
       "cpuPercent": 6.4,
-      "sampledAt": "2026-10-08T09:30:55Z"
-    }
+      "sampledAt": "2026-10-08T09:30:55Z",
+    },
   },
   "lastTaskResult": {
     "type": "export",
     "distro": "Debian",
     "status": "success",
-    "finishedAt": "2026-10-07T18:22:10Z"
-  }
+    "finishedAt": "2026-10-07T18:22:10Z",
+  },
 }
 ```
 
@@ -837,7 +834,7 @@ export interface AppSettings {
     autoRefreshOnStart: boolean
     pollIntervalMs: number
     locale: 'system' | 'zh-CN' | 'en-US'
-    theme: 'light'                       // 固定浅色主题
+    theme: 'light' // 固定浅色主题
     accent: 'aurora' | 'sunset' | 'ocean' | 'forest' | 'custom'
     closeBehavior: 'minimizeToTray' | 'quit'
     launchAtLogin: boolean
@@ -916,45 +913,45 @@ export type TaskHandle = { taskId: string }
 
 所有通道名集中在 `shared/channels.ts`，主/预加载共享常量，避免拼写漂移。
 
-| 通道 | 方向 | 入参 | 返回 | 说明 |
-|---|---|---|---|---|
-| `distros:list` | R→M | void | `DistroView[]` | 列出全部（系统+元数据） |
-| `distros:start` | R→M | `name` | `void` | 启动 |
-| `distros:terminate` | R→M | `name` | `void` | `--terminate` |
-| `distros:shutdown` | R→M | void | `void` | `--shutdown` |
-| `distros:setDefault` | R→M | `name` | `void` | `--set-default` |
-| `distros:setVersion` | R→M | `name, version` | `TaskHandle` | `--set-version`（长任务） |
-| `distros:unregister` | R→M | `name` | `void` | `--unregister`（危险） |
-| `distros:install` | R→M | `{ name?, source }` | `TaskHandle` | `--install`（长任务） |
-| `distros:listOnline` | R→M | void | `string[]` | `--list --online` |
-| `io:export` | R→M | `{ name, path, format }` | `TaskHandle` | `--export` |
-| `io:import` | R→M | `{ name, path, format, version }` | `TaskHandle` | `--import` |
-| `io:move` | R→M | `{ name, path }` | `TaskHandle` | `--manage --move` |
-| `meta:get` | R→M | `name` | `DistroMeta \| null` | 读元数据 |
-| `meta:set` | R→M | `DistroMeta` | `void` | 写元数据 |
-| `registry:detail` | R→M | `name` | `DistroRuntime` | 读 Lxss |
-| `config:get` | R→M | `fileKey` | `object` | 读配置文件 |
-| `config:set` | R→M | `{ fileKey, patch }` | `object` | 合并写回 |
-| `config:openExternal` | R→M | `fileKey` | `void` | 系统编辑器打开 |
-| `wslconf:read` | R→M | `name` | `string` | 读 `/etc/wsl.conf` |
-| `wslconf:write` | R→M | `{ name, content }` | `void` | 写 `/etc/wsl.conf`（提权） |
-| `pty:create` | R→M | `{ distro, shell?, cwd?, cols, rows }` | `ptyId` | 新建终端 |
-| `pty:input` | R→M | `{ ptyId, data }` | `void` | 写入按键 |
-| `pty:resize` | R→M | `{ ptyId, cols, rows }` | `void` | 调整尺寸 |
-| `pty:kill` | R→M | `ptyId` | `void` | 结束会话 |
-| `pty:data` | M→R | `{ ptyId, chunk }` | — | 推送输出（事件） |
-| `pty:exit` | M→R | `{ ptyId, code }` | — | 会话退出（事件） |
-| `fs:readDir` | R→M | `{ distro, path }` | `DirEntry[]` | 浏览 `\\wsl.localhost` |
-| `fs:read` | R→M | `{ distro, path }` | `Buffer` | 读文件 |
-| `fs:write` | R→M | `{ distro, path, data }` | `void` | 写文件 |
-| `fs:revealInExplorer` | R→M | `{ distro, path }` | `void` | 资源管理器打开 |
-| `metrics:sample` | R→M | `name` | `Metrics` | 采样 |
-| `task:cancel` | R→M | `taskId` | `void` | 取消长任务 |
-| `task:progress` | M→R | `TaskProgress` | — | 任务进度（事件） |
-| `action:run` | R→M | `{ actionId, distro }` | `TaskHandle` | 执行动作 |
-| `network:apply` | R→M | `portForwardId` | `TaskHandle` | 应用转发（需确认） |
-| `app:getVersion` | R→M | void | `string` | 版本信息 |
-| `app:openConfigDir` | R→M | void | `void` | 打开配置目录 |
+| 通道                  | 方向 | 入参                                   | 返回                 | 说明                       |
+| --------------------- | ---- | -------------------------------------- | -------------------- | -------------------------- |
+| `distros:list`        | R→M  | void                                   | `DistroView[]`       | 列出全部（系统+元数据）    |
+| `distros:start`       | R→M  | `name`                                 | `void`               | 启动                       |
+| `distros:terminate`   | R→M  | `name`                                 | `void`               | `--terminate`              |
+| `distros:shutdown`    | R→M  | void                                   | `void`               | `--shutdown`               |
+| `distros:setDefault`  | R→M  | `name`                                 | `void`               | `--set-default`            |
+| `distros:setVersion`  | R→M  | `name, version`                        | `TaskHandle`         | `--set-version`（长任务）  |
+| `distros:unregister`  | R→M  | `name`                                 | `void`               | `--unregister`（危险）     |
+| `distros:install`     | R→M  | `{ name?, source }`                    | `TaskHandle`         | `--install`（长任务）      |
+| `distros:listOnline`  | R→M  | void                                   | `string[]`           | `--list --online`          |
+| `io:export`           | R→M  | `{ name, path, format }`               | `TaskHandle`         | `--export`                 |
+| `io:import`           | R→M  | `{ name, path, format, version }`      | `TaskHandle`         | `--import`                 |
+| `io:move`             | R→M  | `{ name, path }`                       | `TaskHandle`         | `--manage --move`          |
+| `meta:get`            | R→M  | `name`                                 | `DistroMeta \| null` | 读元数据                   |
+| `meta:set`            | R→M  | `DistroMeta`                           | `void`               | 写元数据                   |
+| `registry:detail`     | R→M  | `name`                                 | `DistroRuntime`      | 读 Lxss                    |
+| `config:get`          | R→M  | `fileKey`                              | `object`             | 读配置文件                 |
+| `config:set`          | R→M  | `{ fileKey, patch }`                   | `object`             | 合并写回                   |
+| `config:openExternal` | R→M  | `fileKey`                              | `void`               | 系统编辑器打开             |
+| `wslconf:read`        | R→M  | `name`                                 | `string`             | 读 `/etc/wsl.conf`         |
+| `wslconf:write`       | R→M  | `{ name, content }`                    | `void`               | 写 `/etc/wsl.conf`（提权） |
+| `pty:create`          | R→M  | `{ distro, shell?, cwd?, cols, rows }` | `ptyId`              | 新建终端                   |
+| `pty:input`           | R→M  | `{ ptyId, data }`                      | `void`               | 写入按键                   |
+| `pty:resize`          | R→M  | `{ ptyId, cols, rows }`                | `void`               | 调整尺寸                   |
+| `pty:kill`            | R→M  | `ptyId`                                | `void`               | 结束会话                   |
+| `pty:data`            | M→R  | `{ ptyId, chunk }`                     | —                    | 推送输出（事件）           |
+| `pty:exit`            | M→R  | `{ ptyId, code }`                      | —                    | 会话退出（事件）           |
+| `fs:readDir`          | R→M  | `{ distro, path }`                     | `DirEntry[]`         | 浏览 `\\wsl.localhost`     |
+| `fs:read`             | R→M  | `{ distro, path }`                     | `Buffer`             | 读文件                     |
+| `fs:write`            | R→M  | `{ distro, path, data }`               | `void`               | 写文件                     |
+| `fs:revealInExplorer` | R→M  | `{ distro, path }`                     | `void`               | 资源管理器打开             |
+| `metrics:sample`      | R→M  | `name`                                 | `Metrics`            | 采样                       |
+| `task:cancel`         | R→M  | `taskId`                               | `void`               | 取消长任务                 |
+| `task:progress`       | M→R  | `TaskProgress`                         | —                    | 任务进度（事件）           |
+| `action:run`          | R→M  | `{ actionId, distro }`                 | `TaskHandle`         | 执行动作                   |
+| `network:apply`       | R→M  | `portForwardId`                        | `TaskHandle`         | 应用转发（需确认）         |
+| `app:getVersion`      | R→M  | void                                   | `string`             | 版本信息                   |
+| `app:openConfigDir`   | R→M  | void                                   | `void`               | 打开配置目录               |
 
 ### 8.2 预加载暴露面（示意）
 
@@ -981,8 +978,7 @@ const api = {
   terminal: {
     create: (opts: unknown) => ipcRenderer.invoke(CH.ptyCreate, opts),
     input: (id: string, data: string) => ipcRenderer.invoke(CH.ptyInput, { ptyId: id, data }),
-    resize: (id: string, cols: number, rows: number) =>
-      ipcRenderer.invoke(CH.ptyResize, { ptyId: id, cols, rows }),
+    resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke(CH.ptyResize, { ptyId: id, cols, rows }),
     onData: (cb: (p: { ptyId: string; chunk: string }) => void) => {
       const h = (_: unknown, p: any) => cb(p)
       ipcRenderer.on(CH.ptyData, h)
@@ -1012,15 +1008,14 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
-export async function runWsl(
-  args: string[],
-  opts: { timeoutMs?: number; encoding?: 'utf16' | 'utf8' } = {},
-) {
+export async function runWsl(args: string[], opts: { timeoutMs?: number; encoding?: 'utf16' | 'utf8' } = {}) {
   const enc = (b?: Buffer) =>
     !b ? '' : opts.encoding === 'utf8' ? b.toString('utf8') : b.toString('utf16le').replace(/\0/g, '')
   try {
     const { stdout, stderr } = await execFileAsync('wsl.exe', args, {
-      encoding: 'buffer', windowsHide: true, timeout: opts.timeoutMs ?? 30_000,
+      encoding: 'buffer',
+      windowsHide: true,
+      timeout: opts.timeoutMs ?? 30_000,
       maxBuffer: 64 * 1024 * 1024,
     })
     return { stdout: enc(stdout as unknown as Buffer), stderr: enc(stderr as unknown as Buffer), code: 0 }
@@ -1030,11 +1025,18 @@ export async function runWsl(
 }
 
 export function parseDistroList(raw: string) {
-  return raw.split(/\r?\n/).slice(1).filter((l) => l.trim() !== '').map((line) => {
-    const isDefault = line.trimStart().startsWith('*')
-    const parts = line.replace('*', '').trim().split(/\s{2,}/)
-    return { isDefault, name: parts[0] ?? '', state: parts[1] ?? 'Unknown', version: Number(parts[2] ?? 2) }
-  })
+  return raw
+    .split(/\r?\n/)
+    .slice(1)
+    .filter((l) => l.trim() !== '')
+    .map((line) => {
+      const isDefault = line.trimStart().startsWith('*')
+      const parts = line
+        .replace('*', '')
+        .trim()
+        .split(/\s{2,}/)
+      return { isDefault, name: parts[0] ?? '', state: parts[1] ?? 'Unknown', version: Number(parts[2] ?? 2) }
+    })
 }
 ```
 
@@ -1069,7 +1071,12 @@ export async function atomicWrite(filePath: string, content: string): Promise<vo
   await fs.mkdir(dir, { recursive: true })
   const tmp = join(dir, `.${randomUUID()}.tmp`)
   const fh = await fs.open(tmp, 'w')
-  try { await fh.writeFile(content, 'utf8'); await fh.sync() } finally { await fh.close() }
+  try {
+    await fh.writeFile(content, 'utf8')
+    await fh.sync()
+  } finally {
+    await fh.close()
+  }
   await fs.rename(tmp, filePath)
 }
 ```
@@ -1087,12 +1094,20 @@ function createSession(o: { distro: string; shell?: string; cwd?: string; cols: 
   if (o.cwd) args.push('--cd', o.cwd)
   args.push('-e', o.shell || '/bin/bash')
   const p = pty.spawn('wsl.exe', args, {
-    name: 'xterm-256color', cols: o.cols, rows: o.rows,
-    cwd: process.env.USERPROFILE, env: process.env as Record<string, string>, useConpty: true,
+    name: 'xterm-256color',
+    cols: o.cols,
+    rows: o.rows,
+    cwd: process.env.USERPROFILE,
+    env: process.env as Record<string, string>,
+    useConpty: true,
   })
-  const id = randomUUID(); sessions.set(id, p)
+  const id = randomUUID()
+  sessions.set(id, p)
   p.onData((chunk) => mainWindow.webContents.send('pty:data', { ptyId: id, chunk }))
-  p.onExit(({ exitCode }) => { sessions.delete(id); mainWindow.webContents.send('pty:exit', { ptyId: id, code: exitCode }) })
+  p.onExit(({ exitCode }) => {
+    sessions.delete(id)
+    mainWindow.webContents.send('pty:exit', { ptyId: id, code: exitCode })
+  })
   return id
 }
 ```
@@ -1134,10 +1149,10 @@ WSLPilot 主色命名为 **Aurora（极光）**，取青色到紫色的渐变，
 
 ```css
 /* 品牌渐变 */
---pilot-gradient-aurora: linear-gradient(135deg, #22D3EE 0%, #6366F1 50%, #A855F7 100%);
---pilot-gradient-sunset: linear-gradient(135deg, #FB7185 0%, #F59E0B 100%);
---pilot-gradient-ocean:  linear-gradient(135deg, #38BDF8 0%, #0EA5E9 50%, #2563EB 100%);
---pilot-gradient-forest: linear-gradient(135deg, #34D399 0%, #10B981 50%, #059669 100%);
+--pilot-gradient-aurora: linear-gradient(135deg, #22d3ee 0%, #6366f1 50%, #a855f7 100%);
+--pilot-gradient-sunset: linear-gradient(135deg, #fb7185 0%, #f59e0b 100%);
+--pilot-gradient-ocean: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 50%, #2563eb 100%);
+--pilot-gradient-forest: linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%);
 ```
 
 #### 10.2.2 语义色彩令牌（浅色主题）
@@ -1145,35 +1160,35 @@ WSLPilot 主色命名为 **Aurora（极光）**，取青色到紫色的渐变，
 ```css
 :root[data-theme='light'] {
   /* 背景层次 */
-  --color-bg-canvas:      #F7F8FB;   /* 最底层画布 */
-  --color-bg-surface:     #FFFFFF;   /* 卡片/面板 */
-  --color-bg-elevated:    #FFFFFF;   /* 浮层（带阴影） */
-  --color-bg-sunken:      #EFF1F6;   /* 凹陷区/代码块 */
-  --color-bg-hover:       rgba(15, 23, 42, 0.04);
-  --color-bg-active:      rgba(99, 102, 241, 0.10);
+  --color-bg-canvas: #f7f8fb; /* 最底层画布 */
+  --color-bg-surface: #ffffff; /* 卡片/面板 */
+  --color-bg-elevated: #ffffff; /* 浮层（带阴影） */
+  --color-bg-sunken: #eff1f6; /* 凹陷区/代码块 */
+  --color-bg-hover: rgba(15, 23, 42, 0.04);
+  --color-bg-active: rgba(99, 102, 241, 0.1);
 
   /* 文字 */
-  --color-text-primary:   #0F172A;
+  --color-text-primary: #0f172a;
   --color-text-secondary: #475569;
-  --color-text-tertiary:  #94A3B8;
-  --color-text-inverse:   #FFFFFF;
-  --color-text-link:      #4F46E5;
+  --color-text-tertiary: #94a3b8;
+  --color-text-inverse: #ffffff;
+  --color-text-link: #4f46e5;
 
   /* 边框 */
-  --color-border-subtle:  #EDEFF4;
-  --color-border-default: #E2E5EC;
-  --color-border-strong:  #CBD2DE;
+  --color-border-subtle: #edeff4;
+  --color-border-default: #e2e5ec;
+  --color-border-strong: #cbd2de;
 
   /* 语义状态 */
-  --color-success:        #16A34A;
-  --color-warning:        #D97706;
-  --color-danger:         #DC2626;
-  --color-info:           #0EA5E9;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-info: #0ea5e9;
 
   /* 强调 */
-  --color-accent:         #6366F1;
-  --color-accent-hover:   #4F46E5;
-  --color-accent-soft:    rgba(99, 102, 241, 0.12);
+  --color-accent: #6366f1;
+  --color-accent-hover: #4f46e5;
+  --color-accent-soft: rgba(99, 102, 241, 0.12);
 }
 ```
 
@@ -1181,16 +1196,16 @@ WSLPilot 主色命名为 **Aurora（极光）**，取青色到紫色的渐变，
 
 每个发行版有专属识别色，用于卡片描边、状态点、图标底色：
 
-| 发行版 | 主色 | 说明 |
-|---|---|---|
-| Ubuntu | `#E95420` | 经典橙 |
-| Debian | `#A80030` | 深红 |
-| Fedora | `#51A2DA` | 蓝 |
-| Arch | `#1793D1` | 青蓝 |
-| openSUSE | `#73BA25` | 绿 |
-| Kali | `#557C94` | 蓝灰 |
-| Alpine | `#0D597F` | 深海蓝 |
-| 默认/未知 | `var(--color-accent)` | 回退 |
+| 发行版    | 主色                  | 说明   |
+| --------- | --------------------- | ------ |
+| Ubuntu    | `#E95420`             | 经典橙 |
+| Debian    | `#A80030`             | 深红   |
+| Fedora    | `#51A2DA`             | 蓝     |
+| Arch      | `#1793D1`             | 青蓝   |
+| openSUSE  | `#73BA25`             | 绿     |
+| Kali      | `#557C94`             | 蓝灰   |
+| Alpine    | `#0D597F`             | 深海蓝 |
+| 默认/未知 | `var(--color-accent)` | 回退   |
 
 卡片左侧施以该色的**渐隐描边**，在浅色底上形成清新的"品牌点缀"。
 
@@ -1221,12 +1236,12 @@ export const themeOverrides: GlobalThemeOverrides = {
     cardColor: '#FFFFFF',
     modalColor: '#FFFFFF',
     popoverColor: '#FFFFFF',
-    borderColor: '#E2E5EC'
+    borderColor: '#E2E5EC',
     // ... 其余语义令牌按需映射
   },
   Button: { fontWeight: '600', borderRadiusMedium: '10px' },
   Card: { borderRadius: '16px' },
-  DataTable: { thColor: '#EFF1F6', tdColorHover: 'rgba(99,102,241,0.06)' }
+  DataTable: { thColor: '#EFF1F6', tdColorHover: 'rgba(99,102,241,0.06)' },
 }
 ```
 
@@ -1254,16 +1269,16 @@ export const themeOverrides: GlobalThemeOverrides = {
 
 **字号阶梯（1.25 比例，模块化）**：
 
-| 令牌 | 值 | 用途 |
-|---|---|---|
-| `--text-display` | 32px / 1.15 / 700 | 大数字指标 |
-| `--text-h1` | 24px / 1.25 / 650 | 页面主标题 |
-| `--text-h2` | 19px / 1.3 / 600 | 区块标题 |
-| `--text-h3` | 16px / 1.4 / 600 | 卡片标题 |
-| `--text-body` | 14px / 1.55 / 400 | 正文（桌面应用主字号） |
-| `--text-sm` | 13px / 1.5 / 400 | 次要信息 |
-| `--text-xs` | 12px / 1.45 / 500 | 标签/徽章 |
-| `--text-mono` | 13px / 1.6 / 400 | 代码/命令/终端 |
+| 令牌             | 值                | 用途                   |
+| ---------------- | ----------------- | ---------------------- |
+| `--text-display` | 32px / 1.15 / 700 | 大数字指标             |
+| `--text-h1`      | 24px / 1.25 / 650 | 页面主标题             |
+| `--text-h2`      | 19px / 1.3 / 600  | 区块标题               |
+| `--text-h3`      | 16px / 1.4 / 600  | 卡片标题               |
+| `--text-body`    | 14px / 1.55 / 400 | 正文（桌面应用主字号） |
+| `--text-sm`      | 13px / 1.5 / 400  | 次要信息               |
+| `--text-xs`      | 12px / 1.45 / 500 | 标签/徽章              |
+| `--text-mono`    | 13px / 1.6 / 400  | 代码/命令/终端         |
 
 字重：`300 / 400 / 500 / 600 / 700`。中文优先使用系统字体，保证清晰与加载性能。
 
@@ -1271,38 +1286,58 @@ export const themeOverrides: GlobalThemeOverrides = {
 
 ```css
 /* 间距（4px 基准） */
---space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
---space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-16: 64px;
+--space-1: 4px;
+--space-2: 8px;
+--space-3: 12px;
+--space-4: 16px;
+--space-5: 20px;
+--space-6: 24px;
+--space-8: 32px;
+--space-10: 40px;
+--space-16: 64px;
 
 /* 圆角 */
---radius-xs: 6px;  --radius-sm: 8px;  --radius-md: 12px;
---radius-lg: 16px; --radius-xl: 20px; --radius-full: 9999px;
+--radius-xs: 6px;
+--radius-sm: 8px;
+--radius-md: 12px;
+--radius-lg: 16px;
+--radius-xl: 20px;
+--radius-full: 9999px;
 
 /* 阴影（浅色主题：柔和多层，带蓝色调） */
---shadow-xs:   0 1px 2px rgba(15,23,42,.06);
---shadow-sm:   0 2px 6px rgba(15,23,42,.08);
---shadow-md:   0 6px 16px -4px rgba(15,23,42,.12), 0 2px 6px -2px rgba(15,23,42,.08);
---shadow-lg:   0 16px 40px -12px rgba(15,23,42,.22);
+--shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
+--shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.08);
+--shadow-md: 0 6px 16px -4px rgba(15, 23, 42, 0.12), 0 2px 6px -2px rgba(15, 23, 42, 0.08);
+--shadow-lg: 0 16px 40px -12px rgba(15, 23, 42, 0.22);
 --shadow-glow: 0 0 0 1px var(--color-border-default), 0 8px 32px -8px var(--color-accent-soft);
 
 /* 层级 */
---z-base: 0; --z-dropdown: 1000; --z-sticky: 1100; --z-drawer: 1200;
---z-modal: 1300; --z-toast: 1400; --z-tooltip: 1500; --z-command: 1600;
+--z-base: 0;
+--z-dropdown: 1000;
+--z-sticky: 1100;
+--z-drawer: 1200;
+--z-modal: 1300;
+--z-toast: 1400;
+--z-tooltip: 1500;
+--z-command: 1600;
 ```
 
 ### 10.5 动效令牌
 
 ```css
 /* 时长 */
---dur-instant: 80ms;   --dur-fast: 140ms;  --dur-base: 220ms;
---dur-slow: 320ms;     --dur-slower: 480ms;
+--dur-instant: 80ms;
+--dur-fast: 140ms;
+--dur-base: 220ms;
+--dur-slow: 320ms;
+--dur-slower: 480ms;
 
 /* 缓动 */
---ease-standard:  cubic-bezier(.2, 0, 0, 1);      /* 通用 */
---ease-decelerate: cubic-bezier(0, 0, 0, 1);        /* 进入 */
---ease-accelerate: cubic-bezier(.3, 0, 1, 1);       /* 退出 */
---ease-spring:     cubic-bezier(.34, 1.56, .64, 1); /* 弹性 */
---ease-emphasized: cubic-bezier(.2, 0, 0, 1);
+--ease-standard: cubic-bezier(0.2, 0, 0, 1); /* 通用 */
+--ease-decelerate: cubic-bezier(0, 0, 0, 1); /* 进入 */
+--ease-accelerate: cubic-bezier(0.3, 0, 1, 1); /* 退出 */
+--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 弹性 */
+--ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
 ```
 
 > 当 `prefers-reduced-motion` 或设置中 `reduceMotion` 开启时，所有时长降为 `0.01ms`，动效退化为即时切换。
@@ -1321,30 +1356,30 @@ WSLPilot **不自研基础组件**，而是以 **Naive UI** 作为组件基座�
 
 #### 10.7.1 直接使用 Naive UI 的组件
 
-| 类别 | Naive UI 组件 |
-|---|---|
-| 基础 | `NButton`、`NIcon`、`NText`、`NDivider`、`NTag`、`NBadge`、`NAvatar`、`NTooltip` |
-| 布局 | `NCard`、`NLayout`、`NGrid`、`NSpace`、`NSplit` |
-| 表单 | `NInput`、`NInputNumber`、`NSelect`、`NCheckbox`、`NRadio`、`NSwitch`、`NSlider`、`NForm`、`NFormItem` |
-| 导航 | `NMenu`、`NTabs`、`NBreadcrumb`、`NSteps`、`NPagination`、`NDropdown` |
+| 类别 | Naive UI 组件                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 基础 | `NButton`、`NIcon`、`NText`、`NDivider`、`NTag`、`NBadge`、`NAvatar`、`NTooltip`                                                |
+| 布局 | `NCard`、`NLayout`、`NGrid`、`NSpace`、`NSplit`                                                                                 |
+| 表单 | `NInput`、`NInputNumber`、`NSelect`、`NCheckbox`、`NRadio`、`NSwitch`、`NSlider`、`NForm`、`NFormItem`                          |
+| 导航 | `NMenu`、`NTabs`、`NBreadcrumb`、`NSteps`、`NPagination`、`NDropdown`                                                           |
 | 反馈 | `NMessage`、`NDialog`、`NNotification`、`NDrawer`、`NPopover`、`NModal`、`NSpin`、`NSkeleton`、`NProgress`、`NResult`、`NEmpty` |
-| 数据 | `NDataTable`、`NList`、`NTree`、`NStatistic`、`NDescriptions` |
-| 高级 | `NCode`、`NLog`、`NCollapse`、`NTimeline` |
+| 数据 | `NDataTable`、`NList`、`NTree`、`NStatistic`、`NDescriptions`                                                                   |
+| 高级 | `NCode`、`NLog`、`NCollapse`、`NTimeline`                                                                                       |
 
 #### 10.7.2 WSLPilot 自研的业务组件（基于 Naive UI 封装）
 
-| 组件 | 说明 | 依赖基础 |
-|---|---|---|
-| `DistroCard` | 发行版卡片（品牌色描边 + 状态脉冲） | `NCard` |
-| `MetricCard` | 指标卡（数值滚动 + 迷你趋势） | `NCard` + `Sparkline` |
-| `StatusDot` | 呼吸脉冲状态点 | `NIcon` |
-| `ProgressRing` | 渐变环形进度 | `NProgress`（自定义） |
-| `Sparkline` | 迷你趋势图 | 原生 SVG |
-| `CommandPalette` | ⌘K 命令面板（模糊匹配） | `NModal` + `NInput` |
-| `TerminalPane` | xterm.js 终端面板 | 原生 + `NCard` |
-| `CodeEditor` | 配置文本 / JSONC 编辑器 | 原生 textarea / CodeMirror |
-| `Kbd` | 快捷键提示 | `NText` |
-| `EmptyState` | 空状态插画 | `NEmpty` |
+| 组件             | 说明                                | 依赖基础                   |
+| ---------------- | ----------------------------------- | -------------------------- |
+| `DistroCard`     | 发行版卡片（品牌色描边 + 状态脉冲） | `NCard`                    |
+| `MetricCard`     | 指标卡（数值滚动 + 迷你趋势）       | `NCard` + `Sparkline`      |
+| `StatusDot`      | 呼吸脉冲状态点                      | `NIcon`                    |
+| `ProgressRing`   | 渐变环形进度                        | `NProgress`（自定义）      |
+| `Sparkline`      | 迷你趋势图                          | 原生 SVG                   |
+| `CommandPalette` | ⌘K 命令面板（模糊匹配）             | `NModal` + `NInput`        |
+| `TerminalPane`   | xterm.js 终端面板                   | 原生 + `NCard`             |
+| `CodeEditor`     | 配置文本 / JSONC 编辑器             | 原生 textarea / CodeMirror |
+| `Kbd`            | 快捷键提示                          | `NText`                    |
+| `EmptyState`     | 空状态插画                          | `NEmpty`                   |
 
 ---
 
@@ -1372,8 +1407,13 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 **自定义无边框标题栏（frameless）+ 自绘控件**，实现一体化视觉，同时通过 `-webkit-app-region: drag` 保留拖拽。
 
 ```css
-.titlebar { -webkit-app-region: drag; height: 40px; }
-.titlebar .no-drag { -webkit-app-region: no-drag; }
+.titlebar {
+  -webkit-app-region: drag;
+  height: 40px;
+}
+.titlebar .no-drag {
+  -webkit-app-region: no-drag;
+}
 ```
 
 **主框架三段式**：
@@ -1397,12 +1437,12 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 ### 11.3 响应式与窗口适配
 
-| 宽度 | 布局策略 |
-|---|---|
-| ≥ 1280px | 完整三栏，指标卡 4 列，卡片网格 3 列 |
-| 960–1280px | 指标卡 3 列，卡片网格 2 列 |
-| 720–960px | 侧栏折叠为图标，卡片网格 1 列 |
-| < 720px | 紧凑模式，表格转卡片列表 |
+| 宽度       | 布局策略                             |
+| ---------- | ------------------------------------ |
+| ≥ 1280px   | 完整三栏，指标卡 4 列，卡片网格 3 列 |
+| 960–1280px | 指标卡 3 列，卡片网格 2 列           |
+| 720–960px  | 侧栏折叠为图标，卡片网格 1 列        |
+| < 720px    | 紧凑模式，表格转卡片列表             |
 
 ### 11.4 无障碍（Accessibility）
 
@@ -1416,17 +1456,17 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 ### 11.5 键盘与快捷键
 
-| 快捷键 | 动作 |
-|---|---|
-| `Ctrl/⌘ + K` | 打开命令面板 |
-| `Ctrl/⌘ + N` | 新建终端标签 |
-| `Ctrl/⌘ + ,` | 打开设置 |
-| `Ctrl/⌘ + R` | 刷新发行版列表 |
+| 快捷键               | 动作               |
+| -------------------- | ------------------ |
+| `Ctrl/⌘ + K`         | 打开命令面板       |
+| `Ctrl/⌘ + N`         | 新建终端标签       |
+| `Ctrl/⌘ + ,`         | 打开设置           |
+| `Ctrl/⌘ + R`         | 刷新发行版列表     |
 | `Ctrl/⌘ + Shift + P` | 显示等价命令行切换 |
-| `Esc` | 关闭浮层 / 取消 |
-| `↑ ↓` | 列表/命令面板导航 |
-| `Enter` | 确认 |
-| `Ctrl/⌘ + 1..9` | 切换终端标签 |
+| `Esc`                | 关闭浮层 / 取消    |
+| `↑ ↓`                | 列表/命令面板导航  |
+| `Enter`              | 确认               |
+| `Ctrl/⌘ + 1..9`      | 切换终端标签       |
 
 所有快捷键在设置中可查看，并在相关按钮的 Tooltip 中提示。
 
@@ -1484,6 +1524,7 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ```
 
 **亮点细节**：
+
 - 顶部问候语按时间变化（早上好/下午好/晚上好），带用户头像占位。
 - 指标卡悬浮时轻微上浮 + 光晕，数字带**滚动递增动画**。
 - 迷你趋势图（Sparkline）用渐变描边，实时更新。
@@ -1496,13 +1537,13 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 **详情页**五个标签：
 
-| 标签 | 内容 |
-|---|---|
+| 标签     | 内容                                                                           |
+| -------- | ------------------------------------------------------------------------------ |
 | **概览** | 名称、GUID、BasePath（可复制）、默认用户、WSL 版本、资源 Mini 仪表盘、最近任务 |
-| **终端** | 内嵌 xterm 全功能终端，用户/目录选择，多标签 |
-| **文件** | 双栏浏览器（宿主 ↔ 发行版），拖拽复制，面包屑导航 |
-| **配置** | `wsl.conf` 可视化表单 + 原始文本双模式，带 Diff 预览 |
-| **动作** | `quickActions` 与全部动作卡片，一键运行，展示等价命令 |
+| **终端** | 内嵌 xterm 全功能终端，用户/目录选择，多标签                                   |
+| **文件** | 双栏浏览器（宿主 ↔ 发行版），拖拽复制，面包屑导航                              |
+| **配置** | `wsl.conf` 可视化表单 + 原始文本双模式，带 Diff 预览                           |
+| **动作** | `quickActions` 与全部动作卡片，一键运行，展示等价命令                          |
 
 ### 12.5 终端工作区（Terminal）
 
@@ -1555,20 +1596,20 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 ### 13.2 关键交互动效清单
 
-| 场景 | 动效 | 时长/缓动 |
-|---|---|---|
-| 按钮点击 | 涟漪扩散（Ripple）+ 轻微缩放 | 140ms / ease-standard |
-| 卡片悬浮 | 上浮 2px + 阴影加深 + 光晕淡入 | 220ms / ease-decelerate |
-| 状态点运行 | 呼吸脉冲（scale 1→1.4，opacity 1→0 循环） | 1.8s 循环 |
-| 数字指标 | 从 0 滚动递增到目标值 | 600ms / ease-decelerate |
-| 路由切换 | 淡入 + 上移 8px | 220ms / ease-standard |
-| 抽屉/模态 | 背景模糊渐入 + 面板滑入/缩放 | 320ms / ease-emphasized |
-| 命令面板 | 背景整体模糊 + 面板下弹 | 220ms / ease-decelerate |
-| Toast | 右侧滑入 + 自动淡出 | 320ms / ease-spring |
-| 进度环 | 渐变描边旋转 + 数值同步 | 连续 |
-| 列表项增删 | 高度展开/收起 + 淡入淡出（FLIP） | 220ms |
-| 强调色切换 | 全局强调色 300ms 平滑过渡 | 300ms |
-| 标签切换 | 下划线滑动 + 内容横向滑动 | 220ms |
+| 场景       | 动效                                      | 时长/缓动               |
+| ---------- | ----------------------------------------- | ----------------------- |
+| 按钮点击   | 涟漪扩散（Ripple）+ 轻微缩放              | 140ms / ease-standard   |
+| 卡片悬浮   | 上浮 2px + 阴影加深 + 光晕淡入            | 220ms / ease-decelerate |
+| 状态点运行 | 呼吸脉冲（scale 1→1.4，opacity 1→0 循环） | 1.8s 循环               |
+| 数字指标   | 从 0 滚动递增到目标值                     | 600ms / ease-decelerate |
+| 路由切换   | 淡入 + 上移 8px                           | 220ms / ease-standard   |
+| 抽屉/模态  | 背景模糊渐入 + 面板滑入/缩放              | 320ms / ease-emphasized |
+| 命令面板   | 背景整体模糊 + 面板下弹                   | 220ms / ease-decelerate |
+| Toast      | 右侧滑入 + 自动淡出                       | 320ms / ease-spring     |
+| 进度环     | 渐变描边旋转 + 数值同步                   | 连续                    |
+| 列表项增删 | 高度展开/收起 + 淡入淡出（FLIP）          | 220ms                   |
+| 强调色切换 | 全局强调色 300ms 平滑过渡                 | 300ms                   |
+| 标签切换   | 下划线滑动 + 内容横向滑动                 | 220ms                   |
 
 ### 13.3 命令面板（Command Palette）
 
@@ -1604,7 +1645,7 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 ```ts
 new BrowserWindow({
-  frame: false,                 // 自绘标题栏
+  frame: false, // 自绘标题栏
   titleBarStyle: 'hidden',
   webPreferences: {
     contextIsolation: true,
@@ -1651,25 +1692,25 @@ flowchart LR
 ```ts
 export interface AppError {
   code: string
-  message: string        // 面向用户的中文描述
-  detail?: string        // 原始 stderr，可折叠
-  rawCommand?: string    // 等价命令行
+  message: string // 面向用户的中文描述
+  detail?: string // 原始 stderr，可折叠
+  rawCommand?: string // 等价命令行
   recoverable: boolean
-  suggestion?: string    // 建议的下一步
+  suggestion?: string // 建议的下一步
 }
 ```
 
-| 错误码 | 场景 | 建议 |
-|---|---|---|
-| `WSL_NOT_INSTALLED` | 系统未启用 WSL | 引导 `wsl --install` |
-| `WSL_NOT_FOUND` | 找不到 wsl.exe | 检查 PATH |
-| `DISTRO_RUNNING` | 对运行中发行版迁移 | 先 terminate |
-| `DISTRO_NOT_FOUND` | 名称错误 | 刷新列表 |
-| `PERMISSION_DENIED` | 需提权 | 走 Helper |
-| `CONFIG_INVALID` | JSONC 校验失败 | 展示行号与原因 |
-| `CONFIG_CONFLICT` | 外部编辑冲突 | 重载/覆盖/对比 |
-| `IO_ERROR` | 文件系统错误 | 展示原始信息 |
-| `TASK_CANCELED` | 用户取消 | 非错误 |
+| 错误码              | 场景               | 建议                 |
+| ------------------- | ------------------ | -------------------- |
+| `WSL_NOT_INSTALLED` | 系统未启用 WSL     | 引导 `wsl --install` |
+| `WSL_NOT_FOUND`     | 找不到 wsl.exe     | 检查 PATH            |
+| `DISTRO_RUNNING`    | 对运行中发行版迁移 | 先 terminate         |
+| `DISTRO_NOT_FOUND`  | 名称错误           | 刷新列表             |
+| `PERMISSION_DENIED` | 需提权             | 走 Helper            |
+| `CONFIG_INVALID`    | JSONC 校验失败     | 展示行号与原因       |
+| `CONFIG_CONFLICT`   | 外部编辑冲突       | 重载/覆盖/对比       |
+| `IO_ERROR`          | 文件系统错误       | 展示原始信息         |
+| `TASK_CANCELED`     | 用户取消           | 非错误               |
 
 ### 15.2 错误呈现的 UX
 
@@ -1687,13 +1728,13 @@ export interface AppError {
 
 ## 16. 测试策略
 
-| 层次 | 工具 | 覆盖点 |
-|---|---|---|
-| 单元 | Vitest | `parseDistroList`、JSONC 加载/校验/合并、原子写、占位符替换、错误映射、令牌生成 |
-| IPC 契约 | Vitest | 每通道入参 zod 通过与拒绝用例 |
-| 组件 | Vitest + @vue/test-utils | 按钮、卡片、确认框、配置表单、命令面板 |
-| 视觉回归 | Playwright + 截图对比 | 关键页面浅色主题渲染一致性 |
-| 端到端 | Playwright + Electron | 启动、列出（模拟）发行版、打开终端、改设置并落盘 |
+| 层次     | 工具                     | 覆盖点                                                                          |
+| -------- | ------------------------ | ------------------------------------------------------------------------------- |
+| 单元     | Vitest                   | `parseDistroList`、JSONC 加载/校验/合并、原子写、占位符替换、错误映射、令牌生成 |
+| IPC 契约 | Vitest                   | 每通道入参 zod 通过与拒绝用例                                                   |
+| 组件     | Vitest + @vue/test-utils | 按钮、卡片、确认框、配置表单、命令面板                                          |
+| 视觉回归 | Playwright + 截图对比    | 关键页面浅色主题渲染一致性                                                      |
+| 端到端   | Playwright + Electron    | 启动、列出（模拟）发行版、打开终端、改设置并落盘                                |
 
 **关键单测样例**：含中文、`*` 默认标记、多空格的 `wsl -l -v` 输出解析；损坏 JSONC 返回带行号错误；强调色切换下语义令牌映射正确。
 
@@ -1744,33 +1785,33 @@ export const migrations: Record<ConfigKey, Array<(old: any) => any>> = {
 
 ## 20. 里程碑规划
 
-| 阶段 | 范围 | 交付 |
-|---|---|---|
-| **M1 骨架** | 工程结构、设计系统、令牌、基础组件、ConfigService | 可运行外壳 + 强调色切换 + 读写 settings.jsonc |
-| **M2 驾驶舱** | 解析 `wsl -l -v`、列表、指标卡、启停、设默认 | 驾驶舱与发行版列表可用 |
-| **M3 终端** | node-pty + xterm 多标签 | 内置终端可用 |
-| **M4 备份迁移** | 导出/导入/迁移 + 进度与取消 | 完整 IO 能力 |
-| **M5 配置与动作** | wsl.conf 编辑、注册表详情、自定义动作、命令面板 | 配置中心化 + ⌘K |
-| **M6 网络与设备** | 端口转发、镜像引导、usbipd（可选） | 网络与设备面板 |
-| **M7 打磨发布** | 动效完善、空状态、无障碍、诊断包、签名、自动更新 | 可发布 v1.0 |
+| 阶段              | 范围                                              | 交付                                          |
+| ----------------- | ------------------------------------------------- | --------------------------------------------- |
+| **M1 骨架**       | 工程结构、设计系统、令牌、基础组件、ConfigService | 可运行外壳 + 强调色切换 + 读写 settings.jsonc |
+| **M2 驾驶舱**     | 解析 `wsl -l -v`、列表、指标卡、启停、设默认      | 驾驶舱与发行版列表可用                        |
+| **M3 终端**       | node-pty + xterm 多标签                           | 内置终端可用                                  |
+| **M4 备份迁移**   | 导出/导入/迁移 + 进度与取消                       | 完整 IO 能力                                  |
+| **M5 配置与动作** | wsl.conf 编辑、注册表详情、自定义动作、命令面板   | 配置中心化 + ⌘K                               |
+| **M6 网络与设备** | 端口转发、镜像引导、usbipd（可选）                | 网络与设备面板                                |
+| **M7 打磨发布**   | 动效完善、空状态、无障碍、诊断包、签名、自动更新  | 可发布 v1.0                                   |
 
 ---
 
 ## 21. 风险与对策
 
-| 风险 | 影响 | 对策 |
-|---|---|---|
-| `wsl.exe` 输出格式随版本变化 | 解析失败 | 宽容解析 + 版本探测 + 多语言样本单测 |
-| UTF-16LE 乱码 | 列表不可用 | Buffer + utf16le 解码，清 `\0` |
-| 中文/字体导致列宽不同 | 列错位 | 按多空白切分而非固定列位 |
-| 长任务不可控 | 用户误操作 | 取消、并发锁、二次确认、备份前置 |
-| 配置文件被外部改坏 | 应用崩溃 | zod 校验 + 行号报错 + 备份 + 降级只读 |
-| 并发写覆盖 | 配置丢失 | 单写者队列 + 写前重读 + 原子替换 |
-| 原子写丢注释 | 用户不满 | 最小编辑；冲突询问，绝不静默丢弃 |
-| 提权弹窗频繁 | 体验差 | 合并提权会话 + Helper 结构化请求 |
-| 9p 文件 IO 慢 | 文件面板卡顿 | 加载态 + 大文件引导回终端 |
-| 原生模块 ABI 不匹配 | 终端不可用 | electron-rebuild + CI 双架构 |
-| 动效导致卡顿 | 体验下降 | GPU 加速属性 + reduced-motion 降级 |
+| 风险                         | 影响         | 对策                                  |
+| ---------------------------- | ------------ | ------------------------------------- |
+| `wsl.exe` 输出格式随版本变化 | 解析失败     | 宽容解析 + 版本探测 + 多语言样本单测  |
+| UTF-16LE 乱码                | 列表不可用   | Buffer + utf16le 解码，清 `\0`        |
+| 中文/字体导致列宽不同        | 列错位       | 按多空白切分而非固定列位              |
+| 长任务不可控                 | 用户误操作   | 取消、并发锁、二次确认、备份前置      |
+| 配置文件被外部改坏           | 应用崩溃     | zod 校验 + 行号报错 + 备份 + 降级只读 |
+| 并发写覆盖                   | 配置丢失     | 单写者队列 + 写前重读 + 原子替换      |
+| 原子写丢注释                 | 用户不满     | 最小编辑；冲突询问，绝不静默丢弃      |
+| 提权弹窗频繁                 | 体验差       | 合并提权会话 + Helper 结构化请求      |
+| 9p 文件 IO 慢                | 文件面板卡顿 | 加载态 + 大文件引导回终端             |
+| 原生模块 ABI 不匹配          | 终端不可用   | electron-rebuild + CI 双架构          |
+| 动效导致卡顿                 | 体验下降     | GPU 加速属性 + reduced-motion 降级    |
 
 ---
 
@@ -1778,47 +1819,47 @@ export const migrations: Record<ConfigKey, Array<(old: any) => any>> = {
 
 ### 22.1 常用 wsl.exe 命令对照
 
-| 功能 | 命令 |
-|---|---|
-| 列出（详细） | `wsl --list --verbose` |
-| 列出可安装 | `wsl --list --online` |
-| 安装 | `wsl --install [-d <name>]` |
-| 设为默认 | `wsl --set-default <name>` |
-| 设置版本 | `wsl --set-version <name> <1\|2>` |
-| 终止 | `wsl --terminate <name>` |
-| 全局关机 | `wsl --shutdown` |
-| 注销 | `wsl --unregister <name>` |
-| 导出 | `wsl --export <name> <path> [--vhd]` |
-| 导入 | `wsl --import <name> <installPath> <tar> [--version <1\|2>]` |
-| 就地导入 | `wsl --import-in-place <name> <vhdx>` |
-| 迁移磁盘 | `wsl --manage <name> --move <path>` |
-| 状态 | `wsl --status` / `wsl --version` |
-| 执行命令 | `wsl -d <name> -u <user> --cd <dir> -e <program> <args...>` |
+| 功能         | 命令                                                         |
+| ------------ | ------------------------------------------------------------ |
+| 列出（详细） | `wsl --list --verbose`                                       |
+| 列出可安装   | `wsl --list --online`                                        |
+| 安装         | `wsl --install [-d <name>]`                                  |
+| 设为默认     | `wsl --set-default <name>`                                   |
+| 设置版本     | `wsl --set-version <name> <1\|2>`                            |
+| 终止         | `wsl --terminate <name>`                                     |
+| 全局关机     | `wsl --shutdown`                                             |
+| 注销         | `wsl --unregister <name>`                                    |
+| 导出         | `wsl --export <name> <path> [--vhd]`                         |
+| 导入         | `wsl --import <name> <installPath> <tar> [--version <1\|2>]` |
+| 就地导入     | `wsl --import-in-place <name> <vhdx>`                        |
+| 迁移磁盘     | `wsl --manage <name> --move <path>`                          |
+| 状态         | `wsl --status` / `wsl --version`                             |
+| 执行命令     | `wsl -d <name> -u <user> --cd <dir> -e <program> <args...>`  |
 
 ### 22.2 配置文件清单速查
 
-| 文件 | 用途 | 用户常改 |
-|---|---|---|
-| `settings.jsonc` | 应用偏好 | 是 |
-| `distros.jsonc` | 发行版元数据 | 是 |
-| `actions.jsonc` | 自定义动作 | 是 |
-| `network.jsonc` | 端口转发/代理 | 中 |
-| `ui-state.jsonc` | 界面状态 | 否 |
-| `state.jsonc` | 运行态缓存 | 否 |
+| 文件             | 用途          | 用户常改 |
+| ---------------- | ------------- | -------- |
+| `settings.jsonc` | 应用偏好      | 是       |
+| `distros.jsonc`  | 发行版元数据  | 是       |
+| `actions.jsonc`  | 自定义动作    | 是       |
+| `network.jsonc`  | 端口转发/代理 | 中       |
+| `ui-state.jsonc` | 界面状态      | 否       |
+| `state.jsonc`    | 运行态缓存    | 否       |
 
 ### 22.3 设计令牌速查（语义层）
 
-| 令牌 | 值 | 用途 |
-|---|---|---|
-| `--color-bg-canvas` | `#F7F8FB` | 画布底 |
-| `--color-bg-surface` | `#FFFFFF` | 卡片/面板 |
-| `--color-bg-elevated` | `#FFFFFF` | 浮层 |
-| `--color-text-primary` | `#0F172A` | 主文字 |
-| `--color-text-secondary` | `#475569` | 次文字 |
-| `--color-border-default` | `#E2E5EC` | 边框 |
-| `--color-accent` | `#6366F1` | 强调 |
-| `--color-success` | `#16A34A` | 成功 |
-| `--color-danger` | `#DC2626` | 危险 |
+| 令牌                     | 值        | 用途      |
+| ------------------------ | --------- | --------- |
+| `--color-bg-canvas`      | `#F7F8FB` | 画布底    |
+| `--color-bg-surface`     | `#FFFFFF` | 卡片/面板 |
+| `--color-bg-elevated`    | `#FFFFFF` | 浮层      |
+| `--color-text-primary`   | `#0F172A` | 主文字    |
+| `--color-text-secondary` | `#475569` | 次文字    |
+| `--color-border-default` | `#E2E5EC` | 边框      |
+| `--color-accent`         | `#6366F1` | 强调      |
+| `--color-success`        | `#16A34A` | 成功      |
+| `--color-danger`         | `#DC2626` | 危险      |
 
 ### 22.4 参考
 

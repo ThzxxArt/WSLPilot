@@ -13,6 +13,16 @@
 
 ### Added
 
+- **质量根治（全量 review 清零）**
+  - 全站错误提示修复：统一 `describeError/errorLine`，AppError（纯对象）不再被 `instanceof Error` 误判吞掉
+  - 配置安全：损坏 JSONC 拒绝写回、`patch({})` 不清空文件、嵌套 `__proto__` 拒绝、`z.record` 逐键清洗、版本戳不再"说谎"
+  - 备份命名/轮转往返修复（全部非法字符替换 + 正则同源）
+  - 长任务：无输出看门狗（10 分钟）、settle 幂等、取消与完成竞态修正（exit 0 优先成功）、记录限量
+  - 生命周期：bootstrap 全局异常兜底、窗口防抖 timer 清理、config 监听器隔离、退出前 flush 落盘
+  - **安装发行版向导**（`wsl --list --online` + `wsl --install`，进度/取消）
+  - **全局命令面板 Ctrl/⌘+K**（导航 / 发行版 / 动作即输即搜）
+  - 发行版详情弹窗（GUID/安装位置/元数据编辑/注销），「查看详情」不再是伪跳转
+  - 驾驶舱快捷操作全部接通（安装 / 备份 / 清理旧备份 / 网络）
 - **M4 备份迁移**：导出 / 导入 / 迁移完整 IO 能力，长任务带进度、日志与取消
 - TaskRunner：任务生命周期、进度事件（`task:progress`）、取消（kill 子进程）、同发行版写任务串行锁、`state.jsonc.lastTaskResult` 落盘
 - IoService：`wsl --export`（tar / `--vhd`）、`wsl --import`（`--version` / `--vhd`）、`wsl --import-in-place`、`wsl --manage --move`
@@ -56,4 +66,4 @@
 - NSIS 安装包（支持自定义安装路径）与 portable 免安装版
 - 单元测试（解析 / schema / 迁移 / 错误码）与 CI 工作流
 
-> 完整应用尚未完成（M2–M7 未交付），首个正式版本待功能完整后再打标签。
+> 完整应用尚未完成（M5–M7 未交付），首个正式版本待功能完整后再打标签。

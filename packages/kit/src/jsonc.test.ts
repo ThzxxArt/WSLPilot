@@ -97,4 +97,28 @@ describe('stringifyJsonc / parseOrThrow', () => {
   it('parseOrThrow throws structured error with filename', () => {
     expect(() => parseOrThrow('{bad', 'settings.jsonc')).toThrow(/settings\.jsonc/)
   })
+
+  it('parseOrThrow 接受合法 falsy 根值（review m1）', () => {
+    expect(parseOrThrow('0', 'x')).toBe(0)
+    expect(parseOrThrow('null', 'x')).toBeNull()
+    expect(parseOrThrow('false', 'x')).toBe(false)
+    expect(() => parseOrThrow('', 'x')).toThrow()
+  })
+})
+
+describe('collectLeafPaths 空对象叶子（review M6 回归）', () => {
+  it('根级空 patch 是 no-op；嵌套空对象作为叶子写入', () => {
+    expect(collectLeafPaths({})).toEqual([])
+    expect(collectLeafPaths({ a: {} })).toEqual([{ path: ['a'], value: {} }])
+    expect(collectLeafPaths({ a: { b: {} } })).toEqual([{ path: ['a', 'b'], value: {} }])
+    expect(collectLeafPaths({ a: [] })).toEqual([{ path: ['a'], value: [] }])
+  })
+
+  it('applyPatchJsonc 能把对象写成空对象，且空 patch 不破坏原文', () => {
+    const text = '{\n  // keep\n  "a": { "b": 1 }\n}'
+    const out = applyPatchJsonc(text, { a: {} })
+    expect(parseJsoncSafe(out).data).toEqual({ a: {} })
+    const noop = applyPatchJsonc(text, {})
+    expect(noop).toBe(text)
+  })
 })

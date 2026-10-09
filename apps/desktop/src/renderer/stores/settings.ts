@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import type { AccentName, AppSettings, BackupFormat, LogLevel } from '@wslpilot/shared'
+import { toAppError, type AppError } from '@shared/errors'
 
 const DEFAULTS = {
   accent: 'aurora',
@@ -43,31 +44,44 @@ export const useSettingsStore = defineStore('settings', {
     backupFormat: DEFAULTS.backupFormat as BackupFormat,
     backupKeepRecent: DEFAULTS.backupKeepRecent as number,
     backupAutoBeforeDestructive: DEFAULTS.backupAutoBeforeDestructive as boolean,
+    lastError: null as AppError | null,
     version: '',
   }),
 
   actions: {
+    /**
+     * 加载设置。失败降级到默认值并记录错误——
+     * 绝不让启动链卡死在 loading（review C11）。
+     */
     async load() {
-      const s = (await window.wslAPI.config.get('settings')) as AppSettings
-      this.accent = s.general.accent
-      this.locale = s.general.locale
-      this.reduceMotion = s.general.reduceMotion
-      this.showRawCommand = s.advanced.showRawCommand
-      this.confirmDestructive = s.advanced.confirmDestructive
-      this.logLevel = s.advanced.logLevel
-      this.pollIntervalMs = s.general.pollIntervalMs
-      this.closeBehavior = s.general.closeBehavior
-      this.terminalFontFamily = s.terminal.fontFamily
-      this.terminalFontSize = s.terminal.fontSize
-      this.terminalLineHeight = s.terminal.lineHeight
-      this.terminalCursorStyle = s.terminal.cursorStyle
-      this.terminalCursorBlink = s.terminal.cursorBlink
-      this.terminalScrollback = s.terminal.scrollback
-      this.backupDefaultDir = s.backup.defaultDir
-      this.backupFormat = s.backup.format
-      this.backupKeepRecent = s.backup.keepRecent
-      this.backupAutoBeforeDestructive = s.backup.autoBackupBeforeDestructive
-      this.version = await window.wslAPI.app.getVersion()
+      try {
+        const s = (await window.wslAPI.config.get('settings')) as AppSettings
+        this.accent = s.general.accent
+        this.locale = s.general.locale
+        this.reduceMotion = s.general.reduceMotion
+        this.showRawCommand = s.advanced.showRawCommand
+        this.confirmDestructive = s.advanced.confirmDestructive
+        this.logLevel = s.advanced.logLevel
+        this.pollIntervalMs = s.general.pollIntervalMs
+        this.closeBehavior = s.general.closeBehavior
+        this.terminalFontFamily = s.terminal.fontFamily
+        this.terminalFontSize = s.terminal.fontSize
+        this.terminalLineHeight = s.terminal.lineHeight
+        this.terminalCursorStyle = s.terminal.cursorStyle
+        this.terminalCursorBlink = s.terminal.cursorBlink
+        this.terminalScrollback = s.terminal.scrollback
+        this.backupDefaultDir = s.backup.defaultDir
+        this.backupFormat = s.backup.format
+        this.backupKeepRecent = s.backup.keepRecent
+        this.backupAutoBeforeDestructive = s.backup.autoBackupBeforeDestructive
+      } catch (e) {
+        this.lastError = toAppError(e)
+      }
+      try {
+        this.version = await window.wslAPI.app.getVersion()
+      } catch {
+        this.version = ''
+      }
       this.loaded = true
     },
 

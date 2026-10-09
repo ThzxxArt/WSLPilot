@@ -11,7 +11,7 @@
       "note": "日常开发使用，勿随意迁移",
       "startupCwd": "/home/me/project",
       "pinned": true,
-      "quickActions": ["update-all", "open-code"]
-    }
-  ]
+      "quickActions": ["update-all", "open-code"],
+    },
+  ],
 }

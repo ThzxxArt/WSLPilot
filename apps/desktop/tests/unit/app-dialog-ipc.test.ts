@@ -42,7 +42,12 @@ function register(withWindow = true) {
   return { handlers, ctx }
 }
 
-function call(handlers: Map<string, (ctx: unknown, arg: unknown) => unknown>, ctx: unknown, channel: string, arg: unknown) {
+function call(
+  handlers: Map<string, (ctx: unknown, arg: unknown) => unknown>,
+  ctx: unknown,
+  channel: string,
+  arg: unknown,
+) {
   return handlers.get(channel)!(ctx, arg)
 }
 
@@ -93,13 +98,35 @@ describe('app dialog handlers (M4 路径选择)', () => {
     expect(await call(handlers, ctx, CH.appPickOpenFile, {})).toBeNull()
   })
 
-  it('appOpenPath surfaces shell errors as IO_ERROR', async () => {
+  it('appOpenPath 只允许目录：文件/不存在路径拒绝，目录走 shell（review C10）', async () => {
     const { handlers, ctx } = register()
-    vi.mocked(shell.openPath).mockResolvedValueOnce('boom')
-    await expect(call(handlers, ctx, CH.appOpenPath, 'D:\\x')).rejects.toMatchObject({
+    const { mkdtemp, writeFile } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'wslpilot-open-'))
+    const file = join(dir, 'evil.exe')
+    await writeFile(file, 'x')
+
+    // 目录 → shell.openPath
+    vi.mocked(shell.openPath).mockResolvedValueOnce('')
+    await expect(call(handlers, ctx, CH.appOpenPath, dir)).resolves.toBeUndefined()
+    expect(shell.openPath).toHaveBeenCalledWith(dir)
+
+    // 文件（含可执行）→ 拒绝，绝不走文件关联
+    await expect(call(handlers, ctx, CH.appOpenPath, file)).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+    })
+    expect(shell.openPath).not.toHaveBeenCalledWith(file)
+
+    // 不存在 → IO_ERROR
+    await expect(call(handlers, ctx, CH.appOpenPath, join(dir, 'nope'))).rejects.toMatchObject({
       code: 'IO_ERROR',
     })
-    vi.mocked(shell.openPath).mockResolvedValueOnce('')
-    await expect(call(handlers, ctx, CH.appOpenPath, 'D:\\x')).resolves.toBeUndefined()
+
+    // shell 打开失败 → IO_ERROR
+    vi.mocked(shell.openPath).mockResolvedValueOnce('boom')
+    await expect(call(handlers, ctx, CH.appOpenPath, dir)).rejects.toMatchObject({
+      code: 'IO_ERROR',
+    })
   })
 })

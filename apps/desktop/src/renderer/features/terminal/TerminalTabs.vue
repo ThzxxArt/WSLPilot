@@ -67,49 +67,37 @@ function submitNew() {
 
 <template>
   <div class="terminal-tabs">
-    <div class="tabs-scroll">
-      <button
+    <div class="tabs-scroll" role="tablist" aria-label="终端标签">
+      <!-- 外层不是 button：内部含关闭按钮，嵌套交互元素非法 HTML（review M4） -->
+      <div
         v-for="(s, i) in sessions"
         :key="s.ptyId"
         class="tab"
+        role="tab"
+        tabindex="0"
+        :aria-selected="s.ptyId === activeId"
         :class="{ active: s.ptyId === activeId, dead: !s.alive }"
         @mousedown="onTabMouseDown($event, i)"
         @click="emit('select', s.ptyId)"
         @dblclick="startRename(s)"
+        @keydown.enter.prevent="emit('select', s.ptyId)"
+        @keydown.space.prevent="emit('select', s.ptyId)"
       >
-        <span
-          class="dot"
-          :class="{ on: s.alive }"
-        />
+        <span class="dot" :class="{ on: s.alive }" />
         <span class="label">{{ s.title }}</span>
-        <button
-          class="close"
-          aria-label="关闭"
-          @click.stop="emit('close', s.ptyId)"
-        >
+        <button class="close" :aria-label="`关闭 ${s.title}`" @click.stop="emit('close', s.ptyId)">
           ×
         </button>
-      </button>
+      </div>
     </div>
 
     <div class="tabs-actions">
-      <n-popover
-        trigger="click"
-        placement="bottom-end"
-      >
+      <n-popover trigger="click" placement="bottom-end">
         <template #trigger>
-          <n-button
-            size="tiny"
-            secondary
-            :disabled="!canCreate"
-          >
-            + 新建
-          </n-button>
+          <n-button size="tiny" secondary :disabled="!canCreate"> + 新建 </n-button>
         </template>
         <div class="new-form">
-          <div class="hint">
-            选择发行版（上限 {{ maxSessions }}）
-          </div>
+          <div class="hint">选择发行版（上限 {{ maxSessions }}）</div>
           <n-select
             v-model:value="newDistro"
             :options="distroOptions"
@@ -117,12 +105,7 @@ function submitNew() {
             filterable
             style="width: 220px"
           />
-          <n-button
-            size="small"
-            type="primary"
-            style="margin-top: 8px"
-            @click="submitNew"
-          >
+          <n-button size="small" type="primary" style="margin-top: 8px" @click="submitNew">
             打开终端
           </n-button>
         </div>

@@ -60,27 +60,11 @@ const displayLabel = computed(() => {
     :aria-valuemax="100"
     :aria-label="sublabel || '进度'"
   >
-    <svg
-      :width="size"
-      :height="size"
-      :viewBox="`0 0 ${size} ${size}`"
-    >
+    <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`">
       <defs>
-        <linearGradient
-          :id="uid"
-          x1="0%"
-          y1="0%"
-          x2="100%"
-          y2="100%"
-        >
-          <stop
-            offset="0%"
-            :stop-color="gradientFrom"
-          />
-          <stop
-            offset="100%"
-            :stop-color="gradientTo"
-          />
+        <linearGradient :id="uid" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" :stop-color="gradientFrom" />
+          <stop offset="100%" :stop-color="gradientTo" />
         </linearGradient>
       </defs>
       <circle
@@ -107,10 +91,7 @@ const displayLabel = computed(() => {
       <div class="label">
         {{ displayLabel }}
       </div>
-      <div
-        v-if="sublabel"
-        class="sublabel"
-      >
+      <div v-if="sublabel" class="sublabel">
         {{ sublabel }}
       </div>
     </div>
@@ -135,7 +116,8 @@ const displayLabel = computed(() => {
 
 .progress-ring .value {
   stroke-linecap: round;
-  transition: stroke-dashoffset var(--dur-slow, 480ms) var(--ease-standard, cubic-bezier(0.2, 0, 0, 1));
+  transition: stroke-dashoffset var(--dur-slow, 480ms)
+    var(--ease-standard, cubic-bezier(0.2, 0, 0, 1));
 }
 
 .progress-ring.indeterminate svg {

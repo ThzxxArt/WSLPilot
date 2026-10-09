@@ -23,10 +23,13 @@ export function registerConfigHandlers(add: AddFn, ctx: IpcContext): void {
     return c.configService.load(key)
   })
 
-  add(CH.configSet, async (c, payload: { fileKey: string; patch: DeepPartial<ConfigMap[ConfigKey]> }) => {
-    const key = assertConfigKey(payload?.fileKey)
-    return c.configService.patch(key, payload.patch as never)
-  })
+  add(
+    CH.configSet,
+    async (c, payload: { fileKey: string; patch: DeepPartial<ConfigMap[ConfigKey]> }) => {
+      const key = assertConfigKey(payload?.fileKey)
+      return c.configService.patch(key, payload.patch as never)
+    },
+  )
 
   add(CH.configOpenExternal, async (c, fileKey: string) => {
     const key = assertConfigKey(fileKey)
@@ -49,10 +52,13 @@ export function registerConfigHandlers(add: AddFn, ctx: IpcContext): void {
   for (const key of CONFIG_KEYS) {
     ctx.configService.onChange(key, () => {
       const win = ctx.getMainWindow()
-      win?.webContents.send(CH.configChanged, { fileKey: key })
-      const conflict = ctx.configService.getConflict(key)
-      if (conflict) {
-        win?.webContents.send(CH.configConflict, conflict)
+      // 窗口销毁后 send 会抛错并反噬写路径（review M3）
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(CH.configChanged, { fileKey: key })
+        const conflict = ctx.configService.getConflict(key)
+        if (conflict) {
+          win.webContents.send(CH.configConflict, conflict)
+        }
       }
     })
   }

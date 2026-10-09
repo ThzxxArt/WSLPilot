@@ -56,15 +56,23 @@ const nameTaken = computed(() => {
   return !!n && props.distros.some((d) => d.name === n)
 })
 
-const nameInvalid = computed(() => props.form.name.trim() !== '' && !isValidDistroName(props.form.name))
+const nameInvalid = computed(
+  () => props.form.name.trim() !== '' && !isValidDistroName(props.form.name),
+)
 
 async function browseArchive() {
   const picked = await window.wslAPI.app.pickOpenFile({
     defaultPath: props.defaultDir,
     filters:
       props.form.format === 'vhd'
-        ? [{ name: 'WSL 虚拟磁盘', extensions: ['vhdx', 'vhd'] }, { name: '所有文件', extensions: ['*'] }]
-        : [{ name: 'TAR 归档', extensions: ['tar'] }, { name: '所有文件', extensions: ['*'] }],
+        ? [
+            { name: 'WSL 虚拟磁盘', extensions: ['vhdx', 'vhd'] },
+            { name: '所有文件', extensions: ['*'] },
+          ]
+        : [
+            { name: 'TAR 归档', extensions: ['tar'] },
+            { name: '所有文件', extensions: ['*'] },
+          ],
   })
   if (picked) {
     const looksVhd = /\.vhdx?$/i.test(picked)
@@ -72,6 +80,8 @@ async function browseArchive() {
       ...props.form,
       archivePath: picked,
       format: looksVhd ? 'vhd' : 'tar',
+      // 选到非 vhdx 时自动退出就地导入（非法组合 — review M12）
+      inPlace: looksVhd ? props.form.inPlace : false,
     })
   }
 }
@@ -87,58 +97,31 @@ async function browseInstallDir() {
     <!-- 步骤 1：名称与导入方式 -->
     <template v-if="step === 1">
       <div class="field">
-        <div class="label">
-          新发行版名称
-        </div>
-        <n-input
-          :value="name"
-          placeholder="例如 Ubuntu-Restored"
-          @update:value="setName"
-        />
-        <n-alert
-          v-if="nameTaken"
-          type="warning"
-        >
+        <div class="label">新发行版名称</div>
+        <n-input :value="name" placeholder="例如 Ubuntu-Restored" @update:value="setName" />
+        <n-alert v-if="nameTaken" type="warning">
           已存在同名发行版「{{ form.name }}」，请换一个名称。
         </n-alert>
-        <n-alert
-          v-else-if="nameInvalid"
-          type="error"
-        >
+        <n-alert v-else-if="nameInvalid" type="error">
           名称不能包含 \ / : * ? " &lt; &gt; | 等字符。
         </n-alert>
       </div>
 
       <div class="field">
-        <div class="label">
-          导入方式
-        </div>
-        <n-radio-group
-          :value="mode"
-          @update:value="setMode"
-        >
-          <n-radio-button value="tar">
-            tar 归档导入
-          </n-radio-button>
-          <n-radio-button value="vhd-copy">
-            vhdx 复制导入
-          </n-radio-button>
-          <n-radio-button value="vhd-inplace">
-            vhdx 就地导入
-          </n-radio-button>
+        <div class="label">导入方式</div>
+        <n-radio-group :value="mode" @update:value="setMode">
+          <n-radio-button value="tar"> tar 归档导入 </n-radio-button>
+          <n-radio-button value="vhd-copy"> vhdx 复制导入 </n-radio-button>
+          <n-radio-button value="vhd-inplace"> vhdx 就地导入 </n-radio-button>
         </n-radio-group>
         <div class="hint">
-          就地导入不复制虚拟磁盘、速度快，但源 vhdx 将被直接注册使用；复制导入会把 vhdx 拷贝到安装位置。
+          就地导入不复制虚拟磁盘、速度快，但源 vhdx 将被直接注册使用；复制导入会把 vhdx
+          拷贝到安装位置。
         </div>
       </div>
 
-      <div
-        v-if="mode === 'tar'"
-        class="field"
-      >
-        <div class="label">
-          目标 WSL 版本
-        </div>
+      <div v-if="mode === 'tar'" class="field">
+        <div class="label">目标 WSL 版本</div>
         <n-select
           :value="version"
           :options="[
@@ -154,52 +137,30 @@ async function browseInstallDir() {
     <!-- 步骤 2：文件与安装位置 -->
     <template v-else>
       <div class="field">
-        <div class="label">
-          备份文件
-        </div>
+        <div class="label">备份文件</div>
         <div class="row">
           <n-input
             :value="archivePath"
             placeholder="选择 .tar 或 .vhdx 备份文件"
             @update:value="setArchivePath"
           />
-          <n-button
-            secondary
-            @click="browseArchive"
-          >
-            浏览…
-          </n-button>
+          <n-button secondary @click="browseArchive"> 浏览… </n-button>
         </div>
       </div>
 
-      <div
-        v-if="!form.inPlace"
-        class="field"
-      >
-        <div class="label">
-          安装位置
-        </div>
+      <div v-if="!form.inPlace" class="field">
+        <div class="label">安装位置</div>
         <div class="row">
           <n-input
             :value="installPath"
             placeholder="发行版安装目录（将存放 ext4.vhdx）"
             @update:value="setInstallPath"
           />
-          <n-button
-            secondary
-            @click="browseInstallDir"
-          >
-            浏览…
-          </n-button>
+          <n-button secondary @click="browseInstallDir"> 浏览… </n-button>
         </div>
-        <div class="hint">
-          建议使用独立空目录，便于日后迁移与卸载。
-        </div>
+        <div class="hint">建议使用独立空目录，便于日后迁移与卸载。</div>
       </div>
-      <n-alert
-        v-else
-        type="info"
-      >
+      <n-alert v-else type="info">
         就地导入：源 vhdx 原地注册为「{{ form.name || '新发行版' }}」，无需选择安装位置。
       </n-alert>
     </template>

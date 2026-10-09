@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import Sparkline from './Sparkline.vue'
 
 const props = withDefaults(
@@ -14,6 +14,7 @@ const props = withDefaults(
 )
 
 const display = ref<string>(String(props.value))
+let rafId: number | null = null
 
 watch(
   () => props.value,
@@ -22,12 +23,33 @@ watch(
     if (Number.isFinite(target) && typeof v === 'number') {
       animateTo(target)
     } else {
+      cancelAnimation()
       display.value = String(v)
     }
   },
 )
 
+function cancelAnimation() {
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+}
+
+function prefersReducedMotion(): boolean {
+  // 应用内「减弱动效」与系统偏好都必须生效（review M5）
+  return (
+    document.documentElement.dataset.reduceMotion === 'true' ||
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
 function animateTo(target: number) {
+  cancelAnimation()
+  if (prefersReducedMotion()) {
+    display.value = String(target)
+    return
+  }
   const from = Number(display.value.replace(/[^\d.-]/g, '')) || 0
   const start = performance.now()
   const dur = 600
@@ -35,18 +57,16 @@ function animateTo(target: number) {
     const t = Math.min(1, (now - start) / dur)
     const eased = 1 - Math.pow(1 - t, 3)
     display.value = String(Math.round(from + (target - from) * eased))
-    if (t < 1) requestAnimationFrame(step)
+    if (t < 1) {
+      rafId = requestAnimationFrame(step)
+    } else {
+      rafId = null
+    }
   }
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    display.value = String(target)
-    return
-  }
-  requestAnimationFrame(step)
+  rafId = requestAnimationFrame(step)
 }
 
-// 初始值
-if (typeof props.value === 'number') display.value = String(props.value)
-else display.value = String(props.value)
+onUnmounted(cancelAnimation)
 
 const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
 </script>
@@ -68,10 +88,7 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
         :height="26"
       />
     </div>
-    <div
-      v-if="hint"
-      class="metric-hint"
-    >
+    <div v-if="hint" class="metric-hint">
       {{ hint }}
     </div>
   </div>

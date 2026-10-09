@@ -6,10 +6,18 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: build-arm64-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-arm64:
-    name: Windows ARM64
+    name: Windows ARM64 (native)
     runs-on: windows-11-arm
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -18,20 +26,35 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Enable npm 12 (corepack)
+        run: corepack enable && corepack prepare npm@12 --activate
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Approve install scripts
-        run: npm install-scripts approve electron esbuild vue-demi @parcel/watcher
-        continue-on-error: true
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit & integration tests
+        run: npm test
 
       - name: Build
         run: npm run build --workspace @wslpilot/desktop
 
+      # arm runner 原生编译 arm64（node-pty 等原生模块 ABI 正确 — review C8）
       - name: Package arm64
-        run: npm run package --workspace @wslpilot/desktop
+        run: npm run package --workspace @wslpilot/desktop -- --arm64
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WSLPilot-arm64
+          name: WSLPilot-installers-arm64
           path: apps/desktop/release/*.exe
+
+      # tag 触发时把 arm64 安装包并入同一个 GitHub Release
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/desktop/release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

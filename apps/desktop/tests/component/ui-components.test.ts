@@ -93,6 +93,25 @@ describe('MetricCard', () => {
     await w.setProps({ value: '12.3G / 100G' })
     expect(w.text()).toContain('12.3G / 100G')
   })
+
+  it('数字动画 rAF 真正推进到目标值（review M5）', async () => {
+    const w = mount(MetricCard, { props: { label: 'x', value: 1 } })
+    await w.setProps({ value: 5 })
+    await new Promise((r) => setTimeout(r, 750))
+    expect(w.text()).toContain('5')
+  })
+
+  it('应用内减弱动效时数值瞬时切换（review M5）', async () => {
+    document.documentElement.dataset.reduceMotion = 'true'
+    try {
+      const w = mount(MetricCard, { props: { label: 'x', value: 1 } })
+      await w.setProps({ value: 9 })
+      await Promise.resolve()
+      expect(w.text()).toContain('9')
+    } finally {
+      delete document.documentElement.dataset.reduceMotion
+    }
+  })
 })
 
 describe('DistroCard', () => {
@@ -125,11 +144,52 @@ describe('DistroCard', () => {
   it('emits start / terminate with distro name', async () => {
     const w = mount(DistroCard, {
       props: { distro: distro({ state: 'Stopped' }) },
-      global: { stubs: { NButton: { template: '<button @click="$emit(\'click\')"><slot /></button>' }, NDropdown: true, NTag: true } },
+      global: {
+        stubs: {
+          NButton: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
+          NDropdown: true,
+          NTag: true,
+        },
+      },
     })
     const btns = w.findAll('button')
     await btns[0]!.trigger('click')
     expect(w.emitted('start')?.[0]).toEqual(['Ubuntu-22.04'])
+  })
+
+  it('running 状态点停止按钮 emit terminate', async () => {
+    const w = mount(DistroCard, {
+      props: { distro: distro({ state: 'Running' }) },
+      global: {
+        stubs: {
+          NButton: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
+          NDropdown: true,
+          NTag: true,
+        },
+      },
+    })
+    const btns = w.findAll('button')
+    await btns[0]!.trigger('click')
+    expect(w.emitted('terminate')?.[0]).toEqual(['Ubuntu-22.04'])
+  })
+
+  it('more 菜单分发 setDefault / terminal / more 事件', async () => {
+    const { NDropdown } = await import('naive-ui')
+    const w = mount(DistroCard, {
+      props: { distro: distro() },
+      global: {
+        stubs: { NButton: true, NTag: true },
+      },
+    })
+    const dd = w.findComponent(NDropdown)
+    await dd.vm.$emit('select', 'setDefault')
+    expect(w.emitted('setDefault')?.[0]).toEqual(['Ubuntu-22.04'])
+    await dd.vm.$emit('select', 'terminal')
+    expect(w.emitted('openTerminal')?.[0]).toEqual(['Ubuntu-22.04'])
+    await dd.vm.$emit('select', 'more')
+    expect(w.emitted('more')?.[0]).toEqual(['Ubuntu-22.04'])
+    await dd.vm.$emit('select', 'unknown')
+    expect(w.emitted('more')).toHaveLength(1)
   })
 
   it('shows Chinese state for Unknown', () => {

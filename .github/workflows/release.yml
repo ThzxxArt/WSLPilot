@@ -8,10 +8,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Build & Publish
     runs-on: windows-latest
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -23,24 +28,37 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Enable npm 12 (corepack)
+        run: corepack enable && corepack prepare npm@12 --activate
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Approve install scripts
-        run: npm install-scripts approve electron esbuild vue-demi @parcel/watcher
-        continue-on-error: true
+      # 发版必须与 CI 同级门禁，任何 tag 不得绕过质量关（review C7）
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
+      - name: Unit & integration tests (coverage gate ≥85%)
+        run: npm run test:coverage
+
+      - name: Component tests (coverage gate)
+        run: npm run test:component
 
       - name: Build
         run: npm run build --workspace @wslpilot/desktop
 
-      - name: Package (NSIS + portable)
-        run: npm run package --workspace @wslpilot/desktop
+      - name: Product smoke (main/preload module graph)
+        run: npm run smoke:product
+
+      # 本 job 只产出 x64；arm64 由 build-arm64.yml 在 arm runner 原生构建（review C8）
+      - name: Package (NSIS + portable, x64)
+        run: npm run package --workspace @wslpilot/desktop -- --x64
         env:
           # 代码签名（可选）：配置 secrets 后启用
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -49,11 +67,10 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WSLPilot-installers
+          name: WSLPilot-installers-x64
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
-            apps/desktop/release/*.yml
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -61,7 +78,6 @@ jobs:
           files: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
-            apps/desktop/release/*.yml
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

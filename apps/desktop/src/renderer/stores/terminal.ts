@@ -12,10 +12,13 @@ export interface TerminalSession {
   /** 会话存活 */
   alive: boolean
   exitCode?: number
-  /** 简单输出缓存（用于导出会话，上限 200KB） */
-  buffer: string
 }
 
+/**
+ * 输出缓冲（导出会话 / 挂载回放用）。
+ * 刻意放在响应式系统之外：高吞吐输出不得触发整树重渲染（review M6）。
+ */
+const buffers = new Map<string, string>()
 const BUFFER_LIMIT = 200 * 1024
 
 export const useTerminalStore = defineStore('terminal', {
@@ -42,7 +45,10 @@ export const useTerminalStore = defineStore('terminal', {
       }
     },
 
-    async open(distro: string, opts: { shell?: string; cwd?: string } = {}): Promise<string | null> {
+    async open(
+      distro: string,
+      opts: { shell?: string; cwd?: string } = {},
+    ): Promise<string | null> {
       this.lastError = null
       if (!this.canCreate) {
         this.lastError = {
@@ -70,8 +76,8 @@ export const useTerminalStore = defineStore('terminal', {
           cwd: opts.cwd,
           createdAt: info.createdAt ?? Date.now(),
           alive: true,
-          buffer: '',
         }
+        buffers.set(session.ptyId, '')
         this.sessions.push(session)
         this.activeId = session.ptyId
         return session.ptyId
@@ -109,26 +115,32 @@ export const useTerminalStore = defineStore('terminal', {
     removeLocal(id: string) {
       const idx = this.sessions.findIndex((x) => x.ptyId === id)
       if (idx >= 0) this.sessions.splice(idx, 1)
+      buffers.delete(id)
       if (this.activeId === id) {
         const next = this.sessions[idx] ?? this.sessions[this.sessions.length - 1]
         this.activeId = next?.ptyId ?? ''
       }
     },
 
+    /** 非响应式缓冲读取（导出/回放） */
+    getBuffer(id: string): string {
+      return buffers.get(id) ?? ''
+    },
+
     appendOutput(id: string, chunk: string) {
-      const s = this.sessions.find((x) => x.ptyId === id)
-      if (!s) return
-      s.buffer += chunk
-      if (s.buffer.length > BUFFER_LIMIT) {
-        // 按码点边界截断，避免劈开代理对/ANSI（评审 M1）
-        let slice = s.buffer.slice(s.buffer.length - BUFFER_LIMIT)
+      if (!buffers.has(id)) return
+      let buf = (buffers.get(id) ?? '') + chunk
+      if (buf.length > BUFFER_LIMIT) {
+        // 按码点边界截断，避免劈开代理对（评审 M1）
+        let slice = buf.slice(buf.length - BUFFER_LIMIT)
         // 向前跳过残缺代理对
         const first = slice.charCodeAt(0)
         if (first >= 0xd800 && first <= 0xdbff) {
           slice = slice.slice(1)
         }
-        s.buffer = slice
+        buf = slice
       }
+      buffers.set(id, buf)
     },
 
     handleExit(id: string, code: number) {

@@ -17,11 +17,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@wslpilot/shared": "*",
+    "@wslpilot/shared": "*"
+  },
+  "peerDependencies": {
     "naive-ui": "^2.40.3",
     "vue": "^3.5.13"
   },
   "devDependencies": {
-    "sass": "^1.83.0"
+    "naive-ui": "^2.40.3",
+    "sass": "^1.83.0",
+    "vue": "^3.5.13"
   }
 }

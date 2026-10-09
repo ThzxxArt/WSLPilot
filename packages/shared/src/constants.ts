@@ -3,6 +3,7 @@
  * 颜色 / 令牌一律来自 ./tokens.ts（唯一事实源）
  */
 import { ACCENT_MAPS } from './tokens'
+import { SCHEMA_VERSIONS } from './config-schema'
 
 export {
   PRIMITIVE_GRADIENTS as ACCENT_GRADIENTS,
@@ -13,7 +14,8 @@ export {
 
 export const APP_NAME = 'WSLPilot'
 export const APP_ID = 'com.wslpilot.app'
-export const CURRENT_SETTINGS_VERSION = 2
+/** settings.jsonc 当前 schema 版本（唯一事实源在 config-schema.SCHEMA_VERSIONS） */
+export const CURRENT_SETTINGS_VERSION = SCHEMA_VERSIONS.settings
 
 /** 配置文件键 → 文件名 */
 export const CONFIG_FILE_NAMES = {

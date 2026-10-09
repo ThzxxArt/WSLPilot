@@ -8,15 +8,16 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'happy-dom',
-    include: ['packages/ui/**/*.test.ts', 'apps/desktop/tests/component/**/*.test.ts'],
+    include: ['packages/ui/src/**/*.test.ts', 'apps/desktop/tests/component/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary'],
       include: ['packages/ui/src/components/**/*.{vue,ts}'],
       exclude: ['**/index.ts'],
+      // 与 CI `test:component --coverage` 配套的真实硬门禁（review C5）
       thresholds: {
         lines: 70,
-        functions: 50,
+        functions: 70,
         branches: 70,
         statements: 70,
       },

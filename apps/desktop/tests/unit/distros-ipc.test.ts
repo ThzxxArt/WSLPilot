@@ -73,7 +73,16 @@ function makeCtx() {
 }
 
 function makeDeps() {
-  const pty = { create: vi.fn(() => ({ ptyId: "p1", distro: "U", shell: "b", createdAt: 0 })), input: vi.fn(), resize: vi.fn(), kill: vi.fn(), killAll: vi.fn(), list: vi.fn(() => []), get: vi.fn(() => null), count: vi.fn(() => 0) } as any
+  const pty = {
+    create: vi.fn(() => ({ ptyId: 'p1', distro: 'U', shell: 'b', createdAt: 0 })),
+    input: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    killAll: vi.fn(),
+    list: vi.fn(() => []),
+    get: vi.fn(() => null),
+    count: vi.fn(() => 0),
+  } as any
   return {
     wsl: {
       list: vi.fn(async () => [
@@ -129,7 +138,11 @@ function makeDeps() {
 
 function register(ctx: any, deps = makeDeps()) {
   const wrapped = new Map<string, any>()
-  registerIpcHandlers({ handle: vi.fn((ch: string, fn: any) => wrapped.set(ch, fn)) } as any, ctx, deps)
+  registerIpcHandlers(
+    { handle: vi.fn((ch: string, fn: any) => wrapped.set(ch, fn)) } as any,
+    ctx,
+    deps,
+  )
   return { wrapped, deps }
 }
 
@@ -205,17 +218,20 @@ describe('distros + meta IPC handlers', () => {
   it('meta:set inserts or updates via write queue', async () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
-    await wrapped.get(CH.metaSet)({}, {
-      name: 'Debian',
-      alias: 'test',
-      tags: [],
-      color: '',
-      icon: '',
-      note: '',
-      startupCwd: '~',
-      pinned: false,
-      quickActions: [],
-    })
+    await wrapped.get(CH.metaSet)(
+      {},
+      {
+        name: 'Debian',
+        alias: 'test',
+        tags: [],
+        color: '',
+        icon: '',
+        note: '',
+        startupCwd: '~',
+        pinned: false,
+        quickActions: [],
+      },
+    )
     expect(ctx.configService.update).toHaveBeenCalled()
   })
 

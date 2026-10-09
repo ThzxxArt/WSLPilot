@@ -209,3 +209,40 @@ describe('spawnWsl', () => {
     expect(exits).toEqual([-1])
   })
 })
+
+describe('parseDistroList 边界（review M4 回归）', () => {
+  it('名字以 * 开头但非默认：不误判、不吞字符', () => {
+    const list = parseDistroList('NAME STATE VERSION\n  *mydistro  Running  2')
+    expect(list[0]).toMatchObject({ name: '*mydistro', isDefault: false })
+  })
+
+  it('默认项名字含 *：只去掉标记列', () => {
+    const list = parseDistroList('NAME STATE VERSION\n* *my*distro  Running  2')
+    expect(list[0]).toMatchObject({ name: '*my*distro', isDefault: true })
+  })
+
+  it('非法版本号归一为 2，杜绝 NaN', () => {
+    const list = parseDistroList('NAME STATE VERSION\n  A  Running  oops')
+    expect(list[0]?.version).toBe(2)
+    const list2 = parseDistroList('NAME STATE VERSION\n  A  Running  1')
+    expect(list2[0]?.version).toBe(1)
+  })
+})
+
+describe('runWsl 错误消息透传（review M6 回归）', () => {
+  beforeEach(() => {
+    mockExecFile.mockReset()
+    mockSpawn.mockReset()
+  })
+
+  it('ENOENT 类 spawn 错误保留 message 到 stderr', async () => {
+    const err: any = new Error('spawn wsl.exe ENOENT')
+    err.code = 'ENOENT'
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, undefined, undefined)
+    })
+    const r = await runWsl(['--list'])
+    expect(r.stderr).toContain('ENOENT')
+    expect(r.code).toBe(-1)
+  })
+})

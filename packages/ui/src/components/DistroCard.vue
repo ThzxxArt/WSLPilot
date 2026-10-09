@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { NButton, NDropdown, NTag } from 'naive-ui'
 import StatusDot from './StatusDot.vue'
-import type { DistroView } from '@wslpilot/shared'
+import { stateLabel, type DistroView } from '@wslpilot/shared'
 import { distroBrandColors } from '../tokens'
 
 const props = withDefaults(
@@ -33,24 +33,7 @@ const brandColor = computed(() => {
 const isRunning = computed(() => props.distro.state === 'Running')
 const displayName = computed(() => props.distro.meta?.alias || props.distro.name)
 
-const stateText = computed(() => {
-  switch (props.distro.state) {
-    case 'Running':
-      return '运行中'
-    case 'Stopped':
-      return '已停止'
-    case 'Installing':
-      return '安装中'
-    case 'Uninstalling':
-      return '卸载中'
-    case 'Converting':
-      return '转换中'
-    case 'Unknown':
-      return '未知'
-    default:
-      return props.distro.state || '未知'
-  }
-})
+const stateText = computed(() => stateLabel(props.distro.state))
 
 const moreOptions = computed(() => [
   {
@@ -85,19 +68,9 @@ function onMore(key: string) {
             {{ displayName }}
           </div>
           <div class="sub">
-            <span
-              v-if="distro.meta?.alias"
-              class="real"
-            >{{ distro.name }}</span>
+            <span v-if="distro.meta?.alias" class="real">{{ distro.name }}</span>
             <span v-else>WSL{{ distro.version }}</span>
-            <n-tag
-              v-if="distro.isDefault"
-              size="tiny"
-              :bordered="false"
-              type="info"
-            >
-              默认
-            </n-tag>
+            <n-tag v-if="distro.isDefault" size="tiny" :bordered="false" type="info"> 默认 </n-tag>
           </div>
         </div>
       </div>
@@ -105,23 +78,12 @@ function onMore(key: string) {
     </header>
 
     <div class="state-line">
-      <span
-        class="state"
-        :class="{ on: isRunning }"
-      >{{ stateText }}</span>
+      <span class="state" :class="{ on: isRunning }">{{ stateText }}</span>
       <span class="ver">WSL{{ distro.version }}</span>
     </div>
 
-    <div
-      v-if="distro.meta?.tags?.length"
-      class="tags"
-    >
-      <n-tag
-        v-for="t in distro.meta.tags.slice(0, 3)"
-        :key="t"
-        size="tiny"
-        :bordered="false"
-      >
+    <div v-if="distro.meta?.tags?.length" class="tags">
+      <n-tag v-for="t in distro.meta.tags.slice(0, 3)" :key="t" size="tiny" :bordered="false">
         {{ t }}
       </n-tag>
     </div>
@@ -146,24 +108,9 @@ function onMore(key: string) {
       >
         停止
       </n-button>
-      <n-button
-        size="small"
-        secondary
-        @click="emit('openTerminal', distro.name)"
-      >
-        终端
-      </n-button>
-      <n-dropdown
-        trigger="click"
-        :options="moreOptions"
-        @select="onMore"
-      >
-        <n-button
-          size="small"
-          secondary
-        >
-          ···
-        </n-button>
+      <n-button size="small" secondary @click="emit('openTerminal', distro.name)"> 终端 </n-button>
+      <n-dropdown trigger="click" :options="moreOptions" @select="onMore">
+        <n-button size="small" secondary :aria-label="`${displayName} 更多操作`"> ··· </n-button>
       </n-dropdown>
     </footer>
   </article>

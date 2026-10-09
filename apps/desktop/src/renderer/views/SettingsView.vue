@@ -15,6 +15,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
+import { errorLine } from '../composables/useAppError'
 import { ACCENT_GRADIENTS, ACCENT_PRIMARY } from '@shared/constants'
 import type { AccentName } from '@shared/types'
 import { applyAccentToDom } from '@wslpilot/ui'
@@ -37,7 +38,9 @@ watch(
   { immediate: true },
 )
 
-const previewGradient = computed(() => ACCENT_GRADIENTS[selectedAccent.value] ?? ACCENT_GRADIENTS.aurora)
+const previewGradient = computed(
+  () => ACCENT_GRADIENTS[selectedAccent.value] ?? ACCENT_GRADIENTS.aurora,
+)
 const previewPrimary = computed(() => ACCENT_PRIMARY[selectedAccent.value] ?? ACCENT_PRIMARY.aurora)
 
 async function onAccentChange(name: AccentName) {
@@ -55,37 +58,73 @@ async function browseBackupDir() {
   const picked = await window.wslAPI.app.pickDirectory()
   if (picked) await settings.setBackupDefaultDir(picked)
 }
+
+/** 文本输入防抖落盘（review M8）：停止输入 400ms 后写，失败回滚并提示 */
+function makeDebouncedSetter<T>(read: () => T, write: (v: T) => Promise<unknown>) {
+  let timer: number | undefined
+  return (value: T) => {
+    if (timer) window.clearTimeout(timer)
+    timer = window.setTimeout(() => {
+      timer = undefined
+      const before = read()
+      void write(value).catch((e: unknown) => {
+        message.error(errorLine(e, '保存失败'))
+        void write(before) // 用写前的值回滚
+      })
+    }, 400)
+  }
+}
+
+const setFontFamilyDebounced = makeDebouncedSetter(
+  () => settings.terminalFontFamily,
+  (v: string) => settings.setTerminalFontFamily(v),
+)
+const setBackupDirDebounced = makeDebouncedSetter(
+  () => settings.backupDefaultDir,
+  (v: string) => settings.setBackupDefaultDir(v),
+)
+
+/** 配置文件逐个打开（§12.7） */
+const configFiles: { key: 'settings' | 'distros' | 'actions' | 'network'; label: string }[] = [
+  { key: 'settings', label: 'settings.jsonc' },
+  { key: 'distros', label: 'distros.jsonc' },
+  { key: 'actions', label: 'actions.jsonc' },
+  { key: 'network', label: 'network.jsonc' },
+]
+
+function openConfigFile(key: 'settings' | 'distros' | 'actions' | 'network') {
+  void window.wslAPI.config.openExternal(key).catch((e: unknown) => {
+    message.error(errorLine(e, '打开配置文件失败'))
+  })
+}
+
+function setFontSize(v: number | null) {
+  if (v) void settings.setTerminalFontSize(v)
+}
+
+function setScrollback(v: number | null) {
+  if (v) void settings.setTerminalScrollback(v)
+}
+
+function setKeepRecent(v: number | null) {
+  if (v) void settings.setBackupKeepRecent(v)
+}
 </script>
 
 <template>
   <div class="settings">
     <header class="page-header">
       <h1>设置</h1>
-      <p class="sub">
-        应用偏好与配置管理 · 所有修改即时写入 <code>settings.jsonc</code>
-      </p>
+      <p class="sub">应用偏好与配置管理 · 所有修改即时写入 <code>settings.jsonc</code></p>
     </header>
 
-    <n-card
-      title="外观"
-      class="block"
-      :bordered="true"
-    >
+    <n-card title="外观" class="block" :bordered="true">
       <div class="accent-row">
         <div class="accent-picker">
-          <div class="label">
-            强调色
-          </div>
-          <n-radio-group
-            v-model:value="selectedAccent"
-            @update:value="onAccentChange"
-          >
+          <div class="label">强调色</div>
+          <n-radio-group v-model:value="selectedAccent" @update:value="onAccentChange">
             <n-space>
-              <n-radio
-                v-for="a in accents"
-                :key="a.name"
-                :value="a.name"
-              >
+              <n-radio v-for="a in accents" :key="a.name" :value="a.name">
                 {{ a.label }}
               </n-radio>
             </n-space>
@@ -93,24 +132,18 @@ async function browseBackupDir() {
         </div>
 
         <div class="accent-preview">
-          <div class="label">
-            实时预览
-          </div>
+          <div class="label">实时预览</div>
           <div class="preview-card">
-            <div
-              class="preview-swatch"
-              :style="{ background: previewGradient }"
-            />
+            <div class="preview-swatch" :style="{ background: previewGradient }" />
             <div class="preview-body">
-              <div class="preview-title">
-                WSLPilot
-              </div>
-              <div class="preview-text">
-                按钮与高亮将使用此强调色
-              </div>
+              <div class="preview-title">WSLPilot</div>
+              <div class="preview-text">按钮与高亮将使用此强调色</div>
               <button
                 class="preview-btn"
                 :style="{ background: previewPrimary }"
+                aria-hidden="true"
+                disabled
+                tabindex="-1"
               >
                 主要按钮
               </button>
@@ -123,12 +156,8 @@ async function browseBackupDir() {
 
       <div class="setting-line">
         <div>
-          <div class="label">
-            减弱动效
-          </div>
-          <div class="hint">
-            开启后动画时长降为即时切换
-          </div>
+          <div class="label">减弱动效</div>
+          <div class="hint">开启后动画时长降为即时切换</div>
         </div>
         <n-switch
           :value="settings.reduceMotion"
@@ -137,42 +166,33 @@ async function browseBackupDir() {
       </div>
     </n-card>
 
-    <n-card
-      title="终端"
-      class="block"
-    >
+    <n-card title="终端" class="block">
       <div class="setting-line">
         <div style="flex: 1">
-          <div class="label">
-            字体
-          </div>
+          <div class="label">字体</div>
           <n-input
             :value="settings.terminalFontFamily"
             size="small"
             style="max-width: 320px"
-            @update:value="(v: string) => settings.setTerminalFontFamily(v)"
+            @update:value="(v: string) => setFontFamilyDebounced(v)"
           />
         </div>
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            字号
-          </div>
+          <div class="label">字号</div>
         </div>
         <n-input-number
           :value="settings.terminalFontSize"
           size="small"
           :min="8"
           :max="32"
-          @update:value="(v: number | null) => { if (v) settings.setTerminalFontSize(v) }"
+          @update:value="setFontSize"
         />
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            光标样式
-          </div>
+          <div class="label">光标样式</div>
         </div>
         <n-select
           :value="settings.terminalCursorStyle"
@@ -188,9 +208,7 @@ async function browseBackupDir() {
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            光标闪烁
-          </div>
+          <div class="label">光标闪烁</div>
         </div>
         <n-switch
           :value="settings.terminalCursorBlink"
@@ -199,9 +217,7 @@ async function browseBackupDir() {
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            回滚缓冲行数
-          </div>
+          <div class="label">回滚缓冲行数</div>
         </div>
         <n-input-number
           :value="settings.terminalScrollback"
@@ -209,46 +225,29 @@ async function browseBackupDir() {
           :min="100"
           :max="100000"
           :step="500"
-          @update:value="(v: number | null) => { if (v) settings.setTerminalScrollback(v) }"
+          @update:value="setScrollback"
         />
       </div>
     </n-card>
 
-    <n-card
-      title="备份"
-      class="block"
-    >
+    <n-card title="备份" class="block">
       <div class="setting-line">
         <div style="flex: 1">
-          <div class="label">
-            默认备份目录
-          </div>
-          <div class="hint">
-            支持 %USERPROFILE% 等环境变量
-          </div>
+          <div class="label">默认备份目录</div>
+          <div class="hint">支持 %USERPROFILE% 等环境变量</div>
           <n-input
             :value="settings.backupDefaultDir"
             size="small"
             style="max-width: 360px; margin-top: 6px"
-            @update:value="(v: string) => settings.setBackupDefaultDir(v)"
+            @update:value="(v: string) => setBackupDirDebounced(v)"
           />
         </div>
-        <n-button
-          size="small"
-          secondary
-          @click="browseBackupDir"
-        >
-          浏览…
-        </n-button>
+        <n-button size="small" secondary @click="browseBackupDir"> 浏览… </n-button>
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            默认格式
-          </div>
-          <div class="hint">
-            tar 通用；vhd 仅 WSL2 但导入更快
-          </div>
+          <div class="label">默认格式</div>
+          <div class="hint">tar 通用；vhd 仅 WSL2 但导入更快</div>
         </div>
         <n-select
           :value="settings.backupFormat"
@@ -263,29 +262,21 @@ async function browseBackupDir() {
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            备份保留份数
-          </div>
-          <div class="hint">
-            同名发行版自动轮转，超出的旧备份被清理
-          </div>
+          <div class="label">备份保留份数</div>
+          <div class="hint">同名发行版自动轮转，超出的旧备份被清理</div>
         </div>
         <n-input-number
           :value="settings.backupKeepRecent"
           size="small"
           :min="1"
           :max="50"
-          @update:value="(v: number | null) => { if (v) settings.setBackupKeepRecent(v) }"
+          @update:value="setKeepRecent"
         />
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">
-            破坏性操作前自动备份
-          </div>
-          <div class="hint">
-            迁移磁盘前先导出一份备份（安全兜底）
-          </div>
+          <div class="label">破坏性操作前自动备份</div>
+          <div class="hint">迁移磁盘前先导出一份备份（安全兜底）</div>
         </div>
         <n-switch
           :value="settings.backupAutoBeforeDestructive"
@@ -294,18 +285,11 @@ async function browseBackupDir() {
       </div>
     </n-card>
 
-    <n-card
-      title="高级"
-      class="block"
-    >
+    <n-card title="高级" class="block">
       <div class="setting-line">
         <div>
-          <div class="label">
-            显示等价命令行
-          </div>
-          <div class="hint">
-            操作时展示将执行的 wsl.exe 命令
-          </div>
+          <div class="label">显示等价命令行</div>
+          <div class="hint">操作时展示将执行的 wsl.exe 命令</div>
         </div>
         <n-switch
           :value="settings.showRawCommand"
@@ -315,12 +299,8 @@ async function browseBackupDir() {
 
       <div class="setting-line">
         <div>
-          <div class="label">
-            破坏性操作二次确认
-          </div>
-          <div class="hint">
-            注销、迁移等操作前弹出确认框
-          </div>
+          <div class="label">破坏性操作二次确认</div>
+          <div class="hint">注销、迁移等操作前弹出确认框</div>
         </div>
         <n-switch
           :value="settings.confirmDestructive"
@@ -329,45 +309,29 @@ async function browseBackupDir() {
       </div>
     </n-card>
 
-    <n-card
-      title="配置目录"
-      class="block"
-    >
-      <p class="hint">
-        所有持久化状态为人类可读 JSONC，路径可见、内容可改、可纳入 Git。
-      </p>
-      <n-space style="margin-top: 12px">
-        <n-button @click="openConfigDir">
-          打开配置目录
-        </n-button>
+    <n-card title="配置目录" class="block">
+      <p class="hint">所有持久化状态为人类可读 JSONC，路径可见、内容可改、可纳入 Git。</p>
+      <n-space style="margin-top: 12px" align="center">
+        <n-button @click="openConfigDir"> 打开配置目录 </n-button>
         <n-tag
+          v-for="f in configFiles"
+          :key="f.key"
           :bordered="false"
           type="info"
+          class="config-tag"
+          role="button"
+          tabindex="0"
+          @click="openConfigFile(f.key)"
+          @keydown.enter="openConfigFile(f.key)"
         >
-          settings.jsonc
-        </n-tag>
-        <n-tag :bordered="false">
-          distros.jsonc
-        </n-tag>
-        <n-tag :bordered="false">
-          actions.jsonc
-        </n-tag>
-        <n-tag :bordered="false">
-          network.jsonc
+          {{ f.label }}
         </n-tag>
       </n-space>
     </n-card>
 
-    <n-card
-      title="关于"
-      class="block"
-    >
-      <p class="hint">
-        WSLPilot v{{ settings.version || '0.1.0' }} · MIT License
-      </p>
-      <p class="hint">
-        让 WSL 管理像驾驶一样从容。
-      </p>
+    <n-card title="关于" class="block">
+      <p class="hint">WSLPilot v{{ settings.version || '0.1.0' }} · MIT License</p>
+      <p class="hint">让 WSL 管理像驾驶一样从容。</p>
     </n-card>
   </div>
 </template>
@@ -472,5 +436,13 @@ async function browseBackupDir() {
 
 .setting-line + .setting-line {
   border-top: 1px solid var(--color-border-subtle);
+}
+
+.config-tag {
+  cursor: pointer;
+}
+
+.config-tag:hover {
+  opacity: 0.85;
 }
 </style>

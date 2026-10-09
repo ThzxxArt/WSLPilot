@@ -22,7 +22,13 @@ vi.mock('electron', () => {
 })
 
 import { registerIpcHandlers } from '../../src/main/ipc/router'
-import { CH, serializeIpcError, deserializeIpcError, createAppError, toAppError } from '@wslpilot/shared'
+import {
+  CH,
+  serializeIpcError,
+  deserializeIpcError,
+  createAppError,
+  toAppError,
+} from '@wslpilot/shared'
 
 function makeCtx() {
   const load = vi.fn(async (key: string) => ({ key, $schemaVersion: 2 }))
@@ -155,10 +161,13 @@ describe('IPC router + handlers', () => {
   it('config:set patches and returns result', async () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
-    const result = await wrapped.get(CH.configSet)({}, {
-      fileKey: 'settings',
-      patch: { general: { accent: 'ocean' } },
-    })
+    const result = await wrapped.get(CH.configSet)(
+      {},
+      {
+        fileKey: 'settings',
+        patch: { general: { accent: 'ocean' } },
+      },
+    )
     expect(ctx.configService.patch).toHaveBeenCalled()
     expect(result).toMatchObject({ patched: { general: { accent: 'ocean' } } })
   })
@@ -255,9 +264,7 @@ describe('IPC router + handlers', () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
     // configGet 非法 key —— 由 zod 拦下，错误信息含「参数校验失败」
-    await expect(wrapped.get(CH.configGet)({}, 'evil-not-a-key')).rejects.toThrow(
-      /参数校验失败/,
-    )
+    await expect(wrapped.get(CH.configGet)({}, 'evil-not-a-key')).rejects.toThrow(/参数校验失败/)
     // distrosStart 空名
     await expect(wrapped.get(CH.distrosStart)({}, '')).rejects.toThrow(/参数校验失败/)
     // metaSet 缺 name

@@ -93,7 +93,11 @@ describe('sampleOverview', () => {
         sampledAt: 'T',
       })),
     }
-    const result = await sampleOverview(wsl, [distro('A', 'Running'), distro('B', 'Running')], logger())
+    const result = await sampleOverview(
+      wsl,
+      [distro('A', 'Running'), distro('B', 'Running')],
+      logger(),
+    )
     expect(result.diskUsedKB).toBe(12_000_000)
     expect(result.diskTotalKB).toBe(30_000_000)
     // 禁止用内存推算磁盘

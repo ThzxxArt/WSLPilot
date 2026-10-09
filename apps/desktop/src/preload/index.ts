@@ -29,7 +29,8 @@ const api = {
     resolveConflict: (
       fileKey: ConfigKey,
       action: 'reload' | 'overwrite' | 'ignore',
-    ): Promise<ConfigMap[ConfigKey]> => ipcRenderer.invoke(CH.configResolveConflict, { fileKey, action }),
+    ): Promise<ConfigMap[ConfigKey]> =>
+      ipcRenderer.invoke(CH.configResolveConflict, { fileKey, action }),
     onChanged: (cb: (payload: { fileKey: string }) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, p: { fileKey: string }) => cb(p)
       ipcRenderer.on(CH.configChanged, h)
@@ -50,6 +51,10 @@ const api = {
     setDefault: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosSetDefault, name),
     registryDetail: (name: string): Promise<Partial<DistroView>> =>
       ipcRenderer.invoke(CH.registryDetail, name),
+    listOnline: (): Promise<string[]> => ipcRenderer.invoke(CH.distrosListOnline),
+    install: (name?: string): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosInstall, name ? { name } : {}),
+    uninstall: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosUnregister, name),
   },
 
   meta: {
@@ -61,13 +66,7 @@ const api = {
     /** 单个发行版指标 */
     sample: (name: string): Promise<Metrics> => ipcRenderer.invoke(CH.metricsSample, name),
     /** 全局概览指标 */
-    sampleOverview: (): Promise<OverviewMetrics> =>
-      ipcRenderer.invoke(CH.metricsSample, '*'),
-    onProgress: (cb: (p: TaskProgress) => void): (() => void) => {
-      const h = (_e: IpcRendererEvent, p: TaskProgress) => cb(p)
-      ipcRenderer.on(CH.taskProgress, h)
-      return () => ipcRenderer.removeListener(CH.taskProgress, h)
-    },
+    sampleOverview: (): Promise<OverviewMetrics> => ipcRenderer.invoke(CH.metricsSample, '*'),
   },
 
   terminal: {
@@ -105,6 +104,8 @@ const api = {
     move: (req: IoMoveRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioMove, req),
     listBackups: (dir?: string): Promise<BackupFileInfo[]> =>
       ipcRenderer.invoke(CH.ioListBackups, dir ? { dir } : {}),
+    cleanupBackups: (opts: { dir?: string; keep: number }): Promise<{ removed: number }> =>
+      ipcRenderer.invoke(CH.ioCleanupBackups, opts ?? { keep: 5 }),
   },
 
   task: {

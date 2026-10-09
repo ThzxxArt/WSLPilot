@@ -105,6 +105,25 @@ describe('backup naming & rotation pattern', () => {
     expect(exportFileName('a:b', 'vhd', at)).toBe('a_b_20260102-030405.vhdx')
   })
 
+  it('sanitizes ALL illegal chars (review C3 regression)', () => {
+    const at = new Date(2026, 0, 2, 3, 4, 5)
+    expect(exportFileName('a:b:c', 'tar', at)).toBe('a_b_c_20260102-030405.tar')
+    expect(exportFileName('a/b\\c:d*e', 'tar', at)).toBe('a_b_c_d_e_20260102-030405.tar')
+    expect(exportFileName('q?"<>|', 'tar', at)).toBe('q______20260102-030405.tar')
+    const withControl = exportFileName('a\u0000b', 'tar', at)
+    expect(withControl).toBe('a_b_20260102-030405.tar')
+  })
+
+  it('round-trip: regex always matches its own exportFileName (review C3)', () => {
+    const at = new Date(2026, 0, 2, 3, 4, 5)
+    for (const name of ['a:b:c', 'a/b\\c:d*e', 'q?"<>|', 'Ubuntu', 'x\u0000y', '中 文']) {
+      for (const fmt of ['tar', 'vhd'] as const) {
+        const file = exportFileName(name, fmt, at)
+        expect(backupFileRegex(name).test(file), `round-trip failed for ${name}`).toBe(true)
+      }
+    }
+  })
+
   it('backupFileRegex matches only the exact distro name', () => {
     const re = backupFileRegex('Ubuntu')
     expect(re.test('Ubuntu_20260102-030405.tar')).toBe(true)

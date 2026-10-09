@@ -12,21 +12,18 @@ asarUnpack:
   - '**/node-pty/**'
   - '**/node_modules/node-pty/**'
 extraResources:
-  - from: ../../resources
-    to: icons
-    filter:
-      - '**/*'
+  # 图标由 files: resources/** 内置（asar），此处仅托盘运行时需要外部文件
   - from: resources/tray
     to: tray
     filter:
       - '**/*'
 
 win:
+  # 架构由调用方指定（--x64 / --arm64）：x64 与 arm64 分别在对应 runner 原生构建
+  # （review C8：交叉编译会产出错误 ABI 的 node-pty）
   target:
     - target: nsis
-      arch: [x64, arm64]
     - target: portable
-      arch: [x64]
   icon: ../../build/icon.ico
   artifactName: WSLPilot-${version}-${arch}-setup.${ext}
   requestedExecutionLevel: asInvoker
@@ -48,8 +45,8 @@ nsis:
   installerHeaderIcon: ../../build/icon.ico
   # 自定义 NSIS 脚本（安装前后钩子）
   include: installer.nsh
-  # 安装包内显示的语言
-  language: "2052"
+  # 安装包内显示的语言（2052 = 简体中文）
+  language: '2052'
   guid: 7c8f3e2a-91b4-4c6d-8e5f-1a2b3c4d5e6f
 
 portable:

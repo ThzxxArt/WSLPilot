@@ -13,7 +13,7 @@
       "user": "root",
       "cwd": "/",
       "terminal": true,
-      "confirm": true
-    }
-  ]
+      "confirm": true,
+    },
+  ],
 }

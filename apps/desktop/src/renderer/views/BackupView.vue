@@ -17,7 +17,13 @@ import { ProgressRing } from '@ui/components'
 import { useDistrosStore } from '../stores/distros'
 import { useSettingsStore } from '../stores/settings'
 import { useTasksStore } from '../stores/tasks'
-import { useTaskProgress, taskStatusLabel, taskTypeLabel, formatElapsed } from '../composables/useTaskProgress'
+import {
+  useTaskProgress,
+  taskStatusLabel,
+  taskTypeLabel,
+  formatElapsed,
+} from '../composables/useTaskProgress'
+import { errorLine } from '../composables/useAppError'
 import ExportWizard from '../features/backup/ExportWizard.vue'
 import ImportWizard from '../features/backup/ImportWizard.vue'
 import MoveWizard from '../features/backup/MoveWizard.vue'
@@ -79,7 +85,14 @@ function parentDir(p: string): string {
   return i > 0 ? p.slice(0, i) : p
 }
 
-const { task, percent, percentLabel, isRunning, isDone, cancel: cancelTask } = useTaskProgress(activeTaskId)
+const {
+  task,
+  percent,
+  percentLabel,
+  isRunning,
+  isDone,
+  cancel: cancelTask,
+} = useTaskProgress(activeTaskId)
 
 const elapsedMs = ref(0)
 let elapsedTimer: number | undefined
@@ -127,9 +140,7 @@ const canNext = computed(() => {
   return true
 })
 
-const needAck = computed(
-  () => mode.value === 'move' && settings.confirmDestructive,
-)
+const needAck = computed(() => mode.value === 'move' && settings.confirmDestructive)
 
 function validateCurrent(): string | null {
   if (mode.value === 'export') return validateExportForm(exportForm.value)
@@ -221,7 +232,7 @@ async function cancel() {
     await cancelTask()
     message.info('已请求取消任务')
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '取消失败')
+    message.error(errorLine(e, '取消失败'))
   }
 }
 
@@ -280,15 +291,8 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
     </header>
 
     <div class="mode-tabs">
-      <n-radio-group
-        :value="mode"
-        @update:value="(v: WizardMode) => setMode(v)"
-      >
-        <n-radio-button
-          v-for="m in modeOptions"
-          :key="m.value"
-          :value="m.value"
-        >
+      <n-radio-group :value="mode" @update:value="(v: WizardMode) => setMode(v)">
+        <n-radio-button v-for="m in modeOptions" :key="m.value" :value="m.value">
           {{ m.label }}
         </n-radio-button>
       </n-radio-group>
@@ -338,102 +342,50 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
       </template>
 
       <!-- 步骤 3：确认 -->
-      <div
-        v-else-if="step === 3"
-        class="confirm"
-      >
+      <div v-else-if="step === 3" class="confirm">
         <div class="summary">
-          <div
-            v-for="row in summaryRows"
-            :key="row.label"
-            class="summary-row"
-          >
+          <div v-for="row in summaryRows" :key="row.label" class="summary-row">
             <span class="summary-label">{{ row.label }}</span>
             <span class="summary-value">{{ row.value }}</span>
           </div>
         </div>
 
-        <div
-          v-if="settings.showRawCommand"
-          class="raw"
-        >
-          <div class="raw-label">
-            等价命令行（仅展示）
-          </div>
+        <div v-if="settings.showRawCommand" class="raw">
+          <div class="raw-label">等价命令行（仅展示）</div>
           <code>{{ commandPreview }}</code>
         </div>
 
-        <label
-          v-if="needAck"
-          class="ack"
-        >
-          <n-checkbox
-            :checked="ackDestructive"
-            @update:checked="setAck"
-          />
+        <label v-if="needAck" class="ack">
+          <n-checkbox :checked="ackDestructive" @update:checked="setAck" />
           <span>我已知晓迁移会移动发行版磁盘位置；失败时可再次迁移回原位置或使用自动备份</span>
         </label>
       </div>
 
       <!-- 步骤 4：执行进度 -->
-      <div
-        v-else
-        class="progress"
-      >
-        <ProgressRing
-          :percent="percent"
-          :size="180"
-          :stroke="14"
-          :sublabel="typeLabel"
-        />
+      <div v-else class="progress">
+        <ProgressRing :percent="percent" :size="180" :stroke="14" :sublabel="typeLabel" />
         <div class="progress-text">
           <div class="progress-msg">
             {{ task?.message || '准备中…' }}
           </div>
           <div class="progress-meta">
-            <NTag
-              size="small"
-              :bordered="false"
-              :type="statusType"
-            >
+            <NTag size="small" :bordered="false" :type="statusType">
               {{ taskStatusLabel(task?.status ?? 'running') }}
             </NTag>
             <span>{{ percentLabel }}</span>
             <span>{{ formatElapsed(elapsedMs) }}</span>
           </div>
-          <div
-            v-if="task?.error"
-            class="progress-error"
-          >
+          <div v-if="task?.error" class="progress-error">
             {{ task.error }}
           </div>
           <div class="progress-actions">
-            <n-button
-              v-if="isRunning"
-              secondary
-              type="error"
-              @click="cancel"
-            >
-              取消任务
-            </n-button>
-            <n-button
-              secondary
-              @click="logOpen = true"
-            >
+            <n-button v-if="isRunning" secondary type="error" @click="cancel"> 取消任务 </n-button>
+            <n-button secondary @click="logOpen = true">
               查看日志（{{ task?.logs.length ?? 0 }} 行）
             </n-button>
             <template v-if="isDone">
-              <n-button
-                type="primary"
-                @click="reset"
-              >
-                再来一次
-              </n-button>
-              <n-button
-                v-if="task?.status === 'success'"
-                secondary
-                @click="openResultDir"
-              >
+              <n-button type="primary" @click="reset"> 再来一次 </n-button>
+              <n-button v-if="task?.status === 'success'" secondary @click="openResultDir">
                 打开所在目录
               </n-button>
             </template>
@@ -442,32 +394,13 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
       </div>
 
       <!-- 底部导航 -->
-      <footer
-        v-if="step < 4"
-        class="wizard-footer"
-      >
-        <n-button
-          v-if="step > 1"
-          secondary
-          @click="back"
-        >
-          上一步
-        </n-button>
+      <footer v-if="step < 4" class="wizard-footer">
+        <n-button v-if="step > 1" secondary @click="back"> 上一步 </n-button>
         <span class="spacer" />
-        <n-button
-          v-if="step < 3"
-          type="primary"
-          :disabled="!canNext"
-          @click="next"
-        >
+        <n-button v-if="step < 3" type="primary" :disabled="!canNext" @click="next">
           下一步
         </n-button>
-        <n-button
-          v-else
-          type="primary"
-          :disabled="needAck && !ackDestructive"
-          @click="start"
-        >
+        <n-button v-else type="primary" :disabled="needAck && !ackDestructive" @click="start">
           开始{{ modeOptions.find((m) => m.value === mode)?.label }}
         </n-button>
       </footer>
@@ -476,26 +409,12 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
     <!-- 最近备份 -->
     <section class="card backups">
       <div class="backups-head">
-        <h2 class="panel-title">
-          最近备份
-        </h2>
-        <n-button
-          text
-          type="primary"
-          @click="refreshBackups"
-        >
-          刷新
-        </n-button>
+        <h2 class="panel-title">最近备份</h2>
+        <n-button text type="primary" @click="refreshBackups"> 刷新 </n-button>
       </div>
       <n-spin :show="backupsLoading">
-        <n-empty
-          v-if="backups.length === 0"
-          description="备份目录里还没有文件"
-        />
-        <table
-          v-else
-          class="table"
-        >
+        <n-empty v-if="backups.length === 0" description="备份目录里还没有文件" />
+        <table v-else class="table">
           <thead>
             <tr>
               <th>文件</th>
@@ -505,18 +424,12 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
             </tr>
           </thead>
           <tbody>
-            <tr
-              v-for="b in backups"
-              :key="b.path"
-            >
+            <tr v-for="b in backups" :key="b.path">
               <td class="file-cell">
                 {{ b.name }}
               </td>
               <td>
-                <n-tag
-                  size="tiny"
-                  :bordered="false"
-                >
+                <n-tag size="tiny" :bordered="false">
                   {{ b.format }}
                 </n-tag>
               </td>
@@ -529,15 +442,8 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
     </section>
 
     <!-- 实时日志抽屉 -->
-    <n-drawer
-      v-model:show="logOpen"
-      :width="480"
-      placement="right"
-    >
-      <n-drawer-content
-        title="任务日志"
-        closable
-      >
+    <n-drawer v-model:show="logOpen" :width="480" placement="right">
+      <n-drawer-content title="任务日志" closable>
         <pre class="log">{{ (task?.logs ?? []).join('\n') || '（暂无日志）' }}</pre>
       </n-drawer-content>
     </n-drawer>

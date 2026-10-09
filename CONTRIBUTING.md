@@ -5,25 +5,27 @@
 ## 开发环境
 
 - **Node.js** ≥ 20
-- **npm** ≥ 10
+- **npm** ≥ 12（`corepack enable` 自动按 `packageManager` 对齐；allowScripts 白名单依赖 npm 12）
 - **Windows 10 2004+ / Windows 11**（运行 Electron 应用与 wsl.exe）
 
 ```bash
 git clone https://github.com/ThzxxArt/WSLPilot.git
 cd WSLPilot
+corepack enable
 npm install
-npm install-scripts approve electron esbuild vue-demi @parcel/watcher
 npm run dev
 ```
 
+> 原生模块（electron / esbuild / node-pty 等）的安装脚本白名单见根 `package.json` 的 `allowScripts`，`npm install` 时按白名单执行。
+
 ## 工程结构
 
-| 包 | 职责 |
-|---|---|
+| 包                | 职责                                         |
+| ----------------- | -------------------------------------------- |
 | `packages/shared` | 类型、IPC 通道、zod schema、错误码、配置迁移 |
-| `packages/kit` | 主进程工具（exec、原子写、JSONC、日志） |
-| `packages/ui` | 设计令牌、Naive UI 主题、业务组件 |
-| `apps/desktop` | Electron 主应用（main / preload / renderer） |
+| `packages/kit`    | 主进程工具（exec、原子写、JSONC、日志）      |
+| `packages/ui`     | 设计令牌、Naive UI 主题、业务组件            |
+| `apps/desktop`    | Electron 主应用（main / preload / renderer） |
 
 ## 常用命令
 
@@ -31,10 +33,10 @@ npm run dev
 npm run dev          # 开发模式（HMR）
 npm run typecheck    # TypeScript 检查
 npm test             # 单元 / 集成测试
-npm run test:component  # 组件测试
-npm run test:e2e     # 端到端测试
-npm run build        # 构建
-npm run package      # 打包 NSIS 安装包 / portable
+npm run test:component  # 组件测试（含覆盖率门禁）
+npm run test:e2e     # 端到端测试（需 Windows）
+npm run build        # 构建 + 打包（等价于 npm run package --workspace @wslpilot/desktop）
+npm run format:check # Prettier 一致性检查
 npm run tokens       # 重新生成设计令牌 CSS
 ```
 
@@ -61,7 +63,7 @@ chore: 升级依赖
 2. **命令白名单**：禁止任意命令执行，动作必须在 `actions.jsonc` 声明。
 3. **参数数组化**：所有系统调用以数组传参，杜绝注入。
 4. **浅色主题**：不引入 darkTheme。
-5. **设计令牌驱动**：颜色/间距/动效一律走 `packages/ui/src/tokens`。
+5. **设计令牌驱动**：颜色/间距/动效唯一事实源是 `packages/shared/src/tokens.ts`（`packages/ui/src/tokens` 为其 re-export 层）。
 
 ## 测试要求
 

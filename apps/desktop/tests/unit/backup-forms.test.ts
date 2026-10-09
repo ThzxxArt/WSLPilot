@@ -70,7 +70,9 @@ describe('export form', () => {
     expect(rows.find((r) => r.label === '格式')?.value).toContain('tar')
     expect(exportCommandPreview(form)).toBe('wsl.exe --export Ubuntu "C:\\b\\u.tar"')
     expect(summaryToText(rows)).toContain('导出备份')
-    expect(exportSummary({ ...form, format: 'vhd' }).find((r) => r.label === '格式')?.value).toContain('vhd')
+    expect(
+      exportSummary({ ...form, format: 'vhd' }).find((r) => r.label === '格式')?.value,
+    ).toContain('vhd')
   })
 })
 
@@ -78,9 +80,9 @@ describe('import form', () => {
   it('validates name, archive and install path', () => {
     expect(validateImportForm(DEFAULT_IMPORT_FORM)).toContain('发行版')
     expect(validateImportForm({ ...DEFAULT_IMPORT_FORM, name: 'bad/name' })).toContain('发行版')
-    expect(
-      validateImportForm({ ...DEFAULT_IMPORT_FORM, name: 'New', archivePath: '' }),
-    ).toContain('备份文件')
+    expect(validateImportForm({ ...DEFAULT_IMPORT_FORM, name: 'New', archivePath: '' })).toContain(
+      '备份文件',
+    )
     expect(
       validateImportForm({ ...DEFAULT_IMPORT_FORM, name: 'New', archivePath: 'a.tar' }),
     ).toContain('安装位置')
@@ -139,7 +141,9 @@ describe('import form', () => {
     const vhdCopy = { ...tar, format: 'vhd' as const }
     expect(importCommandPreview(vhdCopy)).toContain('--vhd')
     expect(importSummary(vhdCopy).find((r) => r.label === 'WSL 版本')).toBeUndefined()
-    expect(importSummary(DEFAULT_IMPORT_FORM).find((r) => r.label === '新发行版名称')?.value).toBe('—')
+    expect(importSummary(DEFAULT_IMPORT_FORM).find((r) => r.label === '新发行版名称')?.value).toBe(
+      '—',
+    )
   })
 })
 

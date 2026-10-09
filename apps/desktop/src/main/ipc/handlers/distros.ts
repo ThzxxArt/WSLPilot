@@ -1,6 +1,7 @@
-import { CH, createAppError, type DistroView } from '@wslpilot/shared'
+import { CH, createAppError, type DistroView, type TaskHandle } from '@wslpilot/shared'
 import type { WslService } from '../../services/wsl-service'
 import type { RegistryService } from '../../services/registry-service'
+import type { TaskRunner } from '../../services/task-runner'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -19,9 +20,9 @@ function assertName(name: unknown): string {
 export function registerDistroHandlers(
   add: AddFn,
   _ctx: IpcContext,
-  deps: { wsl: WslService; registry: RegistryService },
+  deps: { wsl: WslService; registry: RegistryService; tasks: TaskRunner },
 ): void {
-  const { wsl, registry } = deps
+  const { wsl, registry, tasks } = deps
 
   add(CH.distrosList, async (c): Promise<DistroView[]> => {
     const metaFile = await c.configService.load('distros')
@@ -57,5 +58,38 @@ export function registerDistroHandlers(
       return sampleOverview(wsl, distros, c.logger)
     }
     return wsl.sampleMetrics(assertName(name))
+  })
+
+  add(CH.distrosListOnline, async () => {
+    return wsl.listOnline()
+  })
+
+  // 长任务：安装 / 版本转换，进度经 task:progress 推送
+  add(CH.distrosInstall, (_c, arg: never): TaskHandle => {
+    const o = (arg ?? {}) as { name?: string }
+    const name = o.name?.trim() || undefined
+    return tasks.start({
+      type: 'install',
+      distro: name,
+      message: name ? `安装 ${name}` : '安装 WSL',
+      lockKey: name ? `install:${name.toLowerCase()}` : 'install:*',
+      run: (ctl) => wsl.install(name, ctl),
+    })
+  })
+
+  add(CH.distrosSetVersion, (_c, arg: never): TaskHandle => {
+    const o = arg as { name: string; version: 1 | 2 }
+    return tasks.start({
+      type: 'convert',
+      distro: o.name,
+      message: `转换 ${o.name} 到 WSL${o.version}`,
+      lockKey: o.name.toLowerCase(),
+      run: (ctl) => wsl.setVersion(o.name, o.version, ctl),
+    })
+  })
+
+  // 危险操作：仅执行，二次确认由渲染层按 confirmDestructive 负责
+  add(CH.distrosUnregister, async (_c, name: string) => {
+    await wsl.unregister(assertName(name))
   })
 }

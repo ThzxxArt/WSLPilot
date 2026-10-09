@@ -1,16 +1,8 @@
-import type {
-  DistroMeta,
-  DistroRuntime,
-  DistroView,
-  Metrics,
-  WslState,
-} from '@wslpilot/shared'
-import {
-  createAppError,
-  assertSafeDistroName,
-  DISTRO_BRAND_COLORS,
-} from '@wslpilot/shared'
+import type { DistroMeta, DistroRuntime, DistroView, Metrics, WslState } from '@wslpilot/shared'
+import { createAppError, assertSafeDistroName, DISTRO_BRAND_COLORS } from '@wslpilot/shared'
 import { runWsl, parseDistroList, type Logger } from '@wslpilot/kit'
+import type { TaskControl } from './task-runner'
+import { spawnWslTask } from './spawn-task'
 
 /** wsl 状态字符串 → 规范化 WslState */
 export function normalizeState(raw: string): WslState {
@@ -39,6 +31,14 @@ export interface WslService {
   setDefault(name: string): Promise<void>
   getVersion(): Promise<WslStatus>
   sampleMetrics(name: string): Promise<Metrics>
+  /** `wsl --list --online`：可安装发行版名列表 */
+  listOnline(): Promise<string[]>
+  /** `wsl --install [-d name]`：流式日志 + 可取消 */
+  install(name: string | undefined, ctl: TaskControl): Promise<void>
+  /** `wsl --unregister`：危险操作，调用方负责确认 */
+  unregister(name: string): Promise<void>
+  /** `wsl --set-version`：长任务（1↔2 转换） */
+  setVersion(name: string, version: 1 | 2, ctl: TaskControl): Promise<void>
 }
 
 function assertName(name: string): string {
@@ -47,7 +47,8 @@ function assertName(name: string): string {
 
 async function runOk(
   args: string[],
-  errCode: 'DISTRO_NOT_FOUND' | 'WSL_NOT_FOUND' | 'WSL_NOT_INSTALLED' | 'TASK_FAILED' = 'TASK_FAILED',
+  errCode:
+    'DISTRO_NOT_FOUND' | 'WSL_NOT_FOUND' | 'WSL_NOT_INSTALLED' | 'TASK_FAILED' = 'TASK_FAILED',
   rawCommand?: string,
 ): Promise<void> {
   const r = await runWsl(args)
@@ -65,8 +66,12 @@ export function createWslService(logger: Logger): WslService {
     const r = await runWsl(['--list', '--verbose'])
     if (r.code !== 0) {
       const text = `${r.stderr}\n${r.stdout}`
-      if (/not recognized|找不到|not found/i.test(text)) {
-        throw createAppError('WSL_NOT_FOUND', { detail: text.trim() })
+      // spawn 级错误（wsl.exe 缺失）与未启用 WSL 都要映射到可行动的错误码（review M6）
+      if (/ENOENT|not recognized|找不到|not found|spawn/i.test(text)) {
+        throw createAppError('WSL_NOT_FOUND', {
+          detail: text.trim(),
+          suggestion: '请确认已安装 WSL 且 wsl.exe 在 PATH 中（wsl --install）',
+        })
       }
       if (/not installed|未安装|not enabled/i.test(text)) {
         throw createAppError('WSL_NOT_INSTALLED', { detail: text.trim() })
@@ -148,12 +153,19 @@ export function createWslService(logger: Logger): WslService {
 
     /**
      * 采样单个发行版资源指标。
-     * free / df / loadavg；失败时返回零值（展示层显示 —）而不是抛错。
+     * free / df / /proc/stat 两次差分（真实 CPU%）；
+     * 失败时返回零值（展示层显示 —）而不是抛错。
      */
     async sampleMetrics(name: string): Promise<Metrics> {
       const n = assertName(name)
-      const script =
-        'free -k 2>/dev/null | awk \'/Mem:/{print $2,$3}\'; df -k / 2>/dev/null | awk \'NR==2{print $3,$2}\'; cat /proc/loadavg 2>/dev/null | awk \'{print $1}\''
+      // 标签前缀解析，杜绝"mem 行/磁盘行格式相同靠顺序区分"的耦合（review M17）
+      const script = [
+        `free -k 2>/dev/null | awk '/Mem:/{print "MEM:"$2,$3}'`,
+        `df -k / 2>/dev/null | awk 'NR==2{print "DISK:"$3,$2}'`,
+        'head -n1 /proc/stat 2>/dev/null',
+        'sleep 0.25',
+        'head -n1 /proc/stat 2>/dev/null',
+      ].join('; ')
       const r = await runWsl(['-d', n, '-e', 'sh', '-c', script], { timeoutMs: 8000 })
       const now = new Date().toISOString()
       const zero: Metrics = {
@@ -170,31 +182,46 @@ export function createWslService(logger: Logger): WslService {
         return zero
       }
 
-      const lines = r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-      // 第1行 "memTotal memUsed"（KB），第2行 "used total"（KB），第3行 loadavg
+      const lines = r.stdout
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
       let memTotalKB = 0
       let memUsedKB = 0
       let diskUsedKB = 0
       let diskTotalKB = 0
-      let load1 = 0
+      const cpuSamples: number[][] = []
 
       for (const line of lines) {
-        const mem = /^(\d+)\s+(\d+)$/.exec(line)
-        if (mem && !memTotalKB) {
-          memTotalKB = Number(mem[1])
-          memUsedKB = Number(mem[2])
-          continue
+        if (line.startsWith('MEM:')) {
+          const [t, u] = line.slice(4).trim().split(/\s+/)
+          memTotalKB = Number(t) || 0
+          memUsedKB = Number(u) || 0
+        } else if (line.startsWith('DISK:')) {
+          const [u, t] = line.slice(5).trim().split(/\s+/)
+          diskUsedKB = Number(u) || 0
+          diskTotalKB = Number(t) || 0
+        } else if (/^cpu\s/.test(line)) {
+          const nums = line
+            .split(/\s+/)
+            .slice(1)
+            .map(Number)
+            .filter((x) => Number.isFinite(x))
+          if (nums.length) cpuSamples.push(nums)
         }
-        const disk = /^(\d+)\s+(\d+)$/.exec(line)
-        if (disk && !diskTotalKB && memTotalKB) {
-          // 与 mem 行格式相同，靠「已读过 mem」区分
-          diskUsedKB = Number(disk[1])
-          diskTotalKB = Number(disk[2])
-          continue
-        }
-        const load = /^(\d+(?:\.\d+)?)/.exec(line)
-        if (load && !load1 && memTotalKB && diskTotalKB) {
-          load1 = Number(load[1])
+      }
+
+      // /proc/stat 两次差分 = 真实 CPU 占用率（不再用 loadavg 伪造 — review M18）
+      let cpuPercent = 0
+      if (cpuSamples.length >= 2) {
+        const a = cpuSamples[0]!
+        const b = cpuSamples[1]!
+        const sum = (arr: number[]) => arr.reduce((s, x) => s + x, 0)
+        const idleOf = (arr: number[]) => (arr[3] ?? 0) + (arr[4] ?? 0)
+        const dTotal = sum(b) - sum(a)
+        const dIdle = idleOf(b) - idleOf(a)
+        if (dTotal > 0) {
+          cpuPercent = Math.min(100, Math.round(((dTotal - dIdle) / dTotal) * 1000) / 10)
         }
       }
 
@@ -203,9 +230,44 @@ export function createWslService(logger: Logger): WslService {
         memTotalKB,
         diskUsedKB,
         diskTotalKB,
-        cpuPercent: Math.min(100, Math.round(load1 * 25 * 10) / 10),
+        cpuPercent,
         sampledAt: now,
       }
+    },
+
+    async listOnline(): Promise<string[]> {
+      const r = await runWsl(['--list', '--online'], { timeoutMs: 60_000 })
+      if (r.code !== 0) {
+        throw createAppError('TASK_FAILED', {
+          message: '获取可安装发行版列表失败',
+          detail: r.stderr || r.stdout,
+          rawCommand: 'wsl.exe --list --online',
+        })
+      }
+      return r.stdout
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !/^(NAME|名称)/i.test(l) && !/^-+$/.test(l))
+        .map((l) => l.split(/\s{2,}/)[0]?.trim() ?? '')
+        .filter((l) => l !== '')
+    },
+
+    async install(name: string | undefined, ctl: TaskControl): Promise<void> {
+      const args = ['--install', ...(name ? ['-d', assertName(name)] : [])]
+      ctl.report(0, name ? `正在安装 ${name}` : '正在安装 WSL')
+      await spawnWslTask(args, ctl, logger)
+      ctl.report(100, '安装完成')
+    },
+
+    async unregister(name: string): Promise<void> {
+      await runOk(['--unregister', assertName(name)], 'DISTRO_NOT_FOUND')
+    },
+
+    async setVersion(name: string, version: 1 | 2, ctl: TaskControl): Promise<void> {
+      const args = ['--set-version', assertName(name), version === 1 ? '1' : '2']
+      ctl.report(0, `正在转换为 WSL${version}`)
+      await spawnWslTask(args, ctl, logger)
+      ctl.report(100, `已转换为 WSL${version}`)
     },
   }
 }

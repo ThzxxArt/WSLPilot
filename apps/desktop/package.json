@@ -4,6 +4,12 @@
   "private": true,
   "description": "WSLPilot 主应用（Electron main / preload / renderer）",
   "license": "MIT",
+  "author": "WSLPilot Contributors",
+  "homepage": "https://github.com/ThzxxArt/WSLPilot",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ThzxxArt/WSLPilot.git"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

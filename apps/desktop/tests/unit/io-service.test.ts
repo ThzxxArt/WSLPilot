@@ -45,7 +45,10 @@ interface SpawnBehavior {
 }
 
 function makeSpawnFn(record: string[][], behavior: () => SpawnBehavior): SpawnWslFn {
-  return ((args: string[], opts: { onLine: (l: string) => void; onExit: (c: number) => void; onError: (e: Error) => void }) => {
+  return ((
+    args: string[],
+    opts: { onLine: (l: string) => void; onExit: (c: number) => void; onError: (e: Error) => void },
+  ) => {
     record.push(args)
     const b = behavior()
     void (async () => {
@@ -73,7 +76,14 @@ function makeCtl(onCancelFns: Array<() => void>): TaskControl {
   return ctl
 }
 
-function makeConfig(over: Partial<{ defaultDir: string; format: 'tar' | 'vhd'; keepRecent: number; autoBackupBeforeDestructive: boolean }> = {}) {
+function makeConfig(
+  over: Partial<{
+    defaultDir: string
+    format: 'tar' | 'vhd'
+    keepRecent: number
+    autoBackupBeforeDestructive: boolean
+  }> = {},
+) {
   return {
     loadSync: (_key: 'settings') => ({
       backup: {
@@ -195,7 +205,10 @@ describe('IoService.runExport', () => {
         spawn,
       }),
     )
-    await io2.runExport({ name: 'U2', path: join(outDir, 'u2'), format: 'vhd' }, makeCtl([]) as never)
+    await io2.runExport(
+      { name: 'U2', path: join(outDir, 'u2'), format: 'vhd' },
+      makeCtl([]) as never,
+    )
     expect(calls[0]).toEqual(['--export', 'U2', join(outDir, 'u2.vhdx'), '--vhd'])
   })
 
@@ -244,8 +257,14 @@ describe('IoService.runExport', () => {
       }),
     )
     await expect(
-      io.runExport({ name: 'Ubuntu', path: join(outDir, 'f.tar'), format: 'tar' }, makeCtl([]) as never),
-    ).rejects.toMatchObject({ code: 'TASK_FAILED', rawCommand: expect.stringContaining('--export') })
+      io.runExport(
+        { name: 'Ubuntu', path: join(outDir, 'f.tar'), format: 'tar' },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+      rawCommand: expect.stringContaining('--export'),
+    })
   })
 
   it('estimates size from directory walk for WSL1 / missing vhdx', async () => {
@@ -279,7 +298,10 @@ describe('IoService.runExport', () => {
         spawn,
       }),
     )
-    await io2.runExport({ name: 'U2', path: join(outDir, 'u2'), format: 'tar' }, makeCtl([]) as never)
+    await io2.runExport(
+      { name: 'U2', path: join(outDir, 'u2'), format: 'tar' },
+      makeCtl([]) as never,
+    )
     expect(calls.length).toBe(2)
   })
 
@@ -379,7 +401,14 @@ describe('IoService.runImport', () => {
     }) as any
     const io = createIoService(deps)
     await io.runImport(
-      { name: 'New', installPath: installDir, archivePath: archive, format: 'tar', version: 1, inPlace: false },
+      {
+        name: 'New',
+        installPath: installDir,
+        archivePath: archive,
+        format: 'tar',
+        version: 1,
+        inPlace: false,
+      },
       makeCtl([]) as never,
     )
     expect(calls[0]).toEqual(['--import', 'New', installDir, archive, '--version', '1'])
@@ -394,7 +423,9 @@ describe('IoService.runImport', () => {
     deps.wsl.list = vi
       .fn()
       .mockResolvedValueOnce([])
-      .mockResolvedValue([{ name: 'InSitu', state: 'Stopped', version: 2, isDefault: false }]) as any
+      .mockResolvedValue([
+        { name: 'InSitu', state: 'Stopped', version: 2, isDefault: false },
+      ]) as any
     const io = createIoService(deps)
     await io.runImport(
       {
@@ -416,7 +447,14 @@ describe('IoService.runImport', () => {
     const io = createIoService(makeDeps({ distros: [], spawn: makeSpawnFn([], () => ({})) }))
     await expect(
       io.runImport(
-        { name: 'X', installPath: '', archivePath: archive, format: 'tar', version: 2, inPlace: true },
+        {
+          name: 'X',
+          installPath: '',
+          archivePath: archive,
+          format: 'tar',
+          version: 2,
+          inPlace: true,
+        },
         makeCtl([]) as never,
       ),
     ).rejects.toMatchObject({ code: 'TASK_FAILED' })
@@ -434,7 +472,14 @@ describe('IoService.runImport', () => {
     const io = createIoService(deps)
     await expect(
       io.runImport(
-        { name: 'New', installPath: installDir, archivePath: archive, format: 'tar', version: 2, inPlace: false },
+        {
+          name: 'New',
+          installPath: installDir,
+          archivePath: archive,
+          format: 'tar',
+          version: 2,
+          inPlace: false,
+        },
         makeCtl([]) as never,
       ),
     ).rejects.toMatchObject({ code: 'TASK_FAILED' })
@@ -448,7 +493,14 @@ describe('IoService.runImport', () => {
     const io = createIoService(makeDeps({ distros: [], spawn }))
     await expect(
       io.runImport(
-        { name: 'InSitu', installPath: '', archivePath: vhdx, format: 'vhd', version: 2, inPlace: true },
+        {
+          name: 'InSitu',
+          installPath: '',
+          archivePath: vhdx,
+          format: 'vhd',
+          version: 2,
+          inPlace: true,
+        },
         makeCtl([]) as never,
       ),
     ).rejects.toMatchObject({ code: 'TASK_FAILED' })
@@ -461,19 +513,78 @@ describe('IoService.runImport', () => {
     const created = join(srcDir, 'new-install')
     const spawn = makeSpawnFn([], () => ({ code: 1 }))
     const deps = makeDeps({ distros: [], spawn })
-    deps.wsl.list = vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([]) as any // 回滚时未注册成功 → 只清目录
+    deps.wsl.list = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([]) as any // 回滚时未注册成功 → 只清目录
     const io = createIoService(deps)
     await expect(
       io.runImport(
-        { name: 'New', installPath: created, archivePath: archive, format: 'tar', version: 2, inPlace: false },
+        {
+          name: 'New',
+          installPath: created,
+          archivePath: archive,
+          format: 'tar',
+          version: 2,
+          inPlace: false,
+        },
         makeCtl([]) as never,
       ),
     ).rejects.toMatchObject({ code: 'TASK_FAILED' })
     await expect(fs.stat(created)).rejects.toThrow()
     expect(runWsl).not.toHaveBeenCalled()
+  })
+
+  it('rollback：注册残留时 unregister，非空自建目录不删，注销失败仅告警', async () => {
+    const archive = join(srcDir, 'a.tar')
+    await fs.writeFile(archive, Buffer.alloc(10))
+    const created = join(srcDir, 'dirty-install')
+    const spawn = makeSpawnFn([], () => ({
+      code: 1,
+      before: async () => {
+        await fs.mkdir(created, { recursive: true })
+        await fs.writeFile(join(created, 'partial.vhdx'), 'x')
+      },
+    }))
+    vi.mocked(runWsl).mockResolvedValueOnce({ stdout: '', stderr: 'busy', code: 1 })
+    const deps = makeDeps({ distros: [], spawn })
+    deps.wsl.list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ name: 'New', state: 'Stopped', version: 2, isDefault: false }]) as any
+    const io = createIoService(deps)
+    await expect(
+      io.runImport(
+        {
+          name: 'New',
+          installPath: created,
+          archivePath: archive,
+          format: 'tar',
+          version: 2,
+          inPlace: false,
+        },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    expect(runWsl).toHaveBeenCalledWith(['--unregister', 'New'])
+    // 非空目录保留
+    await expect(fs.stat(join(created, 'partial.vhdx'))).resolves.toBeTruthy()
+  })
+
+  it('vhd 导入拒绝非 vhdx 归档', async () => {
+    const archive = join(srcDir, 'a.tar')
+    await fs.writeFile(archive, Buffer.alloc(10))
+    const io = createIoService(makeDeps({ distros: [], spawn: makeSpawnFn([], () => ({})) }))
+    await expect(
+      io.runImport(
+        {
+          name: 'N',
+          installPath: installDir!,
+          archivePath: archive,
+          format: 'vhd',
+          version: 2,
+          inPlace: false,
+        },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_FAILED', message: expect.stringContaining('vhdx') })
   })
 })
 
@@ -561,7 +672,10 @@ describe('IoService.runMove', () => {
         { name: 'Ubuntu', path: join(targetParent, 'Ubuntu'), terminateFirst: false },
         makeCtl([]) as never,
       ),
-    ).rejects.toMatchObject({ code: 'TASK_FAILED', message: expect.stringContaining('自动备份失败') })
+    ).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+      message: expect.stringContaining('自动备份失败'),
+    })
     expect(calls.every((c) => c[0] !== '--manage')).toBe(true)
   })
 
@@ -609,7 +723,10 @@ describe('IoService.runMove', () => {
       makeDeps({ distros: [], spawn: makeSpawnFn([], () => ({})), config: makeConfig() }),
     )
     await expect(
-      io.runMove({ name: 'Nope', path: join(targetParent, 'x'), terminateFirst: false }, makeCtl([]) as never),
+      io.runMove(
+        { name: 'Nope', path: join(targetParent, 'x'), terminateFirst: false },
+        makeCtl([]) as never,
+      ),
     ).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
   })
 })
@@ -623,12 +740,17 @@ describe('IoService backups listing & rotation', () => {
     const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: dir }) }))
     const list = await io.listBackups()
     expect(list).toHaveLength(2)
-    expect(list.map((f) => f.name).sort()).toEqual(['Debian_20260102-000000.vhdx', 'Ubuntu_20260101-000000.tar'])
+    expect(list.map((f) => f.name).sort()).toEqual([
+      'Debian_20260102-000000.vhdx',
+      'Ubuntu_20260101-000000.tar',
+    ])
     expect(list[0]!.format === 'tar' || list[0]!.format === 'vhd').toBe(true)
   })
 
   it('returns empty list for missing dir', async () => {
-    const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: join(tmpdir(), 'no-such-dir-xyz') }) }))
+    const io = createIoService(
+      makeDeps({ config: makeConfig({ defaultDir: join(tmpdir(), 'no-such-dir-xyz') }) }),
+    )
     expect(await io.listBackups()).toEqual([])
   })
 
@@ -645,9 +767,65 @@ describe('IoService backups listing & rotation', () => {
     expect(left).toEqual(['Other_20260101-000000.tar', 'Ubuntu_20260103-000000.tar'])
   })
 
+  it('cleanupBackups 按发行版分组轮转全部备份', async () => {
+    const dir = await tmp()
+    for (const stamp of ['20260101-000000', '20260102-000000']) {
+      await fs.writeFile(join(dir, `Ubuntu_${stamp}.tar`), 'x')
+    }
+    await fs.writeFile(join(dir, 'Debian_20260101-000000.tar'), 'x')
+    await fs.writeFile(join(dir, 'Debian_20260102-000000.vhdx'), 'x')
+    await fs.writeFile(join(dir, 'Debian_20260103-000000.tar'), 'x')
+    await fs.writeFile(join(dir, 'junk.txt'), 'x')
+    const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: dir }) }))
+    const { removed } = await io.cleanupBackups(undefined, 1)
+    // Ubuntu: 2→1 删1；Debian: 3→1 删2
+    expect(removed).toBe(3)
+    const left = (await fs.readdir(dir)).sort()
+    expect(left).toEqual(['Debian_20260103-000000.tar', 'Ubuntu_20260102-000000.tar', 'junk.txt'])
+  })
+
+  it('cleanupBackups 对缺失目录返回 0', async () => {
+    const io = createIoService(makeDeps({ config: makeConfig() }))
+    expect(await io.cleanupBackups(join(tmpdir(), 'no-such-xyz'), 5)).toEqual({ removed: 0 })
+  })
+
   it('resolveBackupDir expands env vars', () => {
-    const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: join(tmpdir(), 'bk') }) }))
+    const io = createIoService(
+      makeDeps({ config: makeConfig({ defaultDir: join(tmpdir(), 'bk') }) }),
+    )
     expect(io.resolveBackupDir()).toMatch(/bk$/)
+  })
+
+  it('resolveTargetFile 纠正扩展名错配（review M12）', () => {
+    expect(resolveTargetFile('out.tar', 'vhd')).toMatch(/out\.vhdx$/)
+    expect(resolveTargetFile('out.vhdx', 'tar')).toMatch(/out\.tar$/)
+    expect(resolveTargetFile('out.vhd', 'tar')).toMatch(/out\.tar$/)
+    expect(resolveTargetFile('out', 'tar')).toMatch(/out\.tar$/)
+    expect(resolveTargetFile('out.tar', 'tar')).toMatch(/out\.tar$/)
+  })
+
+  it('导出目标已存在时改名保留为 .bak-<ts>（review M12）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(8))
+      },
+    }))
+    const localDistro = await tmp()
+    const localOut = await tmp()
+    await fs.writeFile(join(localDistro, 'ext4.vhdx'), Buffer.alloc(64))
+    const target = join(localOut, 'exists.tar')
+    await fs.writeFile(target, 'OLD-CONTENT')
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: localDistro,
+        spawn,
+      }),
+    )
+    await io.runExport({ name: 'Ubuntu', path: target, format: 'tar' }, makeCtl([]) as never)
+    const files = await fs.readdir(localOut)
+    expect(files.some((f) => f.startsWith('exists.tar.bak-'))).toBe(true)
   })
 })
 
@@ -659,7 +837,10 @@ describe('IoService + TaskRunner integration (cancel)', () => {
       onProgress: (p) => progress.push(`${p.status}`),
     })
     let ctlRef: TaskControl | null = null
-    const spawn = ((args: string[], opts: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+    const spawn = ((
+      args: string[],
+      opts: { onLine: (l: string) => void; onExit: (c: number) => void },
+    ) => {
       void args
       // 挂起，等待 kill
       return {
@@ -683,10 +864,9 @@ describe('IoService + TaskRunner integration (cancel)', () => {
       message: '导出 Ubuntu',
       run: (ctl) => {
         ctlRef = ctl
-        return io.runExport(
-          { name: 'Ubuntu', path: join(outDir, 'x.tar'), format: 'tar' },
-          ctl,
-        ).then(() => undefined)
+        return io
+          .runExport({ name: 'Ubuntu', path: join(outDir, 'x.tar'), format: 'tar' }, ctl)
+          .then(() => undefined)
       },
     })
     await new Promise((r) => setTimeout(r, 20))

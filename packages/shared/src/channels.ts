@@ -16,6 +16,7 @@ export const CH = {
   ioImport: 'io:import',
   ioMove: 'io:move',
   ioListBackups: 'io:listBackups',
+  ioCleanupBackups: 'io:cleanupBackups',
 
   // meta
   metaGet: 'meta:get',
@@ -94,6 +95,7 @@ export const INVOKE_CHANNELS = [
   CH.ioImport,
   CH.ioMove,
   CH.ioListBackups,
+  CH.ioCleanupBackups,
   CH.metaGet,
   CH.metaSet,
   CH.registryDetail,

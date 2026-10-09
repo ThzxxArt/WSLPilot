@@ -31,6 +31,24 @@ describe('migrations', () => {
     expect((v2.general as any).accent).toBe('aurora')
     expect((v2.general as any).locale).toBe('zh-CN')
   })
+
+  it('version ≤ 0 按 v1 迁移；未来版本不盖章（review M5 回归）', () => {
+    const zero = migrateConfig(
+      'settings',
+      { $schemaVersion: 0, general: { locale: 'zh-CN' } },
+      2,
+    ) as any
+    expect(zero.$schemaVersion).toBe(2)
+    expect(zero.general.accent).toBe('aurora') // v1→v2 迁移真正执行
+
+    const future = migrateConfig(
+      'settings',
+      { $schemaVersion: 5, general: { accent: 'ocean' } },
+      2,
+    ) as any
+    expect(future.$schemaVersion).toBe(5) // 拒绝降级盖章
+    expect(future.general.accent).toBe('ocean')
+  })
 })
 
 describe('errors', () => {

@@ -77,7 +77,7 @@ describe('useTerminalStore', () => {
 
     const big = 'x'.repeat(300 * 1024)
     s.appendOutput(s.sessions[0]!.ptyId, big)
-    expect(s.sessions[0]!.buffer.length).toBeLessThanOrEqual(200 * 1024)
+    expect(s.getBuffer(s.sessions[0]!.ptyId).length).toBeLessThanOrEqual(200 * 1024)
   })
 
   it('handleExit marks session dead', async () => {
@@ -91,7 +91,9 @@ describe('useTerminalStore', () => {
 
   it('open surfaces AppError on failure', async () => {
     wslAPI.terminal.create.mockRejectedValue(
-      new Error('WSLPILOT:{"code":"DISTRO_NOT_FOUND","message":"没有这个发行版","recoverable":true}'),
+      new Error(
+        'WSLPILOT:{"code":"DISTRO_NOT_FOUND","message":"没有这个发行版","recoverable":true}',
+      ),
     )
     const s = useTerminalStore()
     const id = await s.open('Nope')
@@ -142,10 +144,21 @@ describe('useTerminalStore', () => {
     s.appendOutput(id!, 'x'.repeat(200 * 1024 - 1))
     s.appendOutput(id!, '🎉') // 临界写入代理对
     s.appendOutput(id!, 'y'.repeat(100))
-    const buf = s.sessions[0]!.buffer
+    const buf = s.getBuffer(id!)
     expect(buf.length).toBeLessThanOrEqual(200 * 1024)
     // 截断后开头不得是孤立高代理
     const c = buf.charCodeAt(0)
     expect(c < 0xd800 || c > 0xdbff).toBe(true)
+  })
+
+  it('buffer 移出响应式系统：getBuffer 读取，removeLocal 清理', async () => {
+    const s = useTerminalStore()
+    const id = await s.open('U')
+    s.appendOutput(id!, 'hello')
+    expect(s.getBuffer(id!)).toBe('hello')
+    s.removeLocal(id!)
+    expect(s.getBuffer(id!)).toBe('')
+    // 未知 id 有缓冲防护
+    expect(s.getBuffer('missing')).toBe('')
   })
 })

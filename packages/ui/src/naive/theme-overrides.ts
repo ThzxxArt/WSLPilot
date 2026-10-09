@@ -13,7 +13,8 @@ export function buildThemeOverrides(accent: AccentName = 'aurora'): GlobalThemeO
     common: {
       primaryColor: a.accent,
       primaryColorHover: a.accentHover,
-      primaryColorPressed: s.accentHover,
+      // 必须跟随当前强调色（review：此前误用 semantic 的固定靛蓝）
+      primaryColorPressed: a.accentHover,
       primaryColorSuppl: a.accent,
       successColor: s.success,
       warningColor: s.warning,

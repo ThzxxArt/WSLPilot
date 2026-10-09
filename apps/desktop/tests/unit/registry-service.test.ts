@@ -19,8 +19,10 @@ function logger() {
   } as any
 }
 
-const GUID_OUT = 'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{AAAA-BBBB}\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{CCCC-DDDD}\n'
-const UBUNTU = '    DistributionName    REG_SZ    Ubuntu\n    BasePath    REG_SZ    C:\\WSL\\Ubuntu\n    Version    REG_DWORD    0x2\n    DefaultUid    REG_DWORD    0x3e8'
+const GUID_OUT =
+  'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{AAAA-BBBB}\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{CCCC-DDDD}\n'
+const UBUNTU =
+  '    DistributionName    REG_SZ    Ubuntu\n    BasePath    REG_SZ    C:\\WSL\\Ubuntu\n    Version    REG_DWORD    0x2\n    DefaultUid    REG_DWORD    0x3e8'
 const DEBIAN = '    DistributionName    REG_SZ    Debian\n    Version    REG_DWORD    0x1'
 
 function makeQuery(): RegQuery {

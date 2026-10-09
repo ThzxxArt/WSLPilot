@@ -9,12 +9,12 @@
     "accent": "aurora",
     "closeBehavior": "minimizeToTray",
     "launchAtLogin": false,
-    "reduceMotion": false
+    "reduceMotion": false,
   },
   "wsl": {
     "defaultShell": "",
     "autoShutdownAfterConfigChange": false,
-    "installSource": "store"
+    "installSource": "store",
   },
   "terminal": {
     "fontFamily": "Cascadia Mono, Consolas, monospace",
@@ -24,18 +24,18 @@
     "cursorBlink": true,
     "scrollback": 5000,
     "copyOnSelect": false,
-    "theme": "auto"
+    "theme": "auto",
   },
   "backup": {
     "defaultDir": "%USERPROFILE%\\WSL-Backups",
     "format": "tar",
     "keepRecent": 5,
-    "autoBackupBeforeDestructive": true
+    "autoBackupBeforeDestructive": true,
   },
   "advanced": {
     "showRawCommand": false,
     "confirmDestructive": true,
     "logLevel": "info",
-    "hardwareAcceleration": true
-  }
+    "hardwareAcceleration": true,
+  },
 }

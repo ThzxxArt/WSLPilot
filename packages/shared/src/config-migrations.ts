@@ -27,6 +27,9 @@ export const migrations: Record<string, MigrationFn[]> = {
 /**
  * 将配置从任意旧版本迁移到当前版本。
  * 迁移函数按索引顺序执行：migrations[key][i] 负责 version i → i+1。
+ * 版本戳规则（review M5）：
+ * - version ≤ 0 视为 1（旧文件缺省）
+ * - version > toVersion 拒绝降级盖章，原样返回（避免"没迁移却说已迁移"）
  */
 export function migrateConfig<K extends ConfigKeyOf>(
   key: K,
@@ -36,12 +39,22 @@ export function migrateConfig<K extends ConfigKeyOf>(
   const chain = migrations[key] ?? []
   let current = { ...data }
   let version = typeof current.$schemaVersion === 'number' ? (current.$schemaVersion as number) : 1
+  if (version <= 0) version = 1
+
+  // 未来版本（高于当前支持）：拒绝改写版本戳
+  if (version > toVersion) {
+    return current
+  }
 
   while (version < toVersion && version - 1 < chain.length) {
     const fn = chain[version - 1]
     if (!fn) break
     current = fn(current)
-    version = typeof current.$schemaVersion === 'number' ? (current.$schemaVersion as number) : version + 1
+    const nextVersion =
+      typeof current.$schemaVersion === 'number' ? (current.$schemaVersion as number) : version + 1
+    // 迁移函数必须推进版本；原地踏步则中止，防止死循环
+    if (nextVersion <= version) break
+    version = nextVersion
   }
 
   current.$schemaVersion = toVersion

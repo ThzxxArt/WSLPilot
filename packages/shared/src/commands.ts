@@ -42,11 +42,23 @@ export function backupExtension(format: BackupFormat): string {
   return format === 'vhd' ? 'vhdx' : 'tar'
 }
 
-const ILLEGAL_FILE_CHARS = /[\\/:*?"<>|]/
+const ILLEGAL_FILE_CHARS = /[\\/:*?"<>|]/g
+// eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g
+
+/**
+ * 发行版名 → 文件名安全形态（唯一事实源）。
+ * 生成文件名与轮转匹配必须都走这里，否则往返断裂（review C3）。
+ */
+export function sanitizeNameForFile(name: string): string {
+  return String(name ?? '')
+    .replace(CONTROL_CHARS, '_')
+    .replace(ILLEGAL_FILE_CHARS, '_')
+}
 
 /** 备份文件命名：`<name>_<YYYYMMDD-HHmmss>.<ext>`（与轮转规则配套） */
 export function exportFileName(name: string, format: BackupFormat, at: Date = new Date()): string {
-  const safe = name.replace(ILLEGAL_FILE_CHARS, '_')
+  const safe = sanitizeNameForFile(name)
   const p = (n: number) => String(n).padStart(2, '0')
   const stamp =
     `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}` +
@@ -58,9 +70,12 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 轮转匹配：`<name>_<8位日期-6位时间>.(tar|vhdx)` */
+/** 轮转匹配：`<sanitized(name)>_<8位日期-6位时间>.(tar|vhdx)` */
 export function backupFileRegex(name: string): RegExp {
-  return new RegExp(`^${escapeRegExp(name)}_[0-9]{8}-[0-9]{6}\\.(tar|vhdx)$`, 'i')
+  return new RegExp(
+    `^${escapeRegExp(sanitizeNameForFile(name))}_[0-9]{8}-[0-9]{6}\\.(tar|vhdx)$`,
+    'i',
+  )
 }
 
 /** 文件名是否符合备份命名规范 */

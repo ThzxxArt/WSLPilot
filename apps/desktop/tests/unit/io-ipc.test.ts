@@ -23,20 +23,28 @@ function makeDeps() {
       rotateBackups: vi.fn(async () => 0),
     } as any,
     tasks: {
-      start: vi.fn((opts: { type: string; distro?: string; message: string; lockKey?: string; run: (ctl: TaskControl) => Promise<void> }) => {
-        const ctl: TaskControl = {
-          taskId: 'task-1',
-          type: opts.type as never,
-          distro: opts.distro,
-          report: vi.fn(),
-          log: vi.fn(),
-          isCanceled: () => false,
-          throwIfCanceled: () => {},
-          onCancel: vi.fn(),
-        }
-        void opts.run(ctl)
-        return { taskId: 'task-1' }
-      }),
+      start: vi.fn(
+        (opts: {
+          type: string
+          distro?: string
+          message: string
+          lockKey?: string
+          run: (ctl: TaskControl) => Promise<void>
+        }) => {
+          const ctl: TaskControl = {
+            taskId: 'task-1',
+            type: opts.type as never,
+            distro: opts.distro,
+            report: vi.fn(),
+            log: vi.fn(),
+            isCanceled: () => false,
+            throwIfCanceled: () => {},
+            onCancel: vi.fn(),
+          }
+          void opts.run(ctl)
+          return { taskId: 'task-1' }
+        },
+      ),
       cancel: vi.fn(() => true),
       get: vi.fn(() => null),
       list: vi.fn(() => []),
@@ -62,14 +70,17 @@ describe('io IPC handlers (M4)', () => {
 
   it('io:export starts locked export task', async () => {
     const { handlers, deps } = register()
-    const handle = await handlers.get(CH.ioExport)!({}, {
-      name: 'Ubuntu',
-      path: 'C:\\b\\u.tar',
-      format: 'tar',
-    })
+    const handle = await handlers.get(CH.ioExport)!(
+      {},
+      {
+        name: 'Ubuntu',
+        path: 'C:\\b\\u.tar',
+        format: 'tar',
+      },
+    )
     expect(handle).toEqual({ taskId: 'task-1' })
     expect(deps.tasks.start).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'export', distro: 'Ubuntu', lockKey: 'Ubuntu' }),
+      expect.objectContaining({ type: 'export', distro: 'Ubuntu', lockKey: 'ubuntu' }),
     )
     await new Promise((r) => setTimeout(r, 0))
     expect(deps.io.runExport).toHaveBeenCalledWith(
@@ -107,7 +118,9 @@ describe('io IPC handlers (M4)', () => {
   it('io:listBackups forwards optional dir', async () => {
     const { handlers, deps } = register()
     expect(await handlers.get(CH.ioListBackups)!({}, {})).toEqual([{ dir: undefined }])
-    expect(await handlers.get(CH.ioListBackups)!({}, { dir: 'D:\\bk' })).toEqual([{ dir: 'D:\\bk' }])
+    expect(await handlers.get(CH.ioListBackups)!({}, { dir: 'D:\\bk' })).toEqual([
+      { dir: 'D:\\bk' },
+    ])
     expect(deps.io.listBackups).toHaveBeenCalledTimes(2)
   })
 

@@ -72,6 +72,8 @@ export interface TaskRunner {
 
 /** 日志上限：超出后丢弃最早的日志行（防长任务撑爆内存） */
 const MAX_LOG_LINES = 2000
+/** 终态任务记录保留上限（超出后淘汰最旧 — review M4） */
+const MAX_FINISHED_RECORDS = 50
 
 function clampPercent(p: number | null): number | null {
   if (p === null || !Number.isFinite(p)) return null
@@ -112,6 +114,8 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
   }
 
   function settle(rec: TaskRecord, status: TaskStatus, error?: string): void {
+    // 幂等：已终态的任务不得二次结算（dispose 与 execute 竞态 — review M5）
+    if (rec.status !== 'running') return
     rec.status = status
     rec.finishedAt = Date.now()
     if (error !== undefined) rec.error = error
@@ -130,6 +134,18 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
         events.logger.warn('task finish hook failed', { error: String(e) })
       }
     }
+    trimFinished()
+  }
+
+  /** 淘汰最旧的终态记录，防 Map 无界增长 */
+  function trimFinished(): void {
+    const finished = [...tasks.values()].filter((t) => t.status !== 'running')
+    const overflow = finished.length - MAX_FINISHED_RECORDS
+    if (overflow <= 0) return
+    finished
+      .sort((a, b) => (a.finishedAt ?? a.startedAt) - (b.finishedAt ?? b.startedAt))
+      .slice(0, overflow)
+      .forEach((t) => tasks.delete(t.taskId))
   }
 
   function makeControl(rec: TaskRecord): TaskControl {
@@ -193,7 +209,10 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
       const canceled = cancelRequested.has(rec.taskId)
       const isCancelErr =
         canceled ||
-        (e !== null && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'TASK_CANCELED')
+        (e !== null &&
+          typeof e === 'object' &&
+          'code' in e &&
+          (e as { code: string }).code === 'TASK_CANCELED')
       if (isCancelErr) {
         settle(rec, 'canceled', e instanceof Error ? e.message : '任务已取消')
       } else {
@@ -206,7 +225,11 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
     }
   }
 
-  function enqueue(rec: TaskRecord, lockKey: string | null | undefined, run: (ctl: TaskControl) => Promise<void>): void {
+  function enqueue(
+    rec: TaskRecord,
+    lockKey: string | null | undefined,
+    run: (ctl: TaskControl) => Promise<void>,
+  ): void {
     const job = () => execute(rec, run)
     if (!lockKey) {
       void job()
@@ -271,7 +294,8 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
 
     waitFor(taskId) {
       const rec = tasks.get(taskId)
-      if (!rec) return Promise.reject(createAppError('TASK_FAILED', { message: `任务不存在：${taskId}` }))
+      if (!rec)
+        return Promise.reject(createAppError('TASK_FAILED', { message: `任务不存在：${taskId}` }))
       if (rec.status !== 'running') return Promise.resolve(rec)
       return new Promise<TaskRecord>((resolve) => {
         let set = waiters.get(taskId)
@@ -289,16 +313,21 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
         if (rec.status === 'running') {
           cancelRequested.add(rec.taskId)
           const set = cancelFns.get(rec.taskId)
-          if (set) for (const fn of set) {
-            try {
-              fn()
-            } catch {
-              /* ignore */
+          if (set)
+            for (const fn of set) {
+              try {
+                fn()
+              } catch {
+                /* ignore */
+              }
             }
-          }
           settle(rec, 'canceled', '应用退出，任务终止')
         }
       }
+      // 兜底清理，防残留状态（review M26）
+      cancelRequested.clear()
+      cancelFns.clear()
+      waiters.clear()
       locks.clear()
     },
   }

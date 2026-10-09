@@ -23,9 +23,7 @@ describe('ipc-schema', () => {
   it('parses configSet payload', () => {
     const out = parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: { general: {} } }])
     expect(out).toMatchObject({ fileKey: 'settings' })
-    expect(() =>
-      parseIpcArgs(CH.configSet, [{ fileKey: 'bad', patch: {} }]),
-    ).toThrow()
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'bad', patch: {} }])).toThrow()
   })
 
   it('parses resolveConflict action', () => {
@@ -50,21 +48,18 @@ describe('ipc-schema', () => {
   })
 
   it('validates pty create/input/resize/kill payloads', () => {
-    expect(
-      parseIpcArgs(CH.ptyCreate, [{ distro: 'Ubuntu', cols: 80, rows: 24 }]),
-    ).toMatchObject({ distro: 'Ubuntu', cols: 80 })
+    expect(parseIpcArgs(CH.ptyCreate, [{ distro: 'Ubuntu', cols: 80, rows: 24 }])).toMatchObject({
+      distro: 'Ubuntu',
+      cols: 80,
+    })
     expect(() => parseIpcArgs(CH.ptyCreate, [{ distro: '', cols: 80, rows: 24 }])).toThrow()
-    expect(() =>
-      parseIpcArgs(CH.ptyInput, [{ ptyId: '', data: 'x' }]),
-    ).toThrow()
-    expect(
-      parseIpcArgs(CH.ptyInput, [{ ptyId: 'p1', data: 'ls\n' }]),
-    ).toMatchObject({ ptyId: 'p1' })
+    expect(() => parseIpcArgs(CH.ptyInput, [{ ptyId: '', data: 'x' }])).toThrow()
+    expect(parseIpcArgs(CH.ptyInput, [{ ptyId: 'p1', data: 'ls\n' }])).toMatchObject({
+      ptyId: 'p1',
+    })
     expect(() => parseIpcArgs(CH.ptyKill, [''])).toThrow()
     expect(parseIpcArgs(CH.ptyKill, ['p1'])).toBe('p1')
-    expect(() =>
-      parseIpcArgs(CH.ptyResize, [{ ptyId: 'p1', cols: 1, rows: 10 }]),
-    ).toThrow()
+    expect(() => parseIpcArgs(CH.ptyResize, [{ ptyId: 'p1', cols: 1, rows: 10 }])).toThrow()
   })
 
   it('rejects prototype pollution keys in patch', () => {
@@ -73,7 +68,9 @@ describe('ipc-schema', () => {
     const evil2 = JSON.parse('{"constructor":{"x":1}}')
     expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: evil2 }])).toThrow()
     // 正常 patch 可通过
-    expect(parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: { general: {} } }])).toBeTruthy()
+    expect(
+      parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: { general: {} } }]),
+    ).toBeTruthy()
   })
 
   it('every multi-arg IPC channel that is used in M1+M2 has a schema', () => {
@@ -105,18 +102,12 @@ describe('ipc-schema · M4 备份迁移通道', () => {
     expect(
       parseIpcArgs(CH.ioExport, [{ name: 'Ubuntu', path: 'C:\\b\\u.tar', format: 'tar' }]),
     ).toEqual({ name: 'Ubuntu', path: 'C:\\b\\u.tar', format: 'tar' })
-    expect(() =>
-      parseIpcArgs(CH.ioExport, [{ name: '', path: 'C:\\x', format: 'tar' }]),
-    ).toThrow()
-    expect(() =>
-      parseIpcArgs(CH.ioExport, [{ name: 'U', path: '', format: 'tar' }]),
-    ).toThrow()
+    expect(() => parseIpcArgs(CH.ioExport, [{ name: '', path: 'C:\\x', format: 'tar' }])).toThrow()
+    expect(() => parseIpcArgs(CH.ioExport, [{ name: 'U', path: '', format: 'tar' }])).toThrow()
     expect(() =>
       parseIpcArgs(CH.ioExport, [{ name: 'U', path: 'a\u0000b', format: 'tar' }]),
     ).toThrow()
-    expect(() =>
-      parseIpcArgs(CH.ioExport, [{ name: 'U', path: 'C:\\x', format: 'zip' }]),
-    ).toThrow()
+    expect(() => parseIpcArgs(CH.ioExport, [{ name: 'U', path: 'C:\\x', format: 'zip' }])).toThrow()
   })
 
   it('io:import validates payload and fills defaults', () => {
@@ -132,9 +123,7 @@ describe('ipc-schema · M4 备份迁移通道', () => {
     expect(out.inPlace).toBe(false)
 
     expect(() =>
-      parseIpcArgs(CH.ioImport, [
-        { name: 'N', installPath: '', archivePath: '', format: 'tar' },
-      ]),
+      parseIpcArgs(CH.ioImport, [{ name: 'N', installPath: '', archivePath: '', format: 'tar' }]),
     ).toThrow()
     // 就地导入：installPath 允许为空
     expect(
@@ -155,7 +144,14 @@ describe('ipc-schema · M4 备份迁移通道', () => {
     ).toThrow()
     expect(() =>
       parseIpcArgs(CH.ioImport, [
-        { name: 'N', installPath: 'D:\\N', archivePath: 'D:\\a.tar', format: 'tar', version: 1, inPlace: 'yes' },
+        {
+          name: 'N',
+          installPath: 'D:\\N',
+          archivePath: 'D:\\a.tar',
+          format: 'tar',
+          version: 1,
+          inPlace: 'yes',
+        },
       ]),
     ).toThrow()
   })

@@ -6,6 +6,11 @@ const wslAPI = {
     import: vi.fn(),
     move: vi.fn(),
     listBackups: vi.fn(async () => []),
+    cleanupBackups: vi.fn(async () => ({ removed: 0 })),
+  },
+  distros: {
+    install: vi.fn(async () => ({ taskId: 'ins-1' })),
+    list: vi.fn(async () => []),
   },
   task: {
     cancel: vi.fn(async () => true),
@@ -102,12 +107,24 @@ describe('useTasksStore', () => {
   it('failed and canceled statuses record error text', async () => {
     const s = useTasksStore()
     s.track({ taskId: 'a' }, { type: 'export', distro: 'U', message: 'm' })
-    s.applyProgress({ taskId: 'a', type: 'export', percent: null, message: '炸了', status: 'failed' })
+    s.applyProgress({
+      taskId: 'a',
+      type: 'export',
+      percent: null,
+      message: '炸了',
+      status: 'failed',
+    })
     expect(s.byId('a')?.status).toBe('failed')
     expect(s.byId('a')?.error).toBe('炸了')
 
     s.track({ taskId: 'b' }, { type: 'export', message: 'm' })
-    s.applyProgress({ taskId: 'b', type: 'export', percent: null, message: '已取消', status: 'canceled' })
+    s.applyProgress({
+      taskId: 'b',
+      type: 'export',
+      percent: null,
+      message: '已取消',
+      status: 'canceled',
+    })
     expect(s.byId('b')?.error).toBe('任务已取消')
   })
 
@@ -132,7 +149,13 @@ describe('useTasksStore', () => {
     const s = useTasksStore()
     await s.startExport({ name: 'U', path: 'p', format: 'tar' })
     s.track({ taskId: 'done1' }, { type: 'export', message: 'm' })
-    s.applyProgress({ taskId: 'done1', type: 'export', percent: 100, message: 'ok', status: 'success' })
+    s.applyProgress({
+      taskId: 'done1',
+      type: 'export',
+      percent: 100,
+      message: 'ok',
+      status: 'success',
+    })
     s.clearFinished()
     expect(s.entries.map((e) => e.taskId)).toEqual(['r1'])
   })
@@ -146,5 +169,44 @@ describe('useTasksStore', () => {
     s.track({ taskId: 'x' }, { type: 'export', message: 'a' })
     s.track({ taskId: 'x' }, { type: 'export', message: 'b' })
     expect(s.entries).toHaveLength(1)
+  })
+
+  it('startInstall tracks install task', async () => {
+    wslAPI.distros.install = vi.fn(async () => ({ taskId: 'ins-1' }))
+    const s = useTasksStore()
+    const entry = await s.startInstall('Ubuntu')
+    expect(entry?.taskId).toBe('ins-1')
+    expect(entry?.type).toBe('install')
+    const entry2 = await s.startInstall()
+    expect(wslAPI.distros.install).toHaveBeenCalledWith(undefined)
+    void entry2
+  })
+
+  it('startInstall 捕获 invoke 错误', async () => {
+    wslAPI.distros.install = vi.fn(async () => {
+      throw new Error('WSLPILOT:{"code":"TASK_FAILED","message":"安装失败","recoverable":true}')
+    })
+    const s = useTasksStore()
+    expect(await s.startInstall('X')).toBeNull()
+    expect(s.lastError?.message).toBe('安装失败')
+  })
+
+  it('trimFinished 保留最近 10 条终态记录（review M7）', () => {
+    const s = useTasksStore()
+    for (let i = 0; i < 12; i++) {
+      s.track({ taskId: `f${i}` }, { type: 'export', message: `m${i}` })
+      s.applyProgress({
+        taskId: `f${i}`,
+        type: 'export',
+        percent: 100,
+        message: 'ok',
+        status: 'success',
+      })
+    }
+    s.track({ taskId: 'running-1' }, { type: 'move', message: 'run' })
+    expect(s.entries.filter((e) => e.status !== 'running').length).toBe(10)
+    expect(s.entries.some((e) => e.taskId === 'running-1')).toBe(true)
+    expect(s.entries.some((e) => e.taskId === 'f0')).toBe(false)
+    expect(s.entries.some((e) => e.taskId === 'f11')).toBe(true)
   })
 })

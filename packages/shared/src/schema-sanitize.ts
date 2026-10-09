@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype'])
+
 /** 解包 ZodDefault / ZodOptional / ZodNullable / ZodEffects / ZodBranded */
 function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {
   let s = schema as any
@@ -77,6 +79,25 @@ export function sanitizeWithSchema<T extends z.ZodTypeAny>(
     return (retry.success ? retry.data : cleaned) as z.infer<T>
   }
 
-  // 其他类型：失败用默认值
+  // Record 类型：逐键清洗，合法键保留、非法键丢弃（禁止整体回退丢用户数据 — review C2）
+  if (core instanceof z.ZodRecord) {
+    const source = (
+      data !== null && typeof data === 'object' && !Array.isArray(data) ? data : {}
+    ) as Record<string, unknown>
+    const defaultObj = (
+      defaults !== null && typeof defaults === 'object' && !Array.isArray(defaults) ? defaults : {}
+    ) as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(source)) {
+      if (FORBIDDEN.has(key) || value === undefined) continue
+      const sanitized = sanitizeWithSchema(core.valueSchema, value, defaultObj[key] as any)
+      const check = unwrap(core.valueSchema).safeParse(sanitized)
+      if (check.success) out[key] = check.data
+    }
+    const retry = core.safeParse(out)
+    return (retry.success ? retry.data : out) as z.infer<T>
+  }
+
+  // 其他类型（literal/enum/union 等单值）：解析失败回退默认值（单字段，不伤及其他数据）
   return defaults
 }
