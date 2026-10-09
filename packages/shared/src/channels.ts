@@ -61,6 +61,10 @@ export const CH = {
   // app
   appGetVersion: 'app:getVersion',
   appOpenConfigDir: 'app:openConfigDir',
+  appWindowMinimize: 'app:windowMinimize',
+  appWindowMaximize: 'app:windowMaximize',
+  appWindowClose: 'app:windowClose',
+  appNavigate: 'app:navigate',
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]

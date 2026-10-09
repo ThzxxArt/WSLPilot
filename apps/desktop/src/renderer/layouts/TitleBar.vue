@@ -9,15 +9,16 @@ const settings = useSettingsStore()
 const gradient = computed(() => ACCENT_GRADIENTS[settings.accent] ?? ACCENT_GRADIENTS.aurora)
 
 function minimize() {
-  // 预留：后续通过 IPC 调用 win.minimize()
+  void window.wslAPI.app.minimize()
 }
 
 function toggleMaximize() {
-  // 预留
+  void window.wslAPI.app.maximize()
 }
 
 function close() {
-  // 预留：按 closeBehavior 最小化到托盘或退出
+  // 主进程按 closeBehavior 决定：最小化到托盘或退出
+  void window.wslAPI.app.close()
 }
 </script>
 

@@ -20,6 +20,14 @@ const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(CH.appGetVersion),
     openConfigDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenConfigDir),
+    minimize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMinimize),
+    maximize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMaximize),
+    close: (): Promise<void> => ipcRenderer.invoke(CH.appWindowClose),
+    onNavigate: (cb: (path: string) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, path: string) => cb(path)
+      ipcRenderer.on(CH.appNavigate, h)
+      return () => ipcRenderer.removeListener(CH.appNavigate, h)
+    },
   },
 
   // 预留：后续里程碑启用

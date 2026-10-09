@@ -8,6 +8,12 @@ files:
   - out/**/*
   - resources/**/*
   - package.json
+extraResources:
+  - from: ../../resources
+    to: icons
+    filter:
+      - '**/*'
+
 win:
   target:
     - target: nsis
@@ -15,11 +21,34 @@ win:
     - target: portable
       arch: [x64]
   icon: ../../build/icon.ico
+  artifactName: WSLPilot-${version}-${arch}-setup.${ext}
+  requestedExecutionLevel: asInvoker
+
 nsis:
+  # 单步安装包（非 oneClick），允许用户自定义安装路径
   oneClick: false
+  # 允许更改安装目录 —— 安装向导第二步可选路径
   allowToChangeInstallationDirectory: true
+  # 允许选择「所有用户 / 当前用户」
+  perMachine: false
+  allowElevation: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: WSLPilot
+  deleteAppDataOnUninstall: false
+  installerIcon: ../../build/icon.ico
+  uninstallerIcon: ../../build/icon.ico
+  installerHeaderIcon: ../../build/icon.ico
+  # 自定义 NSIS 脚本（安装前后钩子）
+  include: installer.nsh
+  # 安装包内显示的语言
+  language: "2052"
+  guid: 7c8f3e2a-91b4-4c6d-8e5f-1a2b3c4d5e6f
+
 portable:
-  artifactName: WSLPilot-${version}-portable.exe
+  artifactName: WSLPilot-${version}-${arch}-portable.${ext}
+
+# 产物示例：
+#   WSLPilot-0.1.0-x64-setup.exe     （NSIS 安装包，可自定义路径）
+#   WSLPilot-0.1.0-arm64-setup.exe
+#   WSLPilot-0.1.0-x64-portable.exe  （免安装）

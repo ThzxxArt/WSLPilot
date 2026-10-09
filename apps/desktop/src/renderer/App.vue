@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NConfigProvider, NMessageProvider, NDialogProvider, zhCN, dateZhCN } from 'naive-ui'
+import { useRouter } from 'vue-router'
+import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, zhCN, dateZhCN } from 'naive-ui'
 import DefaultLayout from './layouts/DefaultLayout.vue'
 import { useSettingsStore } from './stores/settings'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
 
 const settings = useSettingsStore()
+const router = useRouter()
 const accent = computed(() => settings.accent as AccentName)
 const { themeOverrides } = useNaiveTheme(accent)
 
@@ -26,19 +28,28 @@ watch(
   { immediate: true },
 )
 
-let unsub: (() => void) | undefined
+let unsubConfig: (() => void) | undefined
+let unsubNavigate: (() => void) | undefined
 
 onMounted(async () => {
   await settings.load()
   applyAccentToDom(settings.accent as AccentName)
   ready.value = true
 
-  unsub = window.wslAPI?.config.onChanged(({ fileKey }) => {
+  unsubConfig = window.wslAPI?.config.onChanged(({ fileKey }) => {
     if (fileKey === 'settings') void settings.load()
+  })
+
+  // 托盘菜单导航
+  unsubNavigate = window.wslAPI?.app.onNavigate((path) => {
+    void router.push(path)
   })
 })
 
-onUnmounted(() => unsub?.())
+onUnmounted(() => {
+  unsubConfig?.()
+  unsubNavigate?.()
+})
 </script>
 
 <template>

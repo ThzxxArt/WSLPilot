@@ -2,19 +2,19 @@ import { defineConfig } from 'vitest/config'
 import { resolve } from 'path'
 import vue from '@vitejs/plugin-vue'
 
+/** 组件测试配置 — happy-dom 环境 */
 export default defineConfig({
   plugins: [vue()],
   test: {
     globals: false,
-    environment: 'node',
-    include: ['packages/*/src/**/*.test.ts', 'apps/desktop/tests/unit/**/*.test.ts'],
+    environment: 'happy-dom',
+    include: ['packages/ui/**/*.test.ts', 'apps/desktop/tests/component/**/*.test.ts'],
   },
   resolve: {
     alias: {
-      '@wslpilot/shared': resolve(__dirname, 'packages/shared/src/index.ts'),
-      '@wslpilot/kit': resolve(__dirname, 'packages/kit/src/index.ts'),
       '@ui': resolve(__dirname, 'packages/ui/src'),
       '@shared': resolve(__dirname, 'packages/shared/src'),
+      '@': resolve(__dirname, 'apps/desktop/src/renderer'),
     },
   },
 })
