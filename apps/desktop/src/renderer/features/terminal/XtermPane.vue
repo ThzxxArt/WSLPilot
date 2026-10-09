@@ -12,11 +12,17 @@ const props = defineProps({
     type: Object as PropType<Partial<TerminalFontPrefs>>,
     default: () => ({}),
   },
+  /** 挂载时回放的历史输出（切换标签后恢复屏幕） */
+  initialBuffer: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits<{
   ready: [term: Terminal]
   exit: [code: number]
+  cursorMove: [pos: { col: number; row: number }]
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -60,21 +66,30 @@ onMounted(() => {
   t.loadAddon(search)
   t.loadAddon(new WebLinksAddon())
   t.open(host.value)
+
+  // 恢复历史缓冲（切标签 / 重挂时）
+  if (props.initialBuffer) {
+    t.write(props.initialBuffer)
+  }
+
   doFit()
 
-  // 用户输入 → PTY
   t.onData((data) => {
     void window.wslAPI.terminal.input(props.ptyId, data)
   })
   t.onResize(({ cols, rows }) => {
     void window.wslAPI.terminal.resize(props.ptyId, cols, rows)
   })
+  t.onCursorMove(() => {
+    emit('cursorMove', {
+      col: t.buffer.active.cursorX + 1,
+      row: t.buffer.active.cursorY + 1,
+    })
+  })
 
-  // PTY 输出 → xterm
   const offData = window.wslAPI.terminal.onData((p) => {
     if (p.ptyId !== props.ptyId) return
     t.write(p.chunk)
-    emit('ready', t) // 幂等信号，父组件可忽略
   })
   const offExit = window.wslAPI.terminal.onExit((p) => {
     if (p.ptyId !== props.ptyId) return
@@ -86,7 +101,6 @@ onMounted(() => {
   ro = new ResizeObserver(() => doFit())
   ro.observe(host.value)
 
-  // 末次 fit（字体加载后）
   setTimeout(doFit, 50)
   emit('ready', t)
 })
@@ -115,7 +129,6 @@ watch(
   { deep: true },
 )
 
-// ── 公开 API ──────────────────────────────────────────────
 function clear() {
   term?.clear()
 }
@@ -177,7 +190,10 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="host" class="xterm-host" />
+  <div
+    ref="host"
+    class="xterm-host"
+  />
 </template>
 
 <style scoped>

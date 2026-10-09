@@ -8,6 +8,9 @@ files:
   - out/**/*
   - resources/**/*
   - package.json
+asarUnpack:
+  - '**/node-pty/**'
+  - '**/node_modules/node-pty/**'
 extraResources:
   - from: ../../resources
     to: icons

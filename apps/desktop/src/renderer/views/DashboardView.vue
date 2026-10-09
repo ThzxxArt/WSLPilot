@@ -53,8 +53,8 @@ async function action(fn: () => Promise<void>, ok: string) {
     await fn()
     message.success(ok)
     await refreshAll()
-  } catch (e: any) {
-    message.error(e?.message || '操作失败')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '操作失败')
   }
 }
 

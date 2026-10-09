@@ -53,10 +53,10 @@ export function registerIpcHandlers(
         let validated: unknown = args[0]
         try {
           validated = parseIpcArgs(channel, args)
-        } catch (e: any) {
+        } catch (e) {
           throw createAppError('CONFIG_INVALID', {
             message: `参数校验失败：${channel}`,
-            detail: e?.message ? String(e.message) : String(e),
+            detail: e instanceof Error ? e.message : String(e),
           })
         }
         return await handler(ctx, validated as never)

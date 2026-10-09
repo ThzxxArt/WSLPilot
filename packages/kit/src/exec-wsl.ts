@@ -39,11 +39,12 @@ export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise
       stderr: decode(stderr as unknown as Buffer),
       code: 0,
     }
-  } catch (e: any) {
+  } catch (e) {
+    const err = e as { code?: number; stdout?: Buffer; stderr?: Buffer }
     return {
-      stdout: decode(e.stdout),
-      stderr: decode(e.stderr),
-      code: typeof e.code === 'number' ? e.code : -1,
+      stdout: decode(err.stdout),
+      stderr: decode(err.stderr),
+      code: typeof err.code === 'number' ? err.code : -1,
     }
   }
 }

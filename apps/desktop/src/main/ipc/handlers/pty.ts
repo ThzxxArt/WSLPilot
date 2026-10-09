@@ -10,12 +10,17 @@ type AddFn = (
 
 function asCreate(arg: unknown): PtyCreateOptions {
   const o = (arg ?? {}) as Record<string, unknown>
+  const num = (v: unknown, dflt: number, min: number, max: number) => {
+    const n = Number(v)
+    if (!Number.isFinite(n)) return dflt
+    return Math.max(min, Math.min(max, Math.floor(n)))
+  }
   return {
     distro: assertSafeDistroName(o.distro),
     shell: typeof o.shell === 'string' ? o.shell : undefined,
     cwd: typeof o.cwd === 'string' ? o.cwd : undefined,
-    cols: Number(o.cols) || 80,
-    rows: Number(o.rows) || 24,
+    cols: num(o.cols, 80, 2, 500),
+    rows: num(o.rows, 24, 1, 200),
   }
 }
 

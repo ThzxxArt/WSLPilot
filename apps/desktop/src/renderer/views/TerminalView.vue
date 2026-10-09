@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NEmpty, useMessage } from 'naive-ui'
 import { useRoute } from 'vue-router'
 import { useTerminalStore } from '../stores/terminal'
@@ -19,7 +19,20 @@ const distros = useDistrosStore()
 const settings = useSettingsStore()
 const message = useMessage()
 
-const paneRef = shallowRef<InstanceType<typeof XtermPane> | null>(null)
+/** 每个 ptyId 一个 XtermPane 实例（v-show 保活，切标签不丢现场） */
+const paneRefs = new Map<string, InstanceType<typeof XtermPane>>()
+const cursorPos = ref({ col: 1, row: 1 })
+const elapsed = ref('00:00')
+let timer: number | undefined
+
+function setPaneRef(id: string, el: unknown) {
+  if (el) paneRefs.set(id, el as InstanceType<typeof XtermPane>)
+  else paneRefs.delete(id)
+}
+
+function activePane() {
+  return paneRefs.get(terminal.activeId) ?? null
+}
 
 const prefs = computed<TerminalFontPrefs>(() => ({
   ...DEFAULT_TERMINAL_PREFS,
@@ -44,11 +57,6 @@ const defaultDistro = computed(() => {
   return distros.defaultDistro?.name ?? distros.items[0]?.name ?? ''
 })
 
-// 光标位置 / 会话时长
-const cursorPos = ref({ col: 1, row: 1 })
-const elapsed = ref('00:00')
-let timer: number | undefined
-
 function tickElapsed() {
   const s = terminal.active
   if (!s) {
@@ -63,7 +71,6 @@ function tickElapsed() {
 
 onMounted(async () => {
   await Promise.all([distros.refresh(), terminal.loadLimits()])
-  // 从路由 / 默认发行版自动打开一个会话
   if (terminal.sessions.length === 0 && defaultDistro.value) {
     await create(defaultDistro.value)
   } else if (terminal.activeId === '' && terminal.sessions.length > 0) {
@@ -82,6 +89,15 @@ watch(
     if (typeof d === 'string' && d) {
       await create(d)
     }
+  },
+)
+
+watch(
+  () => terminal.activeId,
+  () => {
+    cursorPos.value = { col: 1, row: 1 }
+    // 激活标签后重新 fit（v-show 隐藏时尺寸可能为 0）
+    requestAnimationFrame(() => activePane()?.fit())
   },
 )
 
@@ -106,11 +122,11 @@ function onReorder(from: number, to: number) {
 }
 
 function onClear() {
-  paneRef.value?.clear()
+  activePane()?.clear()
 }
 
 function onCopy() {
-  const sel = paneRef.value?.getSelection() ?? ''
+  const sel = activePane()?.getSelection() ?? ''
   if (!sel) {
     message.info('请先在终端中选中内容')
     return
@@ -127,30 +143,34 @@ function onExport() {
   const blob = new Blob([s.buffer], { type: 'text/plain;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `${s.title.replace(/[\\/:*?"<>|]/g, '_')}-${Date.now()}.log`
+  const safe = s.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)
+  a.download = `${safe}-${Date.now()}.log`
   a.click()
   URL.revokeObjectURL(a.href)
   message.success('会话已导出')
 }
 
 function onSearch(q: string) {
-  const ok = paneRef.value?.findNext(q)
+  const ok = activePane()?.findNext(q)
   if (!ok) message.info('未找到匹配')
 }
 
 function onSearchNext() {
-  paneRef.value?.findNext('')
+  activePane()?.findNext('')
 }
 
 function onSearchPrev() {
-  paneRef.value?.findPrevious('')
+  activePane()?.findPrevious('')
 }
 
 function onZoom(delta: number) {
-  paneRef.value?.zoom(delta)
+  activePane()?.zoom(delta)
 }
 
-// PTY 输出灌入 store buffer（导出用）
+function onCursorMove(pos: { col: number; row: number }) {
+  cursorPos.value = pos
+}
+
 const offData = window.wslAPI.terminal.onData((p) => {
   terminal.appendOutput(p.ptyId, p.chunk)
 })
@@ -170,7 +190,9 @@ onUnmounted(() => {
         <h1>终端</h1>
         <p class="sub">
           node-pty + xterm.js · 会话 {{ terminal.aliveCount }}/{{ terminal.maxSessions }}
-          <template v-if="terminal.active"> · {{ terminal.active.distro }}</template>
+          <template v-if="terminal.active">
+            · {{ terminal.active.distro }}
+          </template>
         </p>
       </div>
     </header>
@@ -203,17 +225,22 @@ onUnmounted(() => {
     </div>
 
     <div class="panes">
-      <template v-for="s in terminal.sessions" :key="s.ptyId">
-        <div v-show="s.ptyId === terminal.activeId" class="pane-wrap">
-          <XtermPane
-            v-if="s.ptyId === terminal.activeId"
-            ref="paneRef"
-            :pty-id="s.ptyId"
-            :prefs="prefs"
-            class="pane"
-          />
-        </div>
-      </template>
+      <!-- v-show 保活：切标签不 dispose xterm，现场不丢 -->
+      <div
+        v-for="s in terminal.sessions"
+        v-show="s.ptyId === terminal.activeId"
+        :key="s.ptyId"
+        class="pane-wrap"
+      >
+        <XtermPane
+          :ref="(el) => setPaneRef(s.ptyId, el)"
+          :pty-id="s.ptyId"
+          :prefs="prefs"
+          :initial-buffer="s.buffer"
+          class="pane"
+          @cursor-move="onCursorMove"
+        />
+      </div>
 
       <n-empty
         v-if="terminal.sessions.length === 0"
@@ -236,7 +263,10 @@ onUnmounted(() => {
       <span>行 {{ cursorPos.row }} · 列 {{ cursorPos.col }}</span>
       <span>UTF-8</span>
       <span>会话时长 {{ elapsed }}</span>
-      <span v-if="terminal.active && !terminal.active.alive" class="dead">
+      <span
+        v-if="terminal.active && !terminal.active.alive"
+        class="dead"
+      >
         已退出（代码 {{ terminal.active.exitCode }}）
       </span>
     </footer>
@@ -246,12 +276,14 @@ onUnmounted(() => {
 <style scoped>
 .terminal-view {
   padding: 16px 20px 12px;
-  height: calc(100vh - 40px - 28px);
   display: flex;
   flex-direction: column;
   gap: 10px;
   max-width: 1400px;
   margin: 0 auto;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
 .page-header h1 {
@@ -296,6 +328,7 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--color-text-tertiary);
   padding: 4px 2px;
+  flex-shrink: 0;
 }
 
 .dead {

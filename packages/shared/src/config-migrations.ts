@@ -1,7 +1,7 @@
 import type { ConfigKeyOf } from './config-schema'
 
 /** 配置版本迁移链：旧结构 → 新结构 */
-export type MigrationFn = (old: any) => any
+export type MigrationFn = (old: Record<string, unknown>) => Record<string, unknown>
 
 export const migrations: Record<string, MigrationFn[]> = {
   settings: [

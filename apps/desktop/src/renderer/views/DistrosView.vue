@@ -79,8 +79,8 @@ async function act(fn: () => Promise<void>, ok: string) {
     message.success(ok)
     await distros.refresh()
     await metrics.sample()
-  } catch (e: any) {
-    message.error(e?.message || '操作失败')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '操作失败')
   }
 }
 

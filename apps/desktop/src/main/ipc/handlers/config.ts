@@ -25,7 +25,7 @@ export function registerConfigHandlers(add: AddFn, ctx: IpcContext): void {
 
   add(CH.configSet, async (c, payload: { fileKey: string; patch: DeepPartial<ConfigMap[ConfigKey]> }) => {
     const key = assertConfigKey(payload?.fileKey)
-    return c.configService.patch(key, payload.patch as any)
+    return c.configService.patch(key, payload.patch as never)
   })
 
   add(CH.configOpenExternal, async (c, fileKey: string) => {

@@ -20,6 +20,10 @@ test.describe('WSLPilot 启动冒烟', () => {
     // 侧栏导航存在
     await expect(window.locator('text=驾驶舱')).toBeVisible({ timeout: 15_000 })
 
+    // 打开终端页（M3）
+    await window.locator('text=终端').first().click()
+    await expect(window.locator('text=node-pty')).toBeVisible({ timeout: 15_000 })
+
     await app.close()
   })
 })

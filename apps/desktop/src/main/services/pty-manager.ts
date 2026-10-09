@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { createAppError, MAX_PTY_SESSIONS, assertSafeDistroName } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
+
+const req = createRequire(__filename)
 
 export interface PtyCreateOptions {
   distro: string
@@ -79,12 +82,11 @@ export function createPtyManager(
 ): PtyManager {
   const sessions = new Map<string, { proc: PtyProcessLike; info: PtySessionInfo }>()
 
-  // 默认 spawn：延迟 require node-pty，测试可注入
+  // 默认 spawn：createRequire 加载 node-pty（asarUnpack 后路径稳定）
   const spawn: PtySpawnFn =
     spawnFn ??
     ((file, args, options) => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pty = require('node-pty') as typeof import('node-pty')
+      const pty = req('node-pty') as typeof import('node-pty')
       return pty.spawn(file, args, options as never) as unknown as PtyProcessLike
     })
 
