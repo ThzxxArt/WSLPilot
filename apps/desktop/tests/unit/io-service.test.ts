@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
+import * as fsSync from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdtemp } from 'node:fs/promises'
@@ -284,9 +285,14 @@ describe('IoService.runExport', () => {
       }),
     )
     const ctl1 = makeCtl([])
-    await io1.runExport({ name: 'U1', path: join(outDir, 'u1'), format: 'tar' }, ctl1 as never)
-    // dirSizeBytes 统计到 64 字节源（+vhdx 1024）→ expected>0，进度观察至少触发一次 0
+    const result1 = await io1.runExport(
+      { name: 'U1', path: join(outDir, 'u1'), format: 'tar' },
+      ctl1 as never,
+    )
+    // 目录统计回退路径：导出走完全程（成功 + 完成进度），并输出真实产物
+    expect(result1.name).toMatch(/^u1(_\d{8}-\d{6})?\.tar$/)
     expect(ctl1.report).toHaveBeenCalledWith(0, '正在导出 U1')
+    expect(ctl1.report).toHaveBeenCalledWith(100, '导出完成')
 
     // WSL2 但无 vhdx → 回退目录统计
     const noVhdx = await tmp()
@@ -308,13 +314,12 @@ describe('IoService.runExport', () => {
   it('watchProgress reports percent from file growth during export', async () => {
     const calls: string[][] = []
     const ctl = makeCtl([])
+    // 同步写目标文件：tick 看到的体量不受 I/O 调度影响（review M3 时序根治）
     const spawn: SpawnWslFn = ((args: string[], opts: { onExit: (c: number) => void }) => {
       calls.push(args)
       const target = args[2]!
-      setTimeout(() => {
-        void fs.writeFile(target, Buffer.alloc(512))
-      }, 50)
-      setTimeout(() => opts.onExit(0), 800)
+      fsSync.writeFileSync(target, Buffer.alloc(512))
+      setTimeout(() => opts.onExit(0), 1200)
       return { kill: vi.fn() }
     }) as unknown as SpawnWslFn
     const io = createIoService(
@@ -328,13 +333,12 @@ describe('IoService.runExport', () => {
       { name: 'Ubuntu', path: join(outDir, 'watch.tar'), format: 'tar' },
       ctl as never,
     )
-    // 500ms tick 看到 512/1024 → 50%
+    // tick（500ms）看到 512/1024 → 锁定 50%（弱区间断言根治）
     const mid = (ctl.report as ReturnType<typeof vi.fn>).mock.calls.find(
       (c) => typeof c[0] === 'number' && c[0] > 0 && c[0] < 100,
     )
     expect(mid).toBeTruthy()
-    expect(mid![0]).toBeGreaterThanOrEqual(0)
-    expect(mid![0]).toBeLessThan(100)
+    expect(mid![0]).toBe(50)
   })
 })
 
@@ -734,17 +738,26 @@ describe('IoService.runMove', () => {
 describe('IoService backups listing & rotation', () => {
   it('lists backup files sorted by mtime desc', async () => {
     const dir = await tmp()
-    await fs.writeFile(join(dir, 'Ubuntu_20260101-000000.tar'), 'a')
-    await fs.writeFile(join(dir, 'Debian_20260102-000000.vhdx'), 'b')
+    const older = join(dir, 'Ubuntu_20260101-000000.tar')
+    const newer = join(dir, 'Debian_20260102-000000.vhdx')
+    await fs.writeFile(older, 'a')
+    await fs.writeFile(newer, 'b')
     await fs.writeFile(join(dir, 'readme.txt'), 'x')
+    // 显式时间戳：mtime 降序可断言（review M2 排序断言根治）
+    await fs.utimes(older, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'))
+    await fs.utimes(newer, new Date('2026-06-01T00:00:00Z'), new Date('2026-06-01T00:00:00Z'))
+
     const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: dir }) }))
     const list = await io.listBackups()
     expect(list).toHaveLength(2)
-    expect(list.map((f) => f.name).sort()).toEqual([
+    // 不排序断言原序：新的在前
+    expect(list.map((f) => f.name)).toEqual([
       'Debian_20260102-000000.vhdx',
       'Ubuntu_20260101-000000.tar',
     ])
-    expect(list[0]!.format === 'tar' || list[0]!.format === 'vhd').toBe(true)
+    expect(list[0]!.format).toBe('vhd')
+    expect(list[1]!.format).toBe('tar')
+    expect(list[0]!.sizeBytes).toBe(1)
   })
 
   it('returns empty list for missing dir', async () => {

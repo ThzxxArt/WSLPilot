@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { TERMINAL_LIGHT_THEME, type TerminalFontPrefs, DEFAULT_TERMINAL_PREFS } from './theme'
+import { DEFAULT_TERMINAL_PREFS, resolveTerminalTheme, type TerminalFontPrefs } from './theme'
 import { useSettingsStore } from '../../stores/settings'
 
 const props = defineProps({
@@ -22,7 +22,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits<{
-  ready: [term: Terminal]
   cursorMove: [pos: { col: number; row: number; ptyId: string }]
 }>()
 
@@ -59,7 +58,7 @@ onMounted(() => {
     allowProposedApi: true,
     // 真 PTY 数据：不要 convertEol，避免 TUI 光标异常（评审 M2）
     convertEol: false,
-    theme: { ...TERMINAL_LIGHT_THEME },
+    theme: resolveTerminalTheme(settings.terminalTheme, settings.accent),
     ...DEFAULT_TERMINAL_PREFS,
   })
   applyPrefs(t, props.prefs)
@@ -94,6 +93,12 @@ onMounted(() => {
       ptyId: props.ptyId,
     })
   })
+  // 选中即复制（settings.terminal.copyOnSelect）
+  t.onSelectionChange(() => {
+    if (!settings.terminalCopyOnSelect) return
+    const sel = t.getSelection()
+    if (sel) void navigator.clipboard.writeText(sel).catch(() => {})
+  })
 
   const offData = window.wslAPI.terminal.onData((p) => {
     if (p.ptyId !== props.ptyId) return
@@ -109,7 +114,6 @@ onMounted(() => {
   ro.observe(host.value)
 
   fitTimer = window.setTimeout(doFit, 50)
-  emit('ready', t)
 })
 
 onBeforeUnmount(() => {
@@ -141,6 +145,14 @@ watch(
   { deep: true },
 )
 
+// 终端主题跟随设置（auto / follow-app / custom）
+watch(
+  () => [settings.terminalTheme, settings.accent] as const,
+  () => {
+    if (term) term.options.theme = resolveTerminalTheme(settings.terminalTheme, settings.accent)
+  },
+)
+
 function clear() {
   term?.clear()
 }
@@ -155,10 +167,6 @@ function fitNow() {
 
 function getSelection(): string {
   return term?.getSelection() ?? ''
-}
-
-function write(data: string) {
-  term?.write(data)
 }
 
 let lastSearch = ''
@@ -186,26 +194,14 @@ function zoom(delta: number) {
   void settings.setTerminalFontSize(next)
 }
 
-function scrollLineUp() {
-  term?.scrollLines(-1)
-}
-
-function scrollLineDown() {
-  term?.scrollLines(1)
-}
-
 defineExpose({
   clear,
   focus,
   fit: fitNow,
   getSelection,
-  write,
   findNext,
   findPrevious,
   zoom,
-  scrollLineUp,
-  scrollLineDown,
-  getTerm: () => term,
 })
 </script>
 

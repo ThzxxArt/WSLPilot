@@ -46,7 +46,7 @@ describe('usePolling', () => {
     expect(task).toHaveBeenCalledTimes(1)
   })
 
-  it('rebuilds timer when interval Ref changes', () => {
+  it('rebuilds timer when interval Ref changes', async () => {
     const task = vi.fn()
     const interval = ref(1000)
     const { start } = usePolling(task, { intervalMs: interval, pauseWhenHidden: false })
@@ -54,9 +54,11 @@ describe('usePolling', () => {
     vi.advanceTimersByTime(1000)
     expect(task).toHaveBeenCalledTimes(1)
     interval.value = 2000
+    // watch 为 pre-flush：先让重建生效，再推进时钟（否则旧 1s 计时器继续发）
+    await Promise.resolve()
     vi.advanceTimersByTime(5000)
-    // 新间隔 2s：5s 内约 2 次
-    expect(task.mock.calls.length).toBeGreaterThanOrEqual(3)
+    // 旧间隔 1 次 + 新间隔（2s）× 5s 内 2 次 = 精确 3 次（注释与断言一致 — review）
+    expect(task.mock.calls.length).toBe(3)
   })
 
   it('pauseWhenHidden skips task when document.hidden', () => {

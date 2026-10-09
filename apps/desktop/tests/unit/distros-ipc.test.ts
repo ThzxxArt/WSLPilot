@@ -75,6 +75,7 @@ function makeCtx() {
 function makeDeps() {
   const pty = {
     create: vi.fn(() => ({ ptyId: 'p1', distro: 'U', shell: 'b', createdAt: 0 })),
+    createCommand: vi.fn(() => ({ ptyId: 'p2', distro: 'U', shell: 'b', createdAt: 0 })),
     input: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
@@ -82,6 +83,7 @@ function makeDeps() {
     list: vi.fn(() => []),
     get: vi.fn(() => null),
     count: vi.fn(() => 0),
+    waitExit: vi.fn(async () => 0),
   } as any
   return {
     wsl: {
@@ -127,6 +129,7 @@ function makeDeps() {
       runImport: vi.fn(async () => {}),
       runMove: vi.fn(async () => {}),
       listBackups: vi.fn(async () => []),
+      cleanupBackups: vi.fn(async () => ({ removed: 0 })),
       resolveBackupDir: vi.fn(() => '/tmp/backups'),
       rotateBackups: vi.fn(async () => 0),
     } as any,

@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { CH, type ChannelName } from './channels'
 import { assertSafeDistroName } from './errors'
+import { assertSafeActionId } from './actions'
+import { FS_WRITE_LIMIT_BYTES, WSL_CONF_MAX_BYTES } from './constants'
 
 /**
  * 各 IPC 通道入参 zod schema（设计书 §8.2）。
@@ -96,6 +98,27 @@ function noControl(maxLen: number) {
   )
 }
 
+/** UTF-8 字节长度（Node/渲染通用，不依赖 Buffer） */
+export function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
+/**
+ * 文本类负载的控制字符校验：允许 \t \n \r（配置文本必需），
+ * 其余 C0 控制字符与 DEL 拒绝（与执行边界一致）。
+ */
+function textNoControl(maxChars: number) {
+  return (
+    z
+      .string()
+      .max(maxChars)
+      // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入（豁免 \t\n\r）
+      .refine((s) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s), {
+        message: '包含非法控制字符',
+      })
+  )
+}
+
 export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.distrosStart]: nameSchema,
   [CH.distrosTerminate]: nameSchema,
@@ -106,9 +129,9 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     version: z.union([z.literal(1), z.literal(2)]),
   }),
   [CH.distrosUnregister]: nameSchema,
+  // 安装走 `wsl --install [-d name]`，无「安装源」参数（installSource 幽灵配置已删除）
   [CH.distrosInstall]: z.object({
     name: nameSchema.optional(),
-    source: z.enum(['store', 'web']).default('store'),
   }),
   [CH.registryDetail]: nameSchema,
   [CH.metaGet]: nameSchema,
@@ -206,7 +229,10 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.wslconfRead]: nameSchema,
   [CH.wslconfWrite]: z.object({
     name: nameSchema,
-    content: z.string().max(64 * 1024),
+    // 字符数与字节数双重约束：中文 65536 字 ≈ 196KB 不得穿透（执行边界 wslconf-service 同一常量）
+    content: textNoControl(WSL_CONF_MAX_BYTES).refine((s) => utf8Bytes(s) <= WSL_CONF_MAX_BYTES, {
+      message: `内容超过 ${WSL_CONF_MAX_BYTES} 字节上限`,
+    }),
   }),
 
   // 发行版内文件（M5）：路径经 wsl.localhost 桥，一律拒绝控制字符
@@ -221,20 +247,37 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.fsWrite]: z.object({
     distro: nameSchema,
     path: noControl(1024),
-    data: z.string().max(4 * 1024 * 1024),
+    // 字符数与字节数双重约束（执行边界 fs-bridge 同一常量）
+    data: textNoControl(FS_WRITE_LIMIT_BYTES).refine((s) => utf8Bytes(s) <= FS_WRITE_LIMIT_BYTES, {
+      message: `内容超过 ${FS_WRITE_LIMIT_BYTES} 字节上限`,
+    }),
   }),
   [CH.fsRevealInExplorer]: z.object({
     distro: nameSchema,
     path: noControl(1024),
   }),
 
-  // 自定义动作（M5）：只允许执行配置中声明的 actionId
+  // 自定义动作（M5）：只允许执行配置中声明的 actionId；IPC 边界与执行边界同一校验
   [CH.actionRun]: z.object({
-    actionId: z.string().min(1).max(100),
+    actionId: z
+      .string()
+      .min(1)
+      .max(100)
+      .superRefine((s, ctx) => {
+        try {
+          assertSafeActionId(s)
+        } catch (e) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: e instanceof Error ? e.message : '动作 id 非法',
+          })
+        }
+      }),
     distro: nameSchema.optional(),
   }),
 
-  // 网络（M6）
+  // 网络（M6 有意预留）：契约先行，handler/preload/renderer 未实现
+  // 预留清单由 channels.test.ts 守护，禁止静默扩大
   [CH.networkApply]: z.string().min(1).max(100),
 }
 

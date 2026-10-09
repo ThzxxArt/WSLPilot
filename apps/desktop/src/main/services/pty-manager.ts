@@ -128,6 +128,24 @@ export function createPtyManager(
   /** 会话退出等待者（动作 runner 监控临时 PTY 退出 — M5） */
   const exitWaiters = new Map<string, Set<(code: number) => void>>()
 
+  /**
+   * 结算退出等待者。
+   * kill/killAll 也必须结算：进程已死时 onExit 可能不再触发，
+   * 不结算会让 waitExit 永挂（取消动作卡死 — review 根治）。
+   */
+  function settleExit(ptyId: string, code: number): void {
+    const waiters = exitWaiters.get(ptyId)
+    if (!waiters) return
+    exitWaiters.delete(ptyId)
+    for (const fn of waiters) {
+      try {
+        fn(code)
+      } catch {
+        /* 等待者异常不阻断 */
+      }
+    }
+  }
+
   function spawnSession(
     args: string[],
     meta: { distro: string; shell: string; cwd?: string; cols: number; rows: number },
@@ -165,17 +183,7 @@ export function createPtyManager(
         /* 已退出 */
       }
       const code = exitCode ?? 0
-      const waiters = exitWaiters.get(id)
-      if (waiters) {
-        exitWaiters.delete(id)
-        for (const fn of waiters) {
-          try {
-            fn(code)
-          } catch {
-            /* 等待者异常不阻断 */
-          }
-        }
-      }
+      settleExit(id, code)
       events.onExit(id, code)
     })
 
@@ -288,13 +296,19 @@ export function createPtyManager(
 
     kill(ptyId) {
       const s = sessions.get(ptyId)
-      if (!s) return
+      if (!s) {
+        // 已不在会话表但仍有等待者（异常路径）：必须结算，防永挂
+        settleExit(ptyId, -1)
+        return
+      }
       sessions.delete(ptyId)
       try {
         s.proc.kill()
       } catch (e) {
         logger.warn('pty kill failed', { ptyId, error: String(e) })
       }
+      // 进程已死时 onExit 可能不再到达 → 立即结算等待者（kill 语义：退出码未知取 -1）
+      settleExit(ptyId, -1)
     },
 
     killAll() {
@@ -305,6 +319,7 @@ export function createPtyManager(
           /* ignore */
         }
         sessions.delete(id)
+        settleExit(id, -1)
       }
     },
 

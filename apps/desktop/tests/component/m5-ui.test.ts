@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import CodeEditor from '@ui/components/CodeEditor.vue'
 import Kbd from '@ui/components/Kbd.vue'
+import EmptyState from '@ui/components/EmptyState.vue'
 import * as uiComponents from '@ui/components'
 
 describe('CodeEditor', () => {
@@ -80,9 +81,37 @@ describe('Kbd', () => {
   })
 })
 
+describe('EmptyState', () => {
+  it('渲染说明与插画', () => {
+    const w = mount(EmptyState, {
+      props: { description: '还没有发行版', illustration: '🐧' },
+    })
+    expect(w.text()).toContain('还没有发行版')
+    expect(w.find('.illustration').text()).toBe('🐧')
+    expect(w.attributes('role')).toBe('status')
+  })
+
+  it('默认文案与尺寸变体', () => {
+    const w = mount(EmptyState)
+    expect(w.text()).toContain('暂无数据')
+    expect(w.find('.illustration').exists()).toBe(false)
+    const big = mount(EmptyState, { props: { size: 'large', illustration: 'x' } })
+    expect(big.classes()).toContain('size-large')
+  })
+
+  it('默认插槽渲染主 CTA', () => {
+    const w = mount(EmptyState, {
+      props: { description: '空' },
+      slots: { default: '<button class="cta">去安装</button>' },
+    })
+    expect(w.find('.action .cta').exists()).toBe(true)
+  })
+})
+
 describe('M5 UI 组件注册', () => {
-  it('index 导出 CodeEditor / Kbd', () => {
+  it('index 导出 CodeEditor / Kbd / EmptyState', () => {
     expect(uiComponents.CodeEditor).toBeTruthy()
     expect(uiComponents.Kbd).toBeTruthy()
+    expect(uiComponents.EmptyState).toBeTruthy()
   })
 })

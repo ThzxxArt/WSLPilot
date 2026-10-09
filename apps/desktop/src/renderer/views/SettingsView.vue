@@ -169,6 +169,73 @@ function setKeepRecent(v: number | null) {
           @update:value="(v: boolean) => settings.setReduceMotion(v)"
         />
       </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">界面语言</div>
+          <div class="hint">system 跟随操作系统语言</div>
+        </div>
+        <n-select
+          :value="settings.locale"
+          size="small"
+          style="width: 160px"
+          :options="[
+            { label: '跟随系统', value: 'system' },
+            { label: '简体中文', value: 'zh-CN' },
+            { label: 'English', value: 'en-US' },
+          ]"
+          @update:value="(v: 'system' | 'zh-CN' | 'en-US') => settings.setLocale(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">启动时自动刷新发行版</div>
+          <div class="hint">关闭后仅在手动点击「刷新」时查询 wsl 状态</div>
+        </div>
+        <n-switch
+          :value="settings.autoRefreshOnStart"
+          @update:value="(v: boolean) => settings.setAutoRefreshOnStart(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">轮询间隔</div>
+          <div class="hint">状态刷新频率（1000–60000 毫秒）；窗口失焦时自动暂停</div>
+        </div>
+        <n-input-number
+          :value="settings.pollIntervalMs"
+          size="small"
+          :min="1000"
+          :max="60000"
+          :step="500"
+          @update:value="(v: number | null) => v && settings.setPollIntervalMs(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">关闭窗口时</div>
+          <div class="hint">最小化到托盘（继续后台运行）或直接退出</div>
+        </div>
+        <n-select
+          :value="settings.closeBehavior"
+          size="small"
+          style="width: 180px"
+          :options="[
+            { label: '最小化到托盘', value: 'minimizeToTray' },
+            { label: '直接退出', value: 'quit' },
+          ]"
+          @update:value="(v: 'minimizeToTray' | 'quit') => settings.setCloseBehavior(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">开机自启</div>
+          <div class="hint">登录 Windows 后自动启动（与托盘菜单同步）</div>
+        </div>
+        <n-switch
+          :value="settings.launchAtLogin"
+          @update:value="(v: boolean) => settings.setLaunchAtLogin(v)"
+        />
+      </div>
     </n-card>
 
     <n-card title="WSL" class="block">
@@ -261,6 +328,47 @@ function setKeepRecent(v: number | null) {
           @update:value="setScrollback"
         />
       </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">行高</div>
+          <div class="hint">1–2.5 倍</div>
+        </div>
+        <n-input-number
+          :value="settings.terminalLineHeight"
+          size="small"
+          :min="1"
+          :max="2.5"
+          :step="0.1"
+          @update:value="(v: number | null) => v && settings.setTerminalLineHeight(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">选中即复制</div>
+          <div class="hint">选中文本自动写入剪贴板</div>
+        </div>
+        <n-switch
+          :value="settings.terminalCopyOnSelect"
+          @update:value="(v: boolean) => settings.setTerminalCopyOnSelect(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">终端主题</div>
+          <div class="hint">auto 内置浅色 · follow-app 跟随强调色 · custom 高对比</div>
+        </div>
+        <n-select
+          :value="settings.terminalTheme"
+          size="small"
+          style="width: 180px"
+          :options="[
+            { label: '自动（浅色）', value: 'auto' },
+            { label: '跟随强调色', value: 'follow-app' },
+            { label: '高对比', value: 'custom' },
+          ]"
+          @update:value="(v: 'auto' | 'follow-app' | 'custom') => settings.setTerminalTheme(v)"
+        />
+      </div>
     </n-card>
 
     <n-card title="备份" class="block">
@@ -340,6 +448,37 @@ function setKeepRecent(v: number | null) {
           @update:value="(v: boolean) => settings.setConfirmDestructive(v)"
         />
       </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">日志级别</div>
+          <div class="hint">logs/app-YYYYMMDD.log 的记录粒度</div>
+        </div>
+        <n-select
+          :value="settings.logLevel"
+          size="small"
+          style="width: 140px"
+          :options="[
+            { label: 'trace', value: 'trace' },
+            { label: 'debug', value: 'debug' },
+            { label: 'info', value: 'info' },
+            { label: 'warn', value: 'warn' },
+            { label: 'error', value: 'error' },
+          ]"
+          @update:value="
+            (v: 'trace' | 'debug' | 'info' | 'warn' | 'error') => settings.setLogLevel(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">硬件加速</div>
+          <div class="hint">关闭可解决部分显卡驱动白屏问题；重启应用后生效</div>
+        </div>
+        <n-switch
+          :value="settings.hardwareAcceleration"
+          @update:value="(v: boolean) => settings.setHardwareAcceleration(v)"
+        />
+      </div>
     </n-card>
 
     <n-card title="快捷键" class="block">
@@ -373,7 +512,7 @@ function setKeepRecent(v: number | null) {
     </n-card>
 
     <n-card title="关于" class="block">
-      <p class="hint">WSLPilot v{{ settings.version || '0.1.0' }} · MIT License</p>
+      <p class="hint">WSLPilot v{{ settings.version || '—' }} · MIT License</p>
       <p class="hint">让 WSL 管理像驾驶一样从容。</p>
     </n-card>
   </div>

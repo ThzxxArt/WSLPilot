@@ -6,6 +6,7 @@ import { Kbd } from '@ui/components'
 import { useDistrosStore } from '../../stores/distros'
 import { useActionsStore } from '../../stores/actions'
 import { useSettingsStore } from '../../stores/settings'
+import { useTerminalStore } from '../../stores/terminal'
 import { useCommandPalette } from '../../composables/useCommandPalette'
 import { errorLine } from '../../composables/useAppError'
 import {
@@ -21,6 +22,7 @@ const router = useRouter()
 const distros = useDistrosStore()
 const actions = useActionsStore()
 const settings = useSettingsStore()
+const terminal = useTerminalStore()
 const message = useMessage()
 const { open, closePalette } = useCommandPalette()
 
@@ -90,6 +92,23 @@ function buildItems(): PaletteItem[] {
       },
     })
   }
+  items.push({
+    id: 'new-terminal',
+    group: '动作',
+    label: '新建终端标签',
+    hint: '为默认发行版开会话',
+    icon: '⌨️',
+    keys: ['Ctrl', 'N'],
+    run: async () => {
+      const name = targetDistro()
+      if (!name) {
+        message.warning('没有可用的发行版')
+        return
+      }
+      await terminal.open(name)
+      await router.push('/terminal')
+    },
+  })
   items.push(
     settingsItem('open-config-dir', '打开配置目录', () => window.wslAPI.app.openConfigDir()),
   )
@@ -174,7 +193,7 @@ function buildItems(): PaletteItem[] {
   // ── 导航 ──
   items.push(navItem('nav-dashboard', '驾驶舱', '/dashboard', '全局概览', undefined, '🛫'))
   items.push(navItem('nav-distros', '发行版', '/distros', '列表与操作', undefined, '🐧'))
-  items.push(navItem('nav-terminal', '终端', '/terminal', '多标签工作区', { new: '1' }, '⌨️'))
+  items.push(navItem('nav-terminal', '终端', '/terminal', '多标签工作区', undefined, '🖥️'))
   items.push(navItem('nav-network', '网络', '/network', undefined, undefined, '🌐'))
   items.push(navItem('nav-backup', '备份与迁移', '/backup', undefined, undefined, '💾'))
   items.push(navItem('nav-settings', '设置', '/settings', undefined, undefined, '⚙️'))

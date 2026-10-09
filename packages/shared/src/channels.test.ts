@@ -51,4 +51,16 @@ describe('IPC 契约一致性（review M1）', () => {
   it('parseIpcArgs 拒绝多余参数', () => {
     expect(() => parseIpcArgs(CH.distrosList, ['a', 'b'])).toThrow(/只接受 1 个参数/)
   })
+
+  it('预留通道（契约先行、未实现）显式受控，禁止静默扩大（review M2）', () => {
+    // 有意预留：有 schema + 入册 INVOKE_CHANNELS，但 handler/preload/renderer 未实现（M6 网络）
+    const RESERVED = new Set<string>([CH.networkApply])
+    // 清单即声明：新增预留必须改这里，否则本用例失败
+    expect([...RESERVED].sort()).toEqual([CH.networkApply])
+    for (const ch of RESERVED) {
+      expect(IPC_SCHEMAS[ch as ChannelName], `预留通道缺 schema: ${ch}`).toBeTruthy()
+      expect(INVOKE_CHANNELS).toContain(ch)
+    }
+    // 除预留清单外，其余 invoke 通道都必须有真实消费（由 preload-contract.test 守护）
+  })
 })

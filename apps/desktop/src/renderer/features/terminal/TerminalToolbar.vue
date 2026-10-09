@@ -15,7 +15,6 @@ const emit = defineEmits<{
   copy: []
   export: []
   zoom: [delta: number]
-  fontSizeChange: [n: number]
 }>()
 
 const query = ref('')

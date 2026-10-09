@@ -2,11 +2,13 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from 'electron'
 import { join } from 'node:path'
 import { CH } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
+import type { ConfigService } from '../services/config-service'
 import { markQuitting } from '../app-state'
 
 export interface TrayOptions {
   getMainWindow: () => BrowserWindow | null
   logger: Logger
+  configService: ConfigService
 }
 
 let tray: Tray | null = null
@@ -54,51 +56,64 @@ export function createTray(opts: TrayOptions): Tray {
     }
   }
 
-  const menu = Menu.buildFromTemplate([
-    {
-      label: '打开 WSLPilot',
-      click: showWindow,
-    },
-    { type: 'separator' },
-    {
-      label: '驾驶舱',
-      click: () => navigate('/dashboard'),
-    },
-    {
-      label: '终端',
-      click: () => navigate('/terminal'),
-    },
-    {
-      label: '设置',
-      click: () => navigate('/settings'),
-    },
-    { type: 'separator' },
-    {
-      label: '打开配置目录',
-      click: () => {
-        void shell.openPath(app.getPath('userData'))
+  /** 菜单按 settings 现值构建；勾选后写回 settings（主进程同步系统登录项） */
+  const buildMenu = () => {
+    const launchAtLogin = opts.configService.loadSync('settings').general.launchAtLogin
+    return Menu.buildFromTemplate([
+      {
+        label: '打开 WSLPilot',
+        click: showWindow,
       },
-    },
-    { type: 'separator' },
-    {
-      label: '开机自启',
-      type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (item) => {
-        app.setLoginItemSettings({ openAtLogin: item.checked })
+      { type: 'separator' },
+      {
+        label: '驾驶舱',
+        click: () => navigate('/dashboard'),
       },
-    },
-    { type: 'separator' },
-    {
-      label: '退出',
-      click: () => {
-        markQuitting()
-        app.quit()
+      {
+        label: '终端',
+        click: () => navigate('/terminal'),
       },
-    },
-  ])
+      {
+        label: '设置',
+        click: () => navigate('/settings'),
+      },
+      { type: 'separator' },
+      {
+        label: '打开配置目录',
+        click: () => {
+          void shell.openPath(app.getPath('userData'))
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '开机自启',
+        type: 'checkbox',
+        checked: launchAtLogin,
+        click: (item) => {
+          // settings.jsonc 为真相源；applySettingsSideEffects 同步系统登录项
+          void opts.configService
+            .patch('settings', { general: { launchAtLogin: item.checked } })
+            .catch((e: unknown) =>
+              opts.logger.warn('toggle launchAtLogin failed', { error: String(e) }),
+            )
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '退出',
+        click: () => {
+          markQuitting()
+          app.quit()
+        },
+      },
+    ])
+  }
 
-  tray.setContextMenu(menu)
+  const refreshMenu = () => tray?.setContextMenu(buildMenu())
+  refreshMenu()
+  // 设置变更后重建菜单（勾选态与设置页保持一致）
+  opts.configService.onChange('settings', refreshMenu)
+
   tray.on('double-click', showWindow)
 
   opts.logger.info('tray created')

@@ -8,13 +8,14 @@ import {
   createAppError,
   assertSafeDistroName,
   parseIniLines,
+  WSL_CONF_MAX_BYTES,
   type WslConfChange,
 } from '@wslpilot/shared'
 import { runWsl, runWslWithStdin, type Logger } from '@wslpilot/kit'
 
 export const WSL_CONF_PATH = '/etc/wsl.conf'
-/** 与 ipc-schema wslconfWrite.content 上限一致 */
-export const WSL_CONF_MAX_BYTES = 64 * 1024
+/** 字节上限唯一事实源在 @wslpilot/shared（ipc-schema 与执行边界共用） */
+export { WSL_CONF_MAX_BYTES }
 
 export interface WslConfService {
   /** 读取原文；文件不存在返回 ''（视为默认配置） */

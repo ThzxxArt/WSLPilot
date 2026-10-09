@@ -266,4 +266,33 @@ describe('PtyManager', () => {
     expect(events.onExit).toHaveBeenCalledWith(info.ptyId, 7)
     await expect(pty.waitExit('missing')).rejects.toMatchObject({ code: 'TASK_FAILED' })
   })
+
+  it('kill 即使 onExit 不触发也结算等待者（取消卡死根治 — review M7）', async () => {
+    const info = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    const p = pty.waitExit(info.ptyId)
+    // kill 后不 emitExit（模拟进程已死、onExit 永不到达）
+    pty.kill(info.ptyId)
+    await expect(p).resolves.toBe(-1)
+  })
+
+  it('killAll 结算全部等待者；对已死会话 kill 幂等结算', async () => {
+    const a = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    const b = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    const pa = pty.waitExit(a.ptyId)
+    const pb = pty.waitExit(b.ptyId)
+    pty.killAll()
+    await expect(pa).resolves.toBe(-1)
+    await expect(pb).resolves.toBe(-1)
+    // 会话已不在表中：再次 kill 不抛且二次结算无副作用
+    expect(() => pty.kill(a.ptyId)).not.toThrow()
+    await expect(pa).resolves.toBe(-1)
+  })
+
+  it('onExit 缺省退出码归一为 0', async () => {
+    const info = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    const p = pty.waitExit(info.ptyId)
+    procs[0]!.emitExit(undefined as unknown as number)
+    await expect(p).resolves.toBe(0)
+    expect(events.onExit).toHaveBeenCalledWith(info.ptyId, 0)
+  })
 })

@@ -131,26 +131,39 @@ describe('main-window', () => {
   it('blocks non-http navigation and opens http externally', async () => {
     await createMainWindow('/p.js', makeConfigService())
     const handler = createdWindows[0].webContents.setWindowOpenHandler.mock.calls[0][0]
+    const { shell } = await import('electron')
+    vi.mocked(shell.openExternal).mockClear()
 
+    // http/https：deny + 转系统浏览器
     expect(handler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
     expect(handler({ url: 'http://example.com' })).toEqual({ action: 'deny' })
+    expect(shell.openExternal).toHaveBeenCalledTimes(2)
+    expect(shell.openExternal).toHaveBeenCalledWith('https://example.com')
+
+    // file:// 等非 http：只 deny，绝不外开（安全边界 — review M1 断言根治）
+    vi.mocked(shell.openExternal).mockClear()
     expect(handler({ url: 'file:///etc/passwd' })).toEqual({ action: 'deny' })
+    expect(handler({ url: 'javascript:alert(1)' })).toEqual({ action: 'deny' })
+    expect(shell.openExternal).not.toHaveBeenCalled()
   })
 
   it('persists window state on resize (debounced)', async () => {
     vi.useFakeTimers()
-    const config = makeConfigService()
-    await createMainWindow('/p.js', config)
-    const win = createdWindows[0]
+    try {
+      const config = makeConfigService()
+      await createMainWindow('/p.js', config)
+      const win = createdWindows[0]
 
-    win.emit('resize')
-    win.emit('resize')
-    expect(config.patch).not.toHaveBeenCalled()
+      win.emit('resize')
+      win.emit('resize')
+      expect(config.patch).not.toHaveBeenCalled()
 
-    await vi.advanceTimersByTimeAsync(600)
-    expect(config.patch).toHaveBeenCalledWith('uiState', {
-      window: expect.objectContaining({ width: 900, height: 600, x: 10, y: 20 }),
-    })
-    vi.useRealTimers()
+      await vi.advanceTimersByTimeAsync(600)
+      expect(config.patch).toHaveBeenCalledWith('uiState', {
+        window: expect.objectContaining({ width: 900, height: 600, x: 10, y: 20 }),
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

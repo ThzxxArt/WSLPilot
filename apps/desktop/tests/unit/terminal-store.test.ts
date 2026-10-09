@@ -161,4 +161,46 @@ describe('useTerminalStore', () => {
     // 未知 id 有缓冲防护
     expect(s.getBuffer('missing')).toBe('')
   })
+
+  // ── M5 收编与竞态（review 根治）──
+
+  it('adopt 收编已存在会话并保留 adopt 前到达的输出', () => {
+    const s = useTerminalStore()
+    const ptyId = `race-${Math.random().toString(16).slice(2)}`
+    // 数据先于 adopt 到达（竞态窗口）
+    s.appendOutput(ptyId, 'early-output')
+    s.appendOutput(ptyId, '-more')
+    const session = s.adopt(ptyId, { title: '动作', distro: 'Ubuntu' })
+    expect(session).not.toBeNull()
+    expect(s.sessions).toHaveLength(1)
+    expect(s.sessions[0]).toMatchObject({ ptyId, title: '动作', distro: 'Ubuntu', alive: true })
+    expect(s.getBuffer(ptyId)).toBe('early-output-more')
+    // 重复 adopt 幂等
+    expect(s.adopt(ptyId, { title: 'x', distro: 'y' })).not.toBeNull()
+    expect(s.sessions).toHaveLength(1)
+  })
+
+  it('adopt 前已退出的会话直接标终态（竞态防护）', () => {
+    const s = useTerminalStore()
+    const ptyId = `dead-${Math.random().toString(16).slice(2)}`
+    s.handleExit(ptyId, 42) // 退出事件先到，会话尚不存在
+    const session = s.adopt(ptyId, { distro: 'Ubuntu' })
+    expect(session!.alive).toBe(false)
+    expect(session!.exitCode).toBe(42)
+    // title 缺省回落 distro
+    expect(session!.title).toBe('Ubuntu')
+  })
+
+  it('recover 收编主进程存活会话；list 失败静默', async () => {
+    const s = useTerminalStore()
+    wslAPI.terminal.list.mockResolvedValueOnce([
+      { ptyId: 'orphan-1', distro: 'Debian', shell: '/bin/sh', createdAt: 1 },
+    ])
+    await s.recover()
+    expect(s.sessions).toHaveLength(1)
+    expect(s.sessions[0]).toMatchObject({ ptyId: 'orphan-1', distro: 'Debian' })
+
+    wslAPI.terminal.list.mockRejectedValueOnce(new Error('ipc down'))
+    await expect(s.recover()).resolves.toBeUndefined()
+  })
 })

@@ -127,9 +127,10 @@ describe('actionRunner.prepare', () => {
     })
   })
 
-  it('非法 id 拒绝', async () => {
+  it('非法 id 拒绝（与 IPC 边界同一规则）', async () => {
     const runner = createActionRunner(makeDeps())
-    await expect(runner.prepare('a\u0000b')).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    await expect(runner.prepare('a\u0000b')).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
+    await expect(runner.prepare('a/b')).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
   })
 
   it('distro 动作未指定发行版 → 拒绝', async () => {

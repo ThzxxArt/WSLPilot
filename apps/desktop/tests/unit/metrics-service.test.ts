@@ -100,9 +100,6 @@ describe('sampleOverview', () => {
     )
     expect(result.diskUsedKB).toBe(12_000_000)
     expect(result.diskTotalKB).toBe(30_000_000)
-    // 禁止用内存推算磁盘
-    expect(result.diskUsedKB).not.toBe(Math.round(result.memUsedKB * 0.1))
-    expect(result.diskTotalKB).not.toBe(result.memTotalKB * 2)
   })
 
   it('EMPTY_OVERVIEW has zero counts', () => {

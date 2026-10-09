@@ -1,16 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
 import { NSelect, NRadioGroup, NCheckbox } from 'naive-ui'
 import ProgressRing from '@ui/components/ProgressRing.vue'
 import ExportWizard from '../../src/renderer/features/backup/ExportWizard.vue'
 import ImportWizard from '../../src/renderer/features/backup/ImportWizard.vue'
 import MoveWizard from '../../src/renderer/features/backup/MoveWizard.vue'
-import {
-  useTaskProgressSubscription,
-  useTaskProgress,
-} from '../../src/renderer/composables/useTaskProgress'
 import type { DistroView } from '@wslpilot/shared'
 
 const wslAPI = {
@@ -256,30 +250,5 @@ describe('MoveWizard', () => {
       },
     })
     expect(w2.text()).toContain('自动备份已关闭')
-  })
-})
-
-describe('useTaskProgressSubscription', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.clearAllMocks()
-  })
-
-  it('subscribes on mount and unsubscribes on unmount', async () => {
-    const off = vi.fn()
-    wslAPI.task.onProgress.mockImplementation(() => off)
-
-    const Wrapper = defineComponent({
-      setup() {
-        useTaskProgressSubscription()
-        const { percentLabel } = useTaskProgress('x')
-        return () => h('div', percentLabel.value)
-      },
-    })
-    const w = mount(Wrapper)
-    await flushPromises()
-    expect(wslAPI.task.onProgress).toHaveBeenCalledTimes(1)
-    w.unmount()
-    expect(off).toHaveBeenCalledTimes(1)
   })
 })

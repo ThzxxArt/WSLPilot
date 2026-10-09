@@ -10,6 +10,7 @@ const wslAPI = {
   },
   distros: {
     install: vi.fn(async () => ({ taskId: 'ins-1' })),
+    setVersion: vi.fn(async () => ({ taskId: 'cv-1' })),
     list: vi.fn(async () => []),
   },
   task: {
@@ -101,7 +102,8 @@ describe('useTasksStore', () => {
 
     wslAPI.task.cancel.mockRejectedValueOnce(new Error('boom'))
     await expect(s.cancel('t2')).rejects.toMatchObject({ code: 'UNKNOWN' })
-    expect(s.lastError?.message).toBeTruthy()
+    expect(s.lastError?.code).toBe('UNKNOWN')
+    expect(s.lastError?.message).toBe('发生未知错误')
   })
 
   it('failed and canceled statuses record error text', async () => {
@@ -189,6 +191,22 @@ describe('useTasksStore', () => {
     const s = useTasksStore()
     expect(await s.startInstall('X')).toBeNull()
     expect(s.lastError?.message).toBe('安装失败')
+  })
+
+  it('startConvert 跟踪版本转换任务（M5 兑现）', async () => {
+    wslAPI.distros.setVersion = vi.fn(async () => ({ taskId: 'cv-1' }))
+    const s = useTasksStore()
+    const entry = await s.startConvert('Ubuntu', 2)
+    expect(entry?.taskId).toBe('cv-1')
+    expect(entry?.type).toBe('convert')
+    expect(entry?.message).toBe('转换 Ubuntu 到 WSL2')
+    expect(wslAPI.distros.setVersion).toHaveBeenCalledWith('Ubuntu', 2)
+
+    wslAPI.distros.setVersion = vi.fn(async () => {
+      throw new Error('WSLPILOT:{"code":"TASK_FAILED","message":"转换失败","recoverable":true}')
+    })
+    expect(await s.startConvert('U', 1)).toBeNull()
+    expect(s.lastError?.message).toBe('转换失败')
   })
 
   it('trimFinished 保留最近 10 条终态记录（review M7）', () => {

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useSettingsStore } from '../stores/settings'
 import { useTasksStore } from '../stores/tasks'
 import { taskTypeLabel } from '../composables/useTaskProgress'
+import TaskDrawer from '../features/tasks/TaskDrawer.vue'
 
 const settings = useSettingsStore()
 const tasks = useTasksStore()
-const router = useRouter()
 const now = ref(new Date())
+const drawerOpen = ref(false)
 let timer: number | undefined
 
 onMounted(() => {
@@ -22,8 +22,9 @@ const timeLabel = computed(() =>
 
 const versionLabel = computed(() => settings.version || '—')
 
-/** 长任务常驻进度（设计书 §13.4）：状态栏显示 → 点击展开任务面板 */
+/** 长任务常驻进度（设计书 §13.4）：状态栏显示 → 点击展开任务面板（日志 / 取消） */
 const runningTask = computed(() => tasks.running[tasks.running.length - 1] ?? null)
+const hasEntries = computed(() => tasks.entries.length > 0)
 const taskLabel = computed(() => {
   const t = runningTask.value
   if (!t) return ''
@@ -32,7 +33,7 @@ const taskLabel = computed(() => {
 })
 
 function openTasks() {
-  void router.push('/backup')
+  drawerOpen.value = true
 }
 </script>
 
@@ -48,12 +49,16 @@ function openTasks() {
           {{ taskLabel }}
         </button>
       </template>
+      <button v-else-if="hasEntries" class="task-link" aria-label="查看任务记录" @click="openTasks">
+        任务
+      </button>
       <span class="sep">·</span>
       <span class="muted">WSLPilot v{{ versionLabel }}</span>
     </div>
     <div class="right">
       <span class="muted">{{ timeLabel }}</span>
     </div>
+    <TaskDrawer v-model:show="drawerOpen" />
   </footer>
 </template>
 
@@ -109,6 +114,18 @@ function openTasks() {
 
 .task-chip:hover {
   background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.task-link {
+  color: var(--color-text-tertiary);
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.task-link:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
 }
 
 .task-pulse {

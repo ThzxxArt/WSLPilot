@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createTaskRunner, type TaskRecord } from '../../src/main/services/task-runner'
-import type { TaskProgress } from '@wslpilot/shared'
+import { createAppError, type TaskProgress } from '@wslpilot/shared'
 
 function logger() {
   return {
@@ -90,11 +90,7 @@ describe('TaskRunner', () => {
             killed = true
           })
           ctl.onCancel(() => {
-            reject(
-              new Error(
-                'WSLPILOT:{"code":"TASK_CANCELED","message":"任务已取消","recoverable":true}',
-              ),
-            )
+            reject(createAppError('TASK_CANCELED', { message: '任务已取消' }))
           })
           setTimeout(resolve, 10_000)
         }),
@@ -203,7 +199,7 @@ describe('TaskRunner', () => {
     expect(finished[0]!.status).toBe('failed')
   })
 
-  it('maps thrown TASK_CANCELED error to canceled status', async () => {
+  it('未请求取消时 throwIfCanceled 不抛、任务照常成功', async () => {
     const { runner } = makeRunner()
     const handle = runner.start({
       type: 'export',
@@ -214,6 +210,20 @@ describe('TaskRunner', () => {
     })
     const rec = await runner.waitFor(handle.taskId)
     expect(rec.status).toBe('success')
+  })
+
+  it('抛出 TASK_CANCELED（真实 AppError 形态）映射为 canceled（review C2 根治）', async () => {
+    const { runner } = makeRunner()
+    const handle = runner.start({
+      type: 'export',
+      message: 'm',
+      run: async () => {
+        // 主进程内部真实错误形态：createAppError 产生带 .code 属性的 WslPilotError
+        throw createAppError('TASK_CANCELED', { message: '任务已取消' })
+      },
+    })
+    const rec = await runner.waitFor(handle.taskId)
+    expect(rec.status).toBe('canceled')
   })
 
   it('throwIfCanceled throws after cancel request', async () => {
@@ -345,11 +355,7 @@ describe('TaskRunner', () => {
             ctl.onCancel(() => {
               throw new Error('hook boom 2')
             })
-            reject(
-              new Error(
-                'WSLPILOT:{"code":"TASK_CANCELED","message":"任务已取消","recoverable":true}',
-              ),
-            )
+            reject(createAppError('TASK_CANCELED', { message: '任务已取消' }))
           }, 5)
         }),
     })

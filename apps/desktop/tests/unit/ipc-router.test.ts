@@ -87,10 +87,12 @@ function makeDeps() {
     } as any,
     registry: {
       detail: vi.fn(async () => ({})),
+      detailFull: vi.fn(async () => null),
       listGuids: vi.fn(async () => []),
     } as any,
     pty: {
       create: vi.fn(() => ({ ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 0 })),
+      createCommand: vi.fn(() => ({ ptyId: 'p2', distro: 'U', shell: '/bin/true', createdAt: 0 })),
       input: vi.fn(),
       resize: vi.fn(),
       kill: vi.fn(),
@@ -98,12 +100,14 @@ function makeDeps() {
       list: vi.fn(() => []),
       get: vi.fn(() => null),
       count: vi.fn(() => 0),
+      waitExit: vi.fn(async () => 0),
     } as any,
     io: {
       runExport: vi.fn(async () => ({})),
       runImport: vi.fn(async () => {}),
       runMove: vi.fn(async () => {}),
       listBackups: vi.fn(async () => []),
+      cleanupBackups: vi.fn(async () => ({ removed: 0 })),
       resolveBackupDir: vi.fn(() => '/tmp/backups'),
       rotateBackups: vi.fn(async () => 0),
     } as any,
@@ -245,11 +249,14 @@ describe('IPC router + handlers', () => {
     await expect(wrapped.get(CH.appGetVersion)({})).resolves.toBe('0.1.0')
   })
 
-  it('app:openConfigDir opens path', async () => {
+  it('app:openConfigDir opens userData dir in system explorer', async () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
+    const { shell } = await import('electron')
     await wrapped.get(CH.appOpenConfigDir)({})
-    expect(ctx.configService.userDataDir).toBe('/tmp/cfg')
+    // 断言真实行为（shell.openPath），而非 mock 自身属性（review C1 假信心根治）
+    expect(shell.openPath).toHaveBeenCalledTimes(1)
+    expect(shell.openPath).toHaveBeenCalledWith('/tmp/cfg')
   })
 
   it('window minimize / maximize / close delegate to window', async () => {

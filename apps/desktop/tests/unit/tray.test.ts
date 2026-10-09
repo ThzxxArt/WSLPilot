@@ -72,6 +72,14 @@ function makeLogger() {
   } as any
 }
 
+function makeConfigService() {
+  return {
+    loadSync: vi.fn(() => ({ general: { launchAtLogin: false } })),
+    patch: vi.fn(async () => ({})),
+    onChange: vi.fn(() => () => {}),
+  } as any
+}
+
 describe('tray', () => {
   beforeEach(() => {
     trayInstances.length = 0
@@ -91,6 +99,7 @@ describe('tray', () => {
     const tray = createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
+      configService: makeConfigService(),
     })
 
     expect((tray as any).tooltip).toContain('WSLPilot')
@@ -106,6 +115,7 @@ describe('tray', () => {
     const opts = {
       getMainWindow: () => null,
       logger: makeLogger(),
+      configService: makeConfigService(),
     }
     const t1 = createTray(opts)
     const t2 = createTray(opts)
@@ -125,6 +135,7 @@ describe('tray', () => {
     const tray = createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
+      configService: makeConfigService(),
     })
 
     ;(tray as any).handlers.get('double-click')!()
@@ -144,6 +155,7 @@ describe('tray', () => {
     createTray({
       getMainWindow: () => win as any,
       logger: makeLogger(),
+      configService: makeConfigService(),
     })
 
     const settingsItem = trayMenu.items.find((i: any) => i.label === '设置')
@@ -156,6 +168,7 @@ describe('tray', () => {
     createTray({
       getMainWindow: () => null,
       logger: makeLogger(),
+      configService: makeConfigService(),
     })
     const quitItem = trayMenu.items.find((i: any) => i.label === '退出')
     quitItem.click()
@@ -166,6 +179,7 @@ describe('tray', () => {
     const t = createTray({
       getMainWindow: () => null,
       logger: makeLogger(),
+      configService: makeConfigService(),
     })
     destroyTray()
     expect((t as any).destroyed).toBe(true)

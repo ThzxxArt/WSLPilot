@@ -15,6 +15,7 @@ import { createIoService } from './services/io-service'
 import { createWslConfService } from './services/wslconf-service'
 import { createActionRunner } from './services/action-runner'
 import { createFsBridge } from './services/fs-bridge'
+import { readBootSettings } from './settings-boot'
 import { isQuitting, markQuitting } from './app-state'
 
 let bootstrapLogger: Logger | null = null
@@ -39,6 +40,15 @@ if (!gotLock) {
   app.quit()
 } else {
   installGlobalGuards(() => bootstrapLogger)
+
+  // 硬件加速开关须在 ready 前生效（settings.advanced.hardwareAcceleration）
+  try {
+    if (!readBootSettings(app.getPath('userData')).hardwareAcceleration) {
+      app.disableHardwareAcceleration()
+    }
+  } catch {
+    /* 读取失败按默认（开启）处理 */
+  }
 
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
@@ -108,6 +118,19 @@ async function bootstrap() {
   logger.info('app starting', { version: app.getVersion(), userDataDir })
 
   const configService = await createConfigService(userDataDir, logger)
+
+  /** 设置副作用：日志级别 + 开机自启（settings.jsonc 为唯一真相源） */
+  const applySettingsSideEffects = () => {
+    try {
+      const s = configService.loadSync('settings')
+      logger.setLevel(s.advanced.logLevel)
+      app.setLoginItemSettings({ openAtLogin: s.general.launchAtLogin })
+    } catch (e) {
+      logger.warn('apply settings side effects failed', { error: String(e) })
+    }
+  }
+  applySettingsSideEffects()
+  configService.onChange('settings', applySettingsSideEffects)
 
   mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
   mainWindow.on('closed', () => {
@@ -199,6 +222,7 @@ async function bootstrap() {
   createTray({
     getMainWindow: () => mainWindow,
     logger,
+    configService,
   })
 
   await mainWindow.loadURL(

@@ -5,6 +5,7 @@ import type { Metrics, RegistryDetail } from '@shared/types'
 import { formatKbPair } from '@shared/format'
 import { useDistrosStore } from '../../stores/distros'
 import { useSettingsStore } from '../../stores/settings'
+import { useTasksStore } from '../../stores/tasks'
 import { errorLine } from '../../composables/useAppError'
 import { stateLabel } from '../../composables/state-label'
 import WslConfPanel from '../config/WslConfPanel.vue'
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 
 const distros = useDistrosStore()
 const settings = useSettingsStore()
+const tasks = useTasksStore()
 const message = useMessage()
 
 const detail = ref<RegistryDetail | null>(null)
@@ -136,6 +138,34 @@ function onTerminate() {
 }
 function onSetDefault() {
   void act(() => distros.setDefault(props.distroName), `已设 ${props.distroName} 为默认`)
+}
+
+/** WSL1 ↔ WSL2 转换（wsl --set-version，长任务；运行中会失败，提示先停止） */
+function onConvert() {
+  const d = distro.value
+  if (!d) return
+  const target: 1 | 2 = d.version === 1 ? 2 : 1
+  if (settings.confirmDestructive) {
+    const ok = window.confirm(
+      `将 ${props.distroName} 转换为 WSL${target}？\n\n` +
+        `该操作耗时较长（虚拟磁盘转换），且要求发行版处于已停止状态。\n\n` +
+        `点「确定」开始，点「取消」放弃。`,
+    )
+    if (!ok) return
+  }
+  void (async () => {
+    try {
+      const entry = await tasks.startConvert(props.distroName, target)
+      if (!entry) {
+        message.error(errorLine(tasks.lastError, '转换任务启动失败'))
+        return
+      }
+      message.success(`已开始转换 ${props.distroName} → WSL${target}，进度见底部状态栏`)
+      emit('update:show', false)
+    } catch (e) {
+      message.error(errorLine(e, '启动版本转换失败'))
+    }
+  })()
 }
 
 async function onUnregister() {
@@ -300,6 +330,9 @@ async function saveMeta() {
             设为默认
           </n-button>
           <n-button secondary @click="startEdit"> 编辑元数据 </n-button>
+          <n-button secondary :disabled="!distro" @click="onConvert">
+            转换为 WSL{{ distro && distro.version === 1 ? '2' : '1' }}
+          </n-button>
           <n-button quaternary type="error" @click="onUnregister"> 注销发行版 </n-button>
         </div>
       </n-tab-pane>

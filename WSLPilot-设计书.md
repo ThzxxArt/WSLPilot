@@ -911,6 +911,10 @@ export type TaskHandle = { taskId: string }
 
 ### 8.1 通道总览
 
+> **注**：本表为 v2.0 设计期快照；通道名与入参契约的**唯一事实源**是
+> `packages/shared/src/channels.ts` + `ipc-schema.ts`，返回类型以 `preload/index.ts` 为准。
+> 后续新增通道（如 `io:listBackups`、`pty:list`、`config:resolveConflict`、`app:pick*` 等）不再回填本表。
+
 所有通道名集中在 `shared/channels.ts`，主/预加载共享常量，避免拼写漂移。
 
 | 通道                  | 方向 | 入参                                   | 返回                 | 说明                       |
@@ -1368,18 +1372,18 @@ WSLPilot **不自研基础组件**，而是以 **Naive UI** 作为组件基座�
 
 #### 10.7.2 WSLPilot 自研的业务组件（基于 Naive UI 封装）
 
-| 组件             | 说明                                | 依赖基础                   |
-| ---------------- | ----------------------------------- | -------------------------- |
-| `DistroCard`     | 发行版卡片（品牌色描边 + 状态脉冲） | `NCard`                    |
-| `MetricCard`     | 指标卡（数值滚动 + 迷你趋势）       | `NCard` + `Sparkline`      |
-| `StatusDot`      | 呼吸脉冲状态点                      | `NIcon`                    |
-| `ProgressRing`   | 渐变环形进度                        | `NProgress`（自定义）      |
-| `Sparkline`      | 迷你趋势图                          | 原生 SVG                   |
-| `CommandPalette` | ⌘K 命令面板（模糊匹配）             | `NModal` + `NInput`        |
-| `TerminalPane`   | xterm.js 终端面板                   | 原生 + `NCard`             |
-| `CodeEditor`     | 配置文本 / JSONC 编辑器             | 原生 textarea / CodeMirror |
-| `Kbd`            | 快捷键提示                          | `NText`                    |
-| `EmptyState`     | 空状态插画                          | `NEmpty`                   |
+| 组件             | 说明                                                                          | 依赖基础                   |
+| ---------------- | ----------------------------------------------------------------------------- | -------------------------- |
+| `DistroCard`     | 发行版卡片（品牌色描边 + 状态脉冲）                                           | `NCard`                    |
+| `MetricCard`     | 指标卡（数值滚动 + 迷你趋势）                                                 | `NCard` + `Sparkline`      |
+| `StatusDot`      | 呼吸脉冲状态点                                                                | `NIcon`                    |
+| `ProgressRing`   | 渐变环形进度                                                                  | `NProgress`（自定义）      |
+| `Sparkline`      | 迷你趋势图                                                                    | 原生 SVG                   |
+| `CommandPalette` | ⌘K 命令面板（模糊匹配）— 实现于 `renderer/features/command`（依赖路由/Store） | `NModal` + `NInput`        |
+| `TerminalPane`   | xterm.js 终端面板 — 实现命名 `XtermPane`（`features/terminal`）               | 原生 + `NCard`             |
+| `CodeEditor`     | 配置文本 / JSONC 编辑器                                                       | 原生 textarea / CodeMirror |
+| `Kbd`            | 快捷键提示                                                                    | `NText`                    |
+| `EmptyState`     | 空状态插画                                                                    | `NEmpty`                   |
 
 ---
 

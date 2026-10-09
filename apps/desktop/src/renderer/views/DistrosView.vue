@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import {
   NButton,
-  NEmpty,
   NInput,
   NRadioGroup,
   NRadioButton,
@@ -17,7 +16,8 @@ import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
-import { DistroCard, StatusDot } from '@ui/components'
+import { DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
+import { DistroCard, EmptyState, StatusDot } from '@ui/components'
 import { stateLabel } from '../composables/state-label'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
@@ -35,13 +35,16 @@ const detailOpen = ref(false)
 const detailName = ref('')
 
 onMounted(() => {
-  void distros.refresh()
-  void metrics.sample()
+  // settings.general.autoRefreshOnStart：关闭后仅在尚无数据时兜底拉取一次
+  if (settings.autoRefreshOnStart || distros.items.length === 0) {
+    void distros.refresh()
+    void metrics.sample()
+  }
 })
 
 const pollInterval = computed(() => {
   const ms = settings.pollIntervalMs
-  return typeof ms === 'number' && ms >= 1000 ? ms : 5000
+  return typeof ms === 'number' && ms >= 1000 ? ms : DEFAULT_POLL_INTERVAL_MS
 })
 
 usePolling(() => void distros.refresh(), { intervalMs: pollInterval }).start()
@@ -151,17 +154,16 @@ function onDetailTerminal(name: string) {
     </p>
 
     <n-spin :show="distros.loading && distros.items.length === 0">
-      <n-empty
+      <EmptyState
         v-if="filtered.length === 0 && !distros.loading"
         :description="search || tagFilter ? '没有匹配的发行版' : '尚未检测到发行版'"
+        :illustration="search || tagFilter ? '🔍' : '🐧'"
       >
-        <template #extra>
-          <n-button v-if="search || tagFilter" size="small" secondary @click="clearFilters">
-            清除筛选
-          </n-button>
-          <n-button v-else size="small" secondary @click="distros.refresh()"> 重新扫描 </n-button>
-        </template>
-      </n-empty>
+        <n-button v-if="search || tagFilter" size="small" secondary @click="clearFilters">
+          清除筛选
+        </n-button>
+        <n-button v-else size="small" secondary @click="distros.refresh()"> 重新扫描 </n-button>
+      </EmptyState>
 
       <!-- 卡片网格 -->
       <div v-else-if="viewMode === 'card'" class="grid">
@@ -246,6 +248,7 @@ function onDetailTerminal(name: string) {
                 >
                   设默认
                 </n-button>
+                <n-button size="tiny" quaternary @click="onMore(d.name)"> 详情 </n-button>
               </div>
             </td>
           </tr>

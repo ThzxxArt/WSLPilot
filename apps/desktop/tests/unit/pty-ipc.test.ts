@@ -40,6 +40,7 @@ function makeCtx() {
 function makeDeps() {
   const pty = {
     create: vi.fn(() => ({ ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 1 })),
+    createCommand: vi.fn(() => ({ ptyId: 'p2', distro: 'U', shell: '/bin/true', createdAt: 1 })),
     input: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
@@ -47,6 +48,7 @@ function makeDeps() {
     list: vi.fn(() => [{ ptyId: 'p1', distro: 'U', shell: 'b', createdAt: 1 }]),
     get: vi.fn(() => null),
     count: vi.fn(() => 1),
+    waitExit: vi.fn(async () => 0),
   }
   return {
     wsl: {
@@ -66,7 +68,11 @@ function makeDeps() {
         sampledAt: '',
       })),
     } as any,
-    registry: { detail: vi.fn(async () => ({})), listGuids: vi.fn(async () => []) } as any,
+    registry: {
+      detail: vi.fn(async () => ({})),
+      detailFull: vi.fn(async () => null),
+      listGuids: vi.fn(async () => []),
+    } as any,
     pty: pty as any,
     io: {
       runExport: vi.fn(async () => ({})),

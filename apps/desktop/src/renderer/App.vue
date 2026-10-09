@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, zhCN, dateZhCN } from 'naive-ui'
+import {
+  NConfigProvider,
+  NMessageProvider,
+  NDialogProvider,
+  NSpin,
+  zhCN,
+  enUS,
+  dateZhCN,
+  dateEnUS,
+} from 'naive-ui'
 import DefaultLayout from './layouts/DefaultLayout.vue'
 import ConflictResolver from './features/config/ConflictResolver.vue'
 import CommandPalette from './features/command/CommandPalette.vue'
@@ -18,6 +27,14 @@ const settings = useSettingsStore()
 const router = useRouter()
 const accent = computed(() => settings.accent as AccentName)
 const { themeOverrides } = useNaiveTheme(accent)
+
+/** 语言（settings.general.locale）：system 按浏览器语言判定 */
+const naiveLocale = computed(() => {
+  if (settings.locale === 'en-US') return enUS
+  if (settings.locale === 'zh-CN') return zhCN
+  return navigator.language.toLowerCase().startsWith('zh') ? zhCN : enUS
+})
+const naiveDateLocale = computed(() => (naiveLocale.value === enUS ? dateEnUS : dateZhCN))
 
 const ready = ref(false)
 
@@ -62,6 +79,8 @@ onMounted(async () => {
 
   // ★ PTY 数据应用级常驻：离开终端页也不丢输出（评审 I1）
   const terminal = useTerminalStore()
+  // 窗口重载后找回主进程中仍存活的会话（含动作临时 PTY）
+  void terminal.recover()
   unsubPtyData = window.wslAPI?.terminal.onData((p) => {
     terminal.appendOutput(p.ptyId, p.chunk)
   })
@@ -110,8 +129,8 @@ onUnmounted(() => {
 <template>
   <n-config-provider
     :theme-overrides="themeOverrides"
-    :locale="zhCN"
-    :date-locale="dateZhCN"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
     class="h-full"
   >
     <n-message-provider>

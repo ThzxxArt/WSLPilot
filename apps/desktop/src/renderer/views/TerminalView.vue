@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NEmpty, useMessage } from 'naive-ui'
+import { NButton, useMessage } from 'naive-ui'
+import { EmptyState } from '@ui/components'
 import { useRoute } from 'vue-router'
 import { useTerminalStore } from '../stores/terminal'
 import { useDistrosStore } from '../stores/distros'
@@ -109,8 +110,11 @@ watch(
   () => terminal.activeId,
   () => {
     cursorPos.value = { col: 1, row: 1 }
-    // 激活标签后重新 fit（v-show 隐藏时尺寸可能为 0）
-    requestAnimationFrame(() => activePane()?.fit())
+    // 激活标签后重新 fit（v-show 隐藏时尺寸可能为 0）并聚焦
+    requestAnimationFrame(() => {
+      activePane()?.fit()
+      activePane()?.focus()
+    })
   },
 )
 
@@ -264,13 +268,16 @@ onUnmounted(() => {
         />
       </div>
 
-      <n-empty v-if="terminal.sessions.length === 0" description="还没有终端会话" class="empty">
-        <template #extra>
-          <n-button type="primary" :disabled="!defaultDistro" @click="create(defaultDistro)">
-            打开 {{ defaultDistro || '终端' }}
-          </n-button>
-        </template>
-      </n-empty>
+      <EmptyState
+        v-if="terminal.sessions.length === 0"
+        description="还没有终端会话"
+        illustration="🖥️"
+        class="empty"
+      >
+        <n-button type="primary" :disabled="!defaultDistro" @click="create(defaultDistro)">
+          打开 {{ defaultDistro || '终端' }}
+        </n-button>
+      </EmptyState>
     </div>
 
     <footer class="status">

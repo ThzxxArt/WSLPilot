@@ -5,7 +5,6 @@ import {
   NCheckbox,
   NDrawer,
   NDrawerContent,
-  NEmpty,
   NRadioGroup,
   NRadioButton,
   NSpin,
@@ -13,7 +12,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { formatBytes, type BackupFileInfo } from '@wslpilot/shared'
-import { ProgressRing } from '@ui/components'
+import { ProgressRing, EmptyState } from '@ui/components'
 import { useDistrosStore } from '../stores/distros'
 import { useSettingsStore } from '../stores/settings'
 import { useTasksStore } from '../stores/tasks'
@@ -40,6 +39,7 @@ import {
   importSummary,
   moveCommandPreview,
   moveSummary,
+  summaryToText,
   validateExportForm,
   validateImportForm,
   validateMoveForm,
@@ -163,6 +163,15 @@ const commandPreview = computed(() => {
   if (mode.value === 'import') return importCommandPreview(importForm.value)
   return moveCommandPreview(moveForm.value)
 })
+
+async function copySummary() {
+  try {
+    await navigator.clipboard.writeText(summaryToText(summaryRows.value))
+    message.success('摘要已复制')
+  } catch {
+    message.warning('复制失败，请手动选择文本')
+  }
+}
 
 function setMode(m: WizardMode) {
   if (step.value === 4 && isRunning.value) {
@@ -344,6 +353,10 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
       <!-- 步骤 3：确认 -->
       <div v-else-if="step === 3" class="confirm">
         <div class="summary">
+          <div class="summary-head">
+            <span class="summary-title">确认信息</span>
+            <n-button size="tiny" quaternary @click="copySummary">复制摘要</n-button>
+          </div>
           <div v-for="row in summaryRows" :key="row.label" class="summary-row">
             <span class="summary-label">{{ row.label }}</span>
             <span class="summary-value">{{ row.value }}</span>
@@ -413,7 +426,11 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
         <n-button text type="primary" @click="refreshBackups"> 刷新 </n-button>
       </div>
       <n-spin :show="backupsLoading">
-        <n-empty v-if="backups.length === 0" description="备份目录里还没有文件" />
+        <EmptyState
+          v-if="backups.length === 0"
+          description="备份目录里还没有文件"
+          illustration="💾"
+        />
         <table v-else class="table">
           <thead>
             <tr>
@@ -543,6 +560,20 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+.summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--color-bg-sunken);
+}
+
+.summary-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--color-text-secondary);
 }
 
 .summary-row {

@@ -12,11 +12,10 @@
 | `general.theme`                      | `light`                                 | `light`                     | 固定浅色                       |
 | `general.accent`                     | `aurora\|sunset\|ocean\|forest\|custom` | `aurora`                    | 强调色                         |
 | `general.closeBehavior`              | `minimizeToTray\|quit`                  | `minimizeToTray`            | 关闭行为                       |
-| `general.launchAtLogin`              | boolean                                 | `false`                     | 开机自启                       |
+| `general.launchAtLogin`              | boolean                                 | `false`                     | 开机自启（与托盘菜单同步）     |
 | `general.reduceMotion`               | boolean                                 | `false`                     | 减弱动效                       |
 | `wsl.defaultShell`                   | string                                  | `""`                        | 默认 Shell（空 = `/bin/bash`） |
 | `wsl.autoShutdownAfterConfigChange`  | boolean                                 | `false`                     | 配置变更后自动关机使生效       |
-| `wsl.installSource`                  | `store\|web`                            | `store`                     | 安装源                         |
 | `terminal.fontFamily`                | string                                  | Cascadia Mono…              | 终端字体                       |
 | `terminal.fontSize`                  | number                                  | `14`                        | 字号（8–32）                   |
 | `terminal.lineHeight`                | number                                  | `1.2`                       | 行高（1–2.5）                  |
@@ -32,7 +31,7 @@
 | `advanced.showRawCommand`            | boolean                                 | `false`                     | 显示等价命令                   |
 | `advanced.confirmDestructive`        | boolean                                 | `true`                      | 破坏性确认                     |
 | `advanced.logLevel`                  | `trace\|debug\|info\|warn\|error`       | `info`                      | 日志级别                       |
-| `advanced.hardwareAcceleration`      | boolean                                 | `true`                      | 硬件加速                       |
+| `advanced.hardwareAcceleration`      | boolean                                 | `true`                      | 硬件加速（重启应用生效）       |
 
 ## distros.jsonc — 发行版元数据
 
@@ -89,6 +88,9 @@
   `settings.wsl.autoShutdownAfterConfigChange` 后，保存时自动 `wsl --terminate <name>`
 
 ## network.jsonc — 端口转发与代理
+
+> **注意（M6 未生效）**：本文件当前只作为声明式意图存储，端口转发/代理的应用逻辑在 M6 交付；
+> 在此之前内容不会产生任何系统效果。
 
 端口转发应用时生成 `netsh interface portproxy` 命令并需用户确认（提权）。
 

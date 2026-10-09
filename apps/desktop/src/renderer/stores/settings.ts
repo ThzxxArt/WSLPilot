@@ -1,53 +1,48 @@
 import { defineStore } from 'pinia'
-import type { AccentName, AppSettings, BackupFormat, LogLevel } from '@wslpilot/shared'
+import type {
+  AccentName,
+  AppSettings,
+  BackupFormat,
+  LogLevel,
+  TerminalTheme,
+} from '@wslpilot/shared'
+import { defaultConfig } from '@shared/config-schema'
 import { toAppError, type AppError } from '@shared/errors'
 
-const DEFAULTS = {
-  accent: 'aurora',
-  locale: 'system',
-  reduceMotion: false,
-  showRawCommand: false,
-  confirmDestructive: true,
-  logLevel: 'info',
-  pollIntervalMs: 5000,
-  closeBehavior: 'minimizeToTray' as 'minimizeToTray' | 'quit',
-  terminalFontFamily: 'Cascadia Mono, Consolas, monospace',
-  terminalFontSize: 14,
-  terminalLineHeight: 1.2,
-  terminalCursorStyle: 'block' as 'block' | 'underline' | 'bar',
-  terminalCursorBlink: true,
-  terminalScrollback: 5000,
-  backupDefaultDir: '%USERPROFILE%\\WSL-Backups',
-  backupFormat: 'tar' as BackupFormat,
-  backupKeepRecent: 5,
-  backupAutoBeforeDestructive: true,
-  wslDefaultShell: '',
-  wslAutoShutdownAfterConfigChange: false,
-} as const
+/**
+ * 默认值唯一事实源：settings.jsonc schema（defaultConfig）。
+ * 禁止在此手抄第二份（review：三套终端默认值漂移根治）。
+ */
+const cfg = defaultConfig('settings')
 
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
     loaded: false,
-    accent: DEFAULTS.accent as AccentName,
-    locale: DEFAULTS.locale as AppSettings['general']['locale'],
-    reduceMotion: DEFAULTS.reduceMotion as boolean,
-    showRawCommand: DEFAULTS.showRawCommand as boolean,
-    confirmDestructive: DEFAULTS.confirmDestructive as boolean,
-    logLevel: DEFAULTS.logLevel as LogLevel,
-    pollIntervalMs: DEFAULTS.pollIntervalMs as number,
-    closeBehavior: DEFAULTS.closeBehavior as AppSettings['general']['closeBehavior'],
-    terminalFontFamily: DEFAULTS.terminalFontFamily as string,
-    terminalFontSize: DEFAULTS.terminalFontSize as number,
-    terminalLineHeight: DEFAULTS.terminalLineHeight as number,
-    terminalCursorStyle: DEFAULTS.terminalCursorStyle as 'block' | 'underline' | 'bar',
-    terminalCursorBlink: DEFAULTS.terminalCursorBlink as boolean,
-    terminalScrollback: DEFAULTS.terminalScrollback as number,
-    backupDefaultDir: DEFAULTS.backupDefaultDir as string,
-    backupFormat: DEFAULTS.backupFormat as BackupFormat,
-    backupKeepRecent: DEFAULTS.backupKeepRecent as number,
-    backupAutoBeforeDestructive: DEFAULTS.backupAutoBeforeDestructive as boolean,
-    wslDefaultShell: DEFAULTS.wslDefaultShell as string,
-    wslAutoShutdownAfterConfigChange: DEFAULTS.wslAutoShutdownAfterConfigChange as boolean,
+    accent: cfg.general.accent as AccentName,
+    locale: cfg.general.locale as AppSettings['general']['locale'],
+    reduceMotion: cfg.general.reduceMotion as boolean,
+    autoRefreshOnStart: cfg.general.autoRefreshOnStart as boolean,
+    pollIntervalMs: cfg.general.pollIntervalMs as number,
+    closeBehavior: cfg.general.closeBehavior as AppSettings['general']['closeBehavior'],
+    launchAtLogin: cfg.general.launchAtLogin as boolean,
+    showRawCommand: cfg.advanced.showRawCommand as boolean,
+    confirmDestructive: cfg.advanced.confirmDestructive as boolean,
+    logLevel: cfg.advanced.logLevel as LogLevel,
+    hardwareAcceleration: cfg.advanced.hardwareAcceleration as boolean,
+    wslDefaultShell: cfg.wsl.defaultShell as string,
+    wslAutoShutdownAfterConfigChange: cfg.wsl.autoShutdownAfterConfigChange as boolean,
+    terminalFontFamily: cfg.terminal.fontFamily as string,
+    terminalFontSize: cfg.terminal.fontSize as number,
+    terminalLineHeight: cfg.terminal.lineHeight as number,
+    terminalCursorStyle: cfg.terminal.cursorStyle as 'block' | 'underline' | 'bar',
+    terminalCursorBlink: cfg.terminal.cursorBlink as boolean,
+    terminalScrollback: cfg.terminal.scrollback as number,
+    terminalCopyOnSelect: cfg.terminal.copyOnSelect as boolean,
+    terminalTheme: cfg.terminal.theme as TerminalTheme,
+    backupDefaultDir: cfg.backup.defaultDir as string,
+    backupFormat: cfg.backup.format as BackupFormat,
+    backupKeepRecent: cfg.backup.keepRecent as number,
+    backupAutoBeforeDestructive: cfg.backup.autoBackupBeforeDestructive as boolean,
     lastError: null as AppError | null,
     version: '',
   }),
@@ -63,23 +58,28 @@ export const useSettingsStore = defineStore('settings', {
         this.accent = s.general.accent
         this.locale = s.general.locale
         this.reduceMotion = s.general.reduceMotion
+        this.autoRefreshOnStart = s.general.autoRefreshOnStart
+        this.pollIntervalMs = s.general.pollIntervalMs
+        this.closeBehavior = s.general.closeBehavior
+        this.launchAtLogin = s.general.launchAtLogin
         this.showRawCommand = s.advanced.showRawCommand
         this.confirmDestructive = s.advanced.confirmDestructive
         this.logLevel = s.advanced.logLevel
-        this.pollIntervalMs = s.general.pollIntervalMs
-        this.closeBehavior = s.general.closeBehavior
+        this.hardwareAcceleration = s.advanced.hardwareAcceleration
+        this.wslDefaultShell = s.wsl.defaultShell
+        this.wslAutoShutdownAfterConfigChange = s.wsl.autoShutdownAfterConfigChange
         this.terminalFontFamily = s.terminal.fontFamily
         this.terminalFontSize = s.terminal.fontSize
         this.terminalLineHeight = s.terminal.lineHeight
         this.terminalCursorStyle = s.terminal.cursorStyle
         this.terminalCursorBlink = s.terminal.cursorBlink
         this.terminalScrollback = s.terminal.scrollback
+        this.terminalCopyOnSelect = s.terminal.copyOnSelect
+        this.terminalTheme = s.terminal.theme
         this.backupDefaultDir = s.backup.defaultDir
         this.backupFormat = s.backup.format
         this.backupKeepRecent = s.backup.keepRecent
         this.backupAutoBeforeDestructive = s.backup.autoBackupBeforeDestructive
-        this.wslDefaultShell = s.wsl.defaultShell
-        this.wslAutoShutdownAfterConfigChange = s.wsl.autoShutdownAfterConfigChange
       } catch (e) {
         this.lastError = toAppError(e)
       }
@@ -96,19 +96,19 @@ export const useSettingsStore = defineStore('settings', {
       await window.wslAPI.config.set('settings', { general: { accent } })
     },
 
+    async setLocale(locale: AppSettings['general']['locale']) {
+      this.locale = locale
+      await window.wslAPI.config.set('settings', { general: { locale } })
+    },
+
     async setReduceMotion(reduceMotion: boolean) {
       this.reduceMotion = reduceMotion
       await window.wslAPI.config.set('settings', { general: { reduceMotion } })
     },
 
-    async setShowRawCommand(showRawCommand: boolean) {
-      this.showRawCommand = showRawCommand
-      await window.wslAPI.config.set('settings', { advanced: { showRawCommand } })
-    },
-
-    async setConfirmDestructive(confirmDestructive: boolean) {
-      this.confirmDestructive = confirmDestructive
-      await window.wslAPI.config.set('settings', { advanced: { confirmDestructive } })
+    async setAutoRefreshOnStart(autoRefreshOnStart: boolean) {
+      this.autoRefreshOnStart = autoRefreshOnStart
+      await window.wslAPI.config.set('settings', { general: { autoRefreshOnStart } })
     },
 
     async setPollIntervalMs(pollIntervalMs: number) {
@@ -121,6 +121,43 @@ export const useSettingsStore = defineStore('settings', {
       await window.wslAPI.config.set('settings', { general: { closeBehavior } })
     },
 
+    /** 开机自启：settings.jsonc 为真相源，主进程监听变更同步系统登录项 */
+    async setLaunchAtLogin(launchAtLogin: boolean) {
+      this.launchAtLogin = launchAtLogin
+      await window.wslAPI.config.set('settings', { general: { launchAtLogin } })
+    },
+
+    async setShowRawCommand(showRawCommand: boolean) {
+      this.showRawCommand = showRawCommand
+      await window.wslAPI.config.set('settings', { advanced: { showRawCommand } })
+    },
+
+    async setConfirmDestructive(confirmDestructive: boolean) {
+      this.confirmDestructive = confirmDestructive
+      await window.wslAPI.config.set('settings', { advanced: { confirmDestructive } })
+    },
+
+    async setLogLevel(logLevel: LogLevel) {
+      this.logLevel = logLevel
+      await window.wslAPI.config.set('settings', { advanced: { logLevel } })
+    },
+
+    /** 硬件加速：需重启生效（主进程启动早期读取） */
+    async setHardwareAcceleration(hardwareAcceleration: boolean) {
+      this.hardwareAcceleration = hardwareAcceleration
+      await window.wslAPI.config.set('settings', { advanced: { hardwareAcceleration } })
+    },
+
+    async setWslDefaultShell(defaultShell: string) {
+      this.wslDefaultShell = defaultShell
+      await window.wslAPI.config.set('settings', { wsl: { defaultShell } })
+    },
+
+    async setWslAutoShutdownAfterConfigChange(autoShutdownAfterConfigChange: boolean) {
+      this.wslAutoShutdownAfterConfigChange = autoShutdownAfterConfigChange
+      await window.wslAPI.config.set('settings', { wsl: { autoShutdownAfterConfigChange } })
+    },
+
     async setTerminalFontFamily(fontFamily: string) {
       this.terminalFontFamily = fontFamily
       await window.wslAPI.config.set('settings', { terminal: { fontFamily } })
@@ -129,6 +166,11 @@ export const useSettingsStore = defineStore('settings', {
     async setTerminalFontSize(fontSize: number) {
       this.terminalFontSize = fontSize
       await window.wslAPI.config.set('settings', { terminal: { fontSize } })
+    },
+
+    async setTerminalLineHeight(lineHeight: number) {
+      this.terminalLineHeight = lineHeight
+      await window.wslAPI.config.set('settings', { terminal: { lineHeight } })
     },
 
     async setTerminalCursorStyle(cursorStyle: 'block' | 'underline' | 'bar') {
@@ -144,6 +186,16 @@ export const useSettingsStore = defineStore('settings', {
     async setTerminalScrollback(scrollback: number) {
       this.terminalScrollback = scrollback
       await window.wslAPI.config.set('settings', { terminal: { scrollback } })
+    },
+
+    async setTerminalCopyOnSelect(copyOnSelect: boolean) {
+      this.terminalCopyOnSelect = copyOnSelect
+      await window.wslAPI.config.set('settings', { terminal: { copyOnSelect } })
+    },
+
+    async setTerminalTheme(theme: TerminalTheme) {
+      this.terminalTheme = theme
+      await window.wslAPI.config.set('settings', { terminal: { theme } })
     },
 
     async setBackupDefaultDir(defaultDir: string) {
@@ -164,16 +216,6 @@ export const useSettingsStore = defineStore('settings', {
     async setBackupAutoBeforeDestructive(autoBackupBeforeDestructive: boolean) {
       this.backupAutoBeforeDestructive = autoBackupBeforeDestructive
       await window.wslAPI.config.set('settings', { backup: { autoBackupBeforeDestructive } })
-    },
-
-    async setWslDefaultShell(defaultShell: string) {
-      this.wslDefaultShell = defaultShell
-      await window.wslAPI.config.set('settings', { wsl: { defaultShell } })
-    },
-
-    async setWslAutoShutdownAfterConfigChange(autoShutdownAfterConfigChange: boolean) {
-      this.wslAutoShutdownAfterConfigChange = autoShutdownAfterConfigChange
-      await window.wslAPI.config.set('settings', { wsl: { autoShutdownAfterConfigChange } })
     },
   },
 })

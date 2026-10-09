@@ -15,7 +15,6 @@ export const generalSettingsSchema = z.object({
 export const wslSettingsSchema = z.object({
   defaultShell: z.string().default(''),
   autoShutdownAfterConfigChange: z.boolean().default(false),
-  installSource: z.enum(['store', 'web']).default('store'),
 })
 
 export const terminalSettingsSchema = z.object({

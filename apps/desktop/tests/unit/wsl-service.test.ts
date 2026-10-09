@@ -252,14 +252,24 @@ describe('WslService', () => {
       expect((runWsl as any).mock.calls[0][0]).toEqual(['--list', '--online'])
     })
 
+    it('listOnline 支持中文表头与前置说明行（review m2 分支覆盖）', async () => {
+      ;(runWsl as any).mockResolvedValue(
+        ok(
+          '以下是可安装的发行版的列表。\n名称            友好名称\nUbuntu          Ubuntu\nAlpine          Alpine WSL',
+        ),
+      )
+      expect(await svc.listOnline()).toEqual(['Ubuntu', 'Alpine'])
+    })
+
     it('listOnline 失败抛 TASK_FAILED', async () => {
       ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'net fail', code: 1 })
       await expect(svc.listOnline()).rejects.toMatchObject({ code: 'TASK_FAILED' })
     })
 
     it('install 走流式任务并支持省略名称', async () => {
+      // 异步 onExit：对齐真实 spawn 的事件序（同步触发会掩盖 kill/exit 交错 — review m1）
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
-        o.onExit(0)
+        queueMicrotask(() => o.onExit(0))
         return { kill: vi.fn() }
       })
       await svc.install('Ubuntu', ctl as never)
@@ -276,7 +286,7 @@ describe('WslService', () => {
 
     it('setVersion 流式转换', async () => {
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
-        o.onExit(0)
+        queueMicrotask(() => o.onExit(0))
         return { kill: vi.fn() }
       })
       await svc.setVersion('Ubuntu', 2, ctl as never)

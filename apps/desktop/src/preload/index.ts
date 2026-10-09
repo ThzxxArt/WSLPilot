@@ -58,6 +58,8 @@ const api = {
     listOnline: (): Promise<string[]> => ipcRenderer.invoke(CH.distrosListOnline),
     install: (name?: string): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.distrosInstall, name ? { name } : {}),
+    setVersion: (name: string, version: 1 | 2): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosSetVersion, { name, version }),
     uninstall: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosUnregister, name),
   },
 
@@ -124,9 +126,13 @@ const api = {
     /** 执行 actions.jsonc 白名单动作；terminal 动作附带 ptyId */
     run: (actionId: string, distro?: string): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.actionRun, distro ? { actionId, distro } : { actionId }),
-    /** 动作清单（读 actions.jsonc） */
+    /** 动作清单（读 actions.jsonc）；异常形状降级为空列表 */
     list: (): Promise<WslAction[]> =>
-      ipcRenderer.invoke(CH.configGet, 'actions').then((f: { actions: WslAction[] }) => f.actions),
+      ipcRenderer
+        .invoke(CH.configGet, 'actions')
+        .then((f: { actions?: WslAction[] } | null) =>
+          Array.isArray(f?.actions) ? f.actions : [],
+        ),
     /** 写回动作清单（整表替换） */
     save: (actions: WslAction[]): Promise<unknown> =>
       ipcRenderer.invoke(CH.configSet, { fileKey: 'actions', patch: { actions } }),

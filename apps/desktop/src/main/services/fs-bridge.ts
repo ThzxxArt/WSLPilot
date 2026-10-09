@@ -10,17 +10,19 @@ import { promises as fs } from 'node:fs'
 import {
   createAppError,
   assertSafeDistroName,
+  FS_READ_LIMIT_BYTES,
+  FS_WRITE_LIMIT_BYTES,
   type DirEntry,
   type FsReadResult,
 } from '@wslpilot/shared'
 import { atomicWrite, type Logger } from '@wslpilot/kit'
 
-/** 目录列举上限（防超大目录拖死 IPC） */
+/** 目录列举上限（防超大目录拖死 IPC）；可注入便于测试截断分支 */
 export const READDIR_LIMIT = 5000
-/** 文本读取上限（超出截断，编辑器只读展示） */
-export const READ_LIMIT = 2 * 1024 * 1024
-/** 写入上限（与 ipc-schema fsWrite.data 一致） */
-export const WRITE_LIMIT = 4 * 1024 * 1024
+/** 文本读取上限（超出截断，编辑器只读展示）— 唯一事实源在 @wslpilot/shared */
+export const READ_LIMIT = FS_READ_LIMIT_BYTES
+/** 写入上限（与 ipc-schema fsWrite.data 同一常量） */
+export const WRITE_LIMIT = FS_WRITE_LIMIT_BYTES
 
 // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
@@ -72,8 +74,9 @@ export function parseLinuxPath(input: string): FsPathParts {
  */
 export function joinDistroPath(root: string, linuxPath: string, sep = '\\'): string {
   const { segments } = parseLinuxPath(linuxPath)
-  if (segments.length === 0) return root
-  return `${root.replace(new RegExp(`[${sep === '\\' ? '\\\\' : sep}/]+$`), '')}${sep}${segments.join(sep)}`
+  const trimmed = root.replace(/[/\\]+$/, '')
+  if (segments.length === 0) return trimmed
+  return `${trimmed}${sep}${segments.join(sep)}`
 }
 
 export interface FsBridgeDeps {
@@ -83,6 +86,8 @@ export interface FsBridgeDeps {
   /** 资源管理器展示（默认 shell.showItemInFolder） */
   reveal?: (target: string) => void
   sep?: string
+  /** 目录列举上限（默认 READDIR_LIMIT；测试注入小值验证截断） */
+  readDirLimit?: number
 }
 
 export interface FsBridge {
@@ -105,13 +110,14 @@ function isBinary(buf: Buffer): boolean {
 export function createFsBridge(deps: FsBridgeDeps): FsBridge {
   const sep = deps.sep ?? '\\'
   const rootFor = deps.rootFor ?? defaultRootFor
+  const readDirLimit = deps.readDirLimit ?? READDIR_LIMIT
 
   function resolve(distro: string, linuxPath: string): { abs: string; linux: string } {
     const name = assertSafeDistroName(distro)
     const root = rootFor(name)
     const abs = joinDistroPath(root, linuxPath, sep)
     // 根内校验：解析结果必须以根前缀开头（防 rootFor/sep 注入类逃逸）
-    const normRoot = root.replace(new RegExp(`[${sep === '\\' ? '\\\\' : sep}/]+$`), '')
+    const normRoot = root.replace(/[/\\]+$/, '')
     if (abs !== normRoot && !abs.startsWith(normRoot + sep)) {
       throw createAppError('IO_ERROR', { message: '路径逃逸被拒绝', detail: abs })
     }
@@ -151,8 +157,8 @@ export function createFsBridge(deps: FsBridgeDeps): FsBridge {
         })
       }
 
-      const limited = dirents.slice(0, READDIR_LIMIT)
-      if (dirents.length > READDIR_LIMIT) {
+      const limited = dirents.slice(0, readDirLimit)
+      if (dirents.length > readDirLimit) {
         deps.logger.warn('fs readDir truncated', { distro, linux, count: dirents.length })
       }
 

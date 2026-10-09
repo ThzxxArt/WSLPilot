@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, type ComputedRef, type Ref } from 'vue'
+import { computed, type ComputedRef, type Ref } from 'vue'
 import { useTasksStore, type TaskEntry } from '../stores/tasks'
 import type { TaskProgress } from '@wslpilot/shared'
 
@@ -63,17 +63,6 @@ export function useTaskProgress(taskId: Ref<string> | string): TaskProgressView 
   }
 
   return { task, percent, percentLabel, isRunning, isDone, cancel }
-}
-
-/** 组件内便捷：挂载订阅 / 卸载解绑 */
-export function useTaskProgressSubscription(onEvent?: (p: TaskProgress) => void): void {
-  let off: (() => void) | undefined
-  onMounted(() => {
-    off = attachTaskProgress(onEvent)
-  })
-  onUnmounted(() => {
-    off?.()
-  })
 }
 
 /** 任务耗时展示 mm:ss */

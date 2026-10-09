@@ -21,6 +21,12 @@ export interface TerminalSession {
 const buffers = new Map<string, string>()
 const BUFFER_LIMIT = 200 * 1024
 
+/**
+ * adopt 之前到达的退出事件（action 临时 PTY 的 pty:data/pty:exit 可能
+ * 先于 TaskHandle 返回到达渲染层 — 竞态防护）。
+ */
+const pendingExits = new Map<string, number>()
+
 export const useTerminalStore = defineStore('terminal', {
   state: () => ({
     sessions: [] as TerminalSession[],
@@ -94,8 +100,8 @@ export const useTerminalStore = defineStore('terminal', {
     },
 
     /**
-     * 收编已存在的主进程 PTY 会话（M5 terminal 动作的临时 PTY）。
-     * 不发 pty:create，只登记标签与输出缓冲。
+     * 收编已存在的主进程 PTY 会话（M5 terminal 动作的临时 PTY / 窗口重载恢复）。
+     * 不发 pty:create，只登记标签与输出缓冲；保留 adopt 前已到达的数据。
      */
     adopt(
       ptyId: string,
@@ -103,18 +109,42 @@ export const useTerminalStore = defineStore('terminal', {
     ): TerminalSession | null {
       const existing = this.sessions.find((s) => s.ptyId === ptyId)
       if (existing) return existing
+      const exitCode = pendingExits.get(ptyId)
+      pendingExits.delete(ptyId)
       const session: TerminalSession = {
         ptyId,
         title: opts.title?.trim() || opts.distro,
         distro: opts.distro,
         shell: opts.shell ?? '',
         createdAt: Date.now(),
-        alive: true,
+        alive: exitCode === undefined,
       }
-      buffers.set(ptyId, '')
+      if (exitCode !== undefined) session.exitCode = exitCode
+      // adopt 前到达的输出不丢（竞态防护）
+      if (!buffers.has(ptyId)) buffers.set(ptyId, '')
       this.sessions.push(session)
       this.activeId = ptyId
       return session
+    },
+
+    /**
+     * 恢复主进程中仍存活的会话（窗口刷新 / 重载后找回终端标签）。
+     * 静默失败：无法连接主进程时保持空列表即可。
+     */
+    async recover(): Promise<void> {
+      try {
+        const infos = await window.wslAPI.terminal.list()
+        for (const info of infos ?? []) {
+          if (!info?.ptyId) continue
+          this.adopt(info.ptyId, {
+            title: info.distro,
+            distro: info.distro,
+            shell: info.shell,
+          })
+        }
+      } catch {
+        /* 恢复失败不影响主流程 */
+      }
     },
 
     rename(id: string, title: string) {
@@ -152,7 +182,8 @@ export const useTerminalStore = defineStore('terminal', {
     },
 
     appendOutput(id: string, chunk: string) {
-      if (!buffers.has(id)) return
+      // 未知会话的输出也先缓冲：action 临时 PTY 的数据可能早于 adopt 到达（竞态防护）
+      if (!buffers.has(id)) buffers.set(id, '')
       let buf = (buffers.get(id) ?? '') + chunk
       if (buf.length > BUFFER_LIMIT) {
         // 按码点边界截断，避免劈开代理对（评审 M1）
@@ -169,7 +200,11 @@ export const useTerminalStore = defineStore('terminal', {
 
     handleExit(id: string, code: number) {
       const s = this.sessions.find((x) => x.ptyId === id)
-      if (!s) return
+      if (!s) {
+        // 退出事件先于 adopt 到达：暂存，adopt 时补终态
+        pendingExits.set(id, code)
+        return
+      }
       s.alive = false
       s.exitCode = code
     },

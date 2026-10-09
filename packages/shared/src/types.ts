@@ -36,7 +36,6 @@ export interface DistroView extends DistroRuntime {
 
 export type LocaleCode = 'system' | 'zh-CN' | 'en-US'
 export type CloseBehavior = 'minimizeToTray' | 'quit'
-export type InstallSource = 'store' | 'web'
 export type CursorStyle = 'block' | 'underline' | 'bar'
 export type TerminalTheme = 'auto' | 'follow-app' | 'custom'
 export type BackupFormat = 'tar' | 'vhd'
@@ -56,7 +55,6 @@ export interface GeneralSettings {
 export interface WslSettings {
   defaultShell: string
   autoShutdownAfterConfigChange: boolean
-  installSource: InstallSource
 }
 
 export interface TerminalSettings {

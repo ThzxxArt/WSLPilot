@@ -4,11 +4,13 @@ import {
   collectUnknownKeys,
   diffLines,
   emptyWslConfModel,
+  isSameText,
   parseWslConf,
   type DiffLine,
   type WslConfChange,
   type WslConfModel,
 } from '@shared/wslconf'
+import { formatErrorLine } from '@shared/errors'
 
 export type WslConfMode = 'form' | 'raw'
 
@@ -83,7 +85,12 @@ export function useWslConf(
   /** 最近一次从磁盘载入/保存的文本 */
   const diskText = ref('')
 
-  const isDirty = computed(() => effectiveText() !== diskText.value)
+  // 快路径精确比较；差异仅换行/结尾时用行级比较兜底（避免无意义写盘）
+  const isDirty = computed(() => {
+    const a = effectiveText()
+    const b = diskText.value
+    return a !== b && !isSameText(a, b)
+  })
   const unknownKeys = computed(() => collectUnknownKeys(effectiveText()))
 
   function effectiveText(): string {
@@ -110,7 +117,7 @@ export function useWslConf(
       model.value = parseWslConf(text)
       removeKeys.value = []
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatErrorLine(e, '读取 wsl.conf 失败')
     } finally {
       loading.value = false
     }
@@ -175,7 +182,7 @@ export function useWslConf(
       removeKeys.value = []
       return result
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = formatErrorLine(e, '保存 wsl.conf 失败')
       throw e
     } finally {
       saving.value = false

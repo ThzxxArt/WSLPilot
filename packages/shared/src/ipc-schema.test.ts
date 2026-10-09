@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { parseIpcArgs, IPC_SCHEMAS, nameSchema, configKeySchema } from '../src/ipc-schema'
+import {
+  parseIpcArgs,
+  IPC_SCHEMAS,
+  nameSchema,
+  configKeySchema,
+  utf8Bytes,
+} from '../src/ipc-schema'
 import { CH } from '../src/channels'
 
 describe('ipc-schema', () => {
@@ -211,5 +217,64 @@ describe('ipc-schema · M4 备份迁移通道', () => {
     ]) {
       expect(IPC_SCHEMAS[ch], `missing schema for ${ch}`).toBeTruthy()
     }
+  })
+
+  it('M5 wslconf / fs / action / setVersion 通过与拒绝用例（testing.md 兑现）', () => {
+    // wslconf
+    expect(parseIpcArgs(CH.wslconfRead, ['Ubuntu'])).toBe('Ubuntu')
+    expect(() => parseIpcArgs(CH.wslconfRead, ['bad/name'])).toThrow()
+    expect(parseIpcArgs(CH.wslconfWrite, [{ name: 'Ubuntu', content: '[boot]\n' }])).toEqual({
+      name: 'Ubuntu',
+      content: '[boot]\n',
+    })
+    // 超字节上限（中文场景）：65536 字符中文 ≈ 196KB，必须被字节 refine 拒绝
+    expect(() =>
+      parseIpcArgs(CH.wslconfWrite, [{ name: 'Ubuntu', content: '中'.repeat(40_000) }]),
+    ).toThrow()
+    expect(() => parseIpcArgs(CH.wslconfWrite, [{ name: 'Ubuntu', content: 'a\u0001b' }])).toThrow()
+
+    // fs
+    expect(parseIpcArgs(CH.fsReadDir, [{ distro: 'Ubuntu', path: '/etc' }])).toEqual({
+      distro: 'Ubuntu',
+      path: '/etc',
+    })
+    expect(() => parseIpcArgs(CH.fsRead, [{ distro: 'Ubuntu', path: 'a\u0000b' }])).toThrow()
+    expect(parseIpcArgs(CH.fsWrite, [{ distro: 'U', path: '/x', data: 'y' }])).toBeTruthy()
+    expect(() =>
+      parseIpcArgs(CH.fsWrite, [{ distro: 'U', path: '/x', data: '中'.repeat(1_500_000) }]),
+    ).toThrow()
+    // 空路径 = 发行版根，合法（readDir/reveal 根目录是有效操作）
+    expect(parseIpcArgs(CH.fsRevealInExplorer, [{ distro: 'U', path: '' }])).toEqual({
+      distro: 'U',
+      path: '',
+    })
+    expect(() => parseIpcArgs(CH.fsRevealInExplorer, [{ distro: 'U', path: 'a\u0001b' }])).toThrow()
+
+    // action：id 与执行边界同一规则（控制字符 / 非法字符拒绝）
+    expect(parseIpcArgs(CH.actionRun, [{ actionId: 'update-all', distro: 'Ubuntu' }])).toEqual({
+      actionId: 'update-all',
+      distro: 'Ubuntu',
+    })
+    expect(() => parseIpcArgs(CH.actionRun, [{ actionId: 'a/b' }])).toThrow()
+    expect(() => parseIpcArgs(CH.actionRun, [{ actionId: 'a\u0001b' }])).toThrow()
+    expect(() => parseIpcArgs(CH.actionRun, [{ actionId: '' }])).toThrow()
+
+    // setVersion
+    expect(parseIpcArgs(CH.distrosSetVersion, [{ name: 'Ubuntu', version: 1 }])).toEqual({
+      name: 'Ubuntu',
+      version: 1,
+    })
+    expect(() => parseIpcArgs(CH.distrosSetVersion, [{ name: 'Ubuntu', version: 3 }])).toThrow()
+    expect(() => parseIpcArgs(CH.distrosSetVersion, [{ name: '', version: 2 }])).toThrow()
+
+    // task:cancel
+    expect(parseIpcArgs(CH.taskCancel, ['t1'])).toBe('t1')
+    expect(() => parseIpcArgs(CH.taskCancel, [''])).toThrow()
+  })
+
+  it('utf8Bytes 与字符长度语义分离', () => {
+    expect(utf8Bytes('abc')).toBe(3)
+    expect(utf8Bytes('中')).toBe(3)
+    expect(utf8Bytes('')).toBe(0)
   })
 })

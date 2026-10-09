@@ -33,7 +33,14 @@
 
 ### 2. IPC 契约测试
 
-每个通道的入参 zod schema 需有「通过」与「拒绝」用例：
+带参通道的入参 zod schema 均有「通过」与「拒绝」用例（`ipc-schema.test.ts`，含 wslconf / fs /
+action / setVersion 的字符+字节双上限用例）；无参（void）通道豁免。此外：
+
+- `channels.test.ts`：通道清单互斥全覆盖、带参必登记 schema、**预留通道清单受控**
+  （当前仅 `network:apply` 为 M6 契约先行预留，新增预留必须显式登记）
+- `preload-contract.test.ts`：逐方法断言 invoke 通道名 + 参数形状可过 `IPC_SCHEMAS` 校验
+  （preload 桥与 schema 零漂移）
+- `ipc-router.test.ts`：handler 注册、错误序列化、参数校验拦截
 
 ```ts
 // 例：config:set 入参

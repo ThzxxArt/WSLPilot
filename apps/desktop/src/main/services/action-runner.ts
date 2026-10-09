@@ -119,12 +119,8 @@ export function createActionRunner(deps: ActionRunnerDeps): ActionRunner {
 
   return {
     async prepare(actionId, distro) {
-      let id = ''
-      try {
-        id = assertSafeActionId(actionId)
-      } catch {
-        throw createAppError('TASK_FAILED', { message: `动作 id 非法：${String(actionId)}` })
-      }
+      // 校验失败抛 CONFIG_INVALID（与 IPC 边界同一规则，双保险）
+      const id = assertSafeActionId(actionId)
       const file = deps.configService.loadSync('actions')
       const action = findAction(file.actions ?? [], id)
       if (!action) {

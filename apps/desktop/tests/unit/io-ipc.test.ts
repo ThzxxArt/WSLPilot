@@ -19,6 +19,7 @@ function makeDeps() {
         runs.push(ctl)
       }),
       listBackups: vi.fn(async (dir?: string) => [{ dir }]),
+      cleanupBackups: vi.fn(async (_dir?: string, keep?: number) => ({ removed: keep ?? 5 })),
       resolveBackupDir: vi.fn(() => '/tmp/bk'),
       rotateBackups: vi.fn(async () => 0),
     } as any,
@@ -122,6 +123,15 @@ describe('io IPC handlers (M4)', () => {
       { dir: 'D:\\bk' },
     ])
     expect(deps.io.listBackups).toHaveBeenCalledTimes(2)
+  })
+
+  it('io:cleanupBackups 转发 dir/keep；keep 缺省用 5（review M8 零覆盖根治）', async () => {
+    const { handlers, deps } = register()
+    expect(await handlers.get(CH.ioCleanupBackups)!({}, { keep: 3 })).toEqual({ removed: 3 })
+    expect(deps.io.cleanupBackups).toHaveBeenCalledWith(undefined, 3)
+
+    expect(await handlers.get(CH.ioCleanupBackups)!({}, { dir: 'D:\\bk' })).toEqual({ removed: 5 })
+    expect(deps.io.cleanupBackups).toHaveBeenCalledWith('D:\\bk', 5)
   })
 
   it('task:cancel delegates to runner', () => {

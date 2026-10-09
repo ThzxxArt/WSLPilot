@@ -20,7 +20,7 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
   })
 
   add(CH.appGetWslVersion, async (c) => {
-    if (!c.wsl) return { wslVersion: '', kernelVersion: '' }
+    if (!c.wsl) return { raw: '', wslVersion: '', kernelVersion: '' }
     return c.wsl.getVersion()
   })
 

@@ -86,7 +86,6 @@ describe('ConfigService', () => {
       wsl: {
         defaultShell: '/bin/bash',
         autoShutdownAfterConfigChange: true,
-        installSource: 'web',
       },
       terminal: {
         fontFamily: 'Fira Code',
@@ -162,8 +161,8 @@ describe('ConfigService', () => {
       svc.patch('settings', { general: { accent: 'forest' } }),
     ])
     const s = await svc.load('settings')
-    // 最终结果必须是其中之一且文件可解析
-    expect(['aurora', 'ocean', 'forest']).toContain(s.general.accent)
+    // FIFO 写队列 → 最终值确定为最后一次写入（弱断言根治：串行保序可失败）
+    expect(s.general.accent).toBe('forest')
     const text = await fs.readFile(join(dir, 'settings.jsonc'), 'utf8')
     expect(() => JSON.parse(text.replace(/^\s*\/\/.*$/gm, ''))).not.toThrow()
   })
@@ -332,5 +331,58 @@ describe('ConfigService', () => {
     expect(r.general.accent).toBe('forest')
     const loaded = await svc.load('settings')
     expect(loaded.general.accent).toBe('forest')
+  })
+
+  // ── 配置迁移集成（review M6：迁移/备份分支零覆盖根治）──
+
+  it('migrates v1 settings to v2, keeps comments, and backs up original', async () => {
+    const filePath = join(dir, 'settings.jsonc')
+    const v1 = `{
+  // 迁移前的用户注释
+  "general": {
+    "accent": "sunset" // 想保留的注释
+  }
+}
+`
+    await fs.writeFile(filePath, v1, 'utf8')
+    const svc2 = await createConfigService(dir, mockLogger())
+    try {
+      const loaded = await svc2.load('settings')
+      // 迁移补全新字段并盖章 v2
+      expect(loaded.$schemaVersion).toBe(2)
+      expect(loaded.general.accent).toBe('sunset')
+      expect(loaded.general.launchAtLogin).toBe(false)
+      expect(loaded.general.reduceMotion).toBe(false)
+
+      const text = await fs.readFile(filePath, 'utf8')
+      expect(text).toContain('"$schemaVersion": 2')
+      expect(text).toContain('迁移前的用户注释')
+
+      const backups = (await fs.readdir(join(dir, 'backups'))).filter((f) => f.includes('.v1.'))
+      expect(backups.length).toBeGreaterThan(0)
+    } finally {
+      svc2.dispose()
+    }
+  })
+
+  it('unknown fields in v1 file survive sanitization after migration', async () => {
+    const filePath = join(dir, 'settings.jsonc')
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({
+        $schemaVersion: 1,
+        general: { accent: 'ocean', legacyFlag: true },
+      }),
+      'utf8',
+    )
+    const svc2 = await createConfigService(dir, mockLogger())
+    try {
+      const loaded = await svc2.load('settings')
+      expect(loaded.general.accent).toBe('ocean')
+      // 未知字段被 schema 清洗，但绝不抛错锁死加载
+      expect((loaded.general as unknown as Record<string, unknown>).legacyFlag).toBeUndefined()
+    } finally {
+      svc2.dispose()
+    }
   })
 })

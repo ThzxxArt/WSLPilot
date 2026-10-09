@@ -29,13 +29,14 @@ function makeCtl(over: Partial<TaskControl> = {}): TaskControl {
 describe('spawnWslTask', () => {
   it('resolve on exit 0 and logs lines', async () => {
     const lines: string[] = []
+    // 异步 onExit：对齐真实 spawn 事件序（同步触发会掩盖 kill/exit 交错 — review m1）
     const spawn = ((
       args: string[],
       opts: { onLine: (l: string) => void; onExit: (c: number) => void },
     ) => {
       void args
       opts.onLine('hello')
-      opts.onExit(0)
+      queueMicrotask(() => opts.onExit(0))
       return { kill: vi.fn() }
     }) as unknown as SpawnWslFn
     const ctl = makeCtl({
@@ -52,18 +53,21 @@ describe('spawnWslTask', () => {
       opts: { onLine: (l: string) => void; onExit: (c: number) => void },
     ) => {
       opts.onLine('err-line')
-      opts.onExit(3)
+      queueMicrotask(() => opts.onExit(3))
       return { kill: vi.fn() }
     }) as unknown as SpawnWslFn
-    await expect(spawnWslTask(['x'], makeCtl(), logger(), spawn)).rejects.toMatchObject({
+    const promise = spawnWslTask(['x'], makeCtl(), logger(), spawn)
+    // 先挂断言再等待：拒绝发生在微任务，晚挂载会被判 unhandled
+    const assertion = expect(promise).rejects.toMatchObject({
       code: 'TASK_FAILED',
       rawCommand: expect.stringContaining('wsl.exe x'),
     })
+    await assertion
   })
 
   it('exit 0 优先于取消状态（review M8）', async () => {
     const spawn = ((_a: string[], opts: { onExit: (c: number) => void }) => {
-      opts.onExit(0)
+      queueMicrotask(() => opts.onExit(0))
       return { kill: vi.fn() }
     }) as unknown as SpawnWslFn
     const ctl = makeCtl({ isCanceled: () => true })
@@ -72,13 +76,15 @@ describe('spawnWslTask', () => {
 
   it('非零退出 + 已取消 → TASK_CANCELED', async () => {
     const spawn = ((_a: string[], opts: { onExit: (c: number) => void }) => {
-      opts.onExit(1)
+      queueMicrotask(() => opts.onExit(1))
       return { kill: vi.fn() }
     }) as unknown as SpawnWslFn
     const ctl = makeCtl({ isCanceled: () => true })
-    await expect(spawnWslTask(['x'], ctl, logger(), spawn)).rejects.toMatchObject({
+    const promise = spawnWslTask(['x'], ctl, logger(), spawn)
+    const assertion = expect(promise).rejects.toMatchObject({
       code: 'TASK_CANCELED',
     })
+    await assertion
   })
 
   it('spawn error → TASK_FAILED', async () => {

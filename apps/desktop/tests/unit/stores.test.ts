@@ -13,7 +13,6 @@ const wslAPI = {
   metrics: {
     sample: vi.fn(),
     sampleOverview: vi.fn(),
-    onProgress: vi.fn(() => () => {}),
   },
   config: {
     get: vi.fn(),
@@ -111,31 +110,46 @@ describe('useSettingsStore', () => {
   })
 
   it('load fills from settings.jsonc', async () => {
+    // 基于 schema 默认值构造完整对象：mock 形状与真实 AppSettings 对齐（review 根治）
+    const { defaultConfig } = await import('@shared/config-schema')
+    const base = defaultConfig('settings')
     wslAPI.config.get.mockResolvedValue({
-      $schemaVersion: 2,
+      ...base,
       general: {
+        ...base.general,
         accent: 'ocean',
         locale: 'zh-CN',
         reduceMotion: true,
+        autoRefreshOnStart: false,
         pollIntervalMs: 3000,
         closeBehavior: 'quit',
+        launchAtLogin: true,
       },
       advanced: {
+        ...base.advanced,
         showRawCommand: true,
         confirmDestructive: false,
         logLevel: 'debug',
+        hardwareAcceleration: false,
+      },
+      wsl: {
+        ...base.wsl,
+        defaultShell: '/bin/zsh',
+        autoShutdownAfterConfigChange: true,
       },
       terminal: {
+        ...base.terminal,
         fontFamily: 'MyMono',
         fontSize: 16,
         lineHeight: 1.3,
         cursorStyle: 'bar',
         cursorBlink: false,
         scrollback: 9000,
-        copyOnSelect: false,
-        theme: 'auto',
+        copyOnSelect: true,
+        theme: 'custom',
       },
       backup: {
+        ...base.backup,
         defaultDir: 'D:\\MyBackups',
         format: 'vhd',
         keepRecent: 9,
@@ -146,13 +160,27 @@ describe('useSettingsStore', () => {
     const s = useSettingsStore()
     await s.load()
     expect(s.accent).toBe('ocean')
+    expect(s.locale).toBe('zh-CN')
+    expect(s.reduceMotion).toBe(true)
+    expect(s.autoRefreshOnStart).toBe(false)
     expect(s.pollIntervalMs).toBe(3000)
     expect(s.closeBehavior).toBe('quit')
+    expect(s.launchAtLogin).toBe(true)
     expect(s.showRawCommand).toBe(true)
+    expect(s.confirmDestructive).toBe(false)
+    expect(s.logLevel).toBe('debug')
+    expect(s.hardwareAcceleration).toBe(false)
+    expect(s.wslDefaultShell).toBe('/bin/zsh')
+    expect(s.wslAutoShutdownAfterConfigChange).toBe(true)
+    expect(s.terminalFontFamily).toBe('MyMono')
+    expect(s.terminalLineHeight).toBe(1.3)
+    expect(s.terminalCopyOnSelect).toBe(true)
+    expect(s.terminalTheme).toBe('custom')
     expect(s.backupDefaultDir).toBe('D:\\MyBackups')
     expect(s.backupFormat).toBe('vhd')
     expect(s.backupKeepRecent).toBe(9)
     expect(s.backupAutoBeforeDestructive).toBe(false)
+    expect(s.lastError).toBeNull()
   })
 
   it('setters write config patches', async () => {

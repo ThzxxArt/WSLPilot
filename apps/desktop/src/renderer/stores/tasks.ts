@@ -163,6 +163,22 @@ export const useTasksStore = defineStore('tasks', {
       }
     },
 
+    /** WSL1 ↔ WSL2 版本转换（wsl --set-version，长任务） */
+    async startConvert(name: string, version: 1 | 2): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.setVersion(name, version)
+        return this.track(handle, {
+          type: 'convert',
+          distro: name,
+          message: `转换 ${name} 到 WSL${version}`,
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
     async cancel(taskId: string): Promise<void> {
       this.lastError = null
       try {

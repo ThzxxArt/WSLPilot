@@ -7,7 +7,7 @@ import {
   parseLinuxPath,
   joinDistroPath,
   defaultRootFor,
-  READDIR_LIMIT,
+  READ_LIMIT,
 } from '../../src/main/services/fs-bridge'
 
 function logger() {
@@ -160,13 +160,34 @@ describe('createFsBridge（临时目录模拟发行版根）', () => {
     })
   })
 
-  it('readDir 超量截断（上限保护）', async () => {
+  it('readDir 超量截断并告警（注入上限验证真实截断分支）', async () => {
     const many = join(root, 'many')
     await fsp.mkdir(many)
-    for (let i = 0; i < 20; i++) await fsp.writeFile(join(many, `f${i}`), '')
-    // 降低上限不可注入 → 通过常量断言上限存在（真实上限 5000）
-    expect(READDIR_LIMIT).toBe(5000)
-    const entries = await bridge.readDir('Ubuntu', '/many')
-    expect(entries).toHaveLength(20)
+    for (let i = 0; i < 5; i++) await fsp.writeFile(join(many, `f${i}`), '')
+    const log = logger()
+    const small = createFsBridge({
+      logger: log,
+      rootFor: () => root,
+      sep: '/',
+      readDirLimit: 3,
+    })
+    const entries = await small.readDir('Ubuntu', '/many')
+    expect(entries).toHaveLength(3)
+    expect(log.warn).toHaveBeenCalledWith('fs readDir truncated', {
+      distro: 'Ubuntu',
+      linux: '/many',
+      count: 5,
+    })
+  })
+
+  it('read 超限截断（truncated=true）', async () => {
+    // 直接注入 READ_LIMIT 之上的文件：用大文件验证截断标记
+    const big = join(root, 'big.txt')
+    await fsp.writeFile(big, 'x'.repeat(3 * 1024 * 1024))
+    const r = await bridge.read('Ubuntu', '/big.txt')
+    expect(r.truncated).toBe(true)
+    expect(r.binary).toBe(false)
+    expect(r.sizeBytes).toBe(3 * 1024 * 1024)
+    expect(r.text.length).toBe(READ_LIMIT)
   })
 })

@@ -1,4 +1,5 @@
 import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
 
 /**
  * 轮询节流 — 设计书 §19：
@@ -15,7 +16,7 @@ export function usePolling(
 
   const resolveInterval = () => {
     const v = options.intervalMs
-    const n = typeof v === 'number' ? v : (v?.value ?? 5000)
+    const n = typeof v === 'number' ? v : (v?.value ?? DEFAULT_POLL_INTERVAL_MS)
     return Math.max(1000, n)
   }
 

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NEmpty, NPopconfirm, useMessage } from 'naive-ui'
+import { NButton, NPopconfirm, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useDistrosStore } from '../stores/distros'
 import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
-import { MetricCard, DistroCard, StatusDot } from '@ui/components'
-import { ACCENT_GRADIENTS } from '@shared/constants'
+import { MetricCard, DistroCard, EmptyState, StatusDot } from '@ui/components'
+import { ACCENT_GRADIENTS, DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
 import InstallDistroModal from '../features/distros/InstallDistroModal.vue'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
@@ -35,7 +35,7 @@ const wslLabel = computed(() => {
 
 const pollInterval = computed(() => {
   const ms = settings.pollIntervalMs
-  return typeof ms === 'number' && ms >= 1000 ? ms : 5000
+  return typeof ms === 'number' && ms >= 1000 ? ms : DEFAULT_POLL_INTERVAL_MS
 })
 
 async function refreshAll() {
@@ -43,7 +43,8 @@ async function refreshAll() {
 }
 
 onMounted(() => {
-  void refreshAll()
+  // settings.general.autoRefreshOnStart：关闭后仅在尚无数据时兜底拉取一次
+  if (settings.autoRefreshOnStart || distros.items.length === 0) void refreshAll()
   void window.wslAPI.app
     .getWslVersion()
     .then((info) => {
@@ -185,11 +186,9 @@ function onDetailTerminal(name: string) {
       </div>
 
       <div v-if="distros.items.length === 0" class="empty-wrap">
-        <n-empty description="还没有发行版数据">
-          <template #extra>
-            <n-button size="small" secondary @click="refreshAll"> 重新加载 </n-button>
-          </template>
-        </n-empty>
+        <EmptyState description="还没有发行版数据" illustration="🛫">
+          <n-button size="small" secondary @click="refreshAll"> 重新加载 </n-button>
+        </EmptyState>
       </div>
 
       <div v-else class="cards">
