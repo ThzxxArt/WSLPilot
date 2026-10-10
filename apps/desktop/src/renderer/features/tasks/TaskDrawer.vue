@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { NButton, NDrawer, NEmpty, NTag, useMessage } from 'naive-ui'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { NButton, NDrawer, NTag, useMessage } from 'naive-ui'
+import { EmptyState } from '@ui/components'
 import { useTasksStore, type TaskEntry } from '../../stores/tasks'
 import { formatElapsed, taskStatusLabel, taskTypeLabel } from '../../composables/useTaskProgress'
 import { errorLine } from '../../composables/useAppError'
@@ -11,6 +12,24 @@ const emit = defineEmits<{ 'update:show': [boolean] }>()
 const tasks = useTasksStore()
 const message = useMessage()
 const selectedId = ref('')
+/** 耗时显示每秒刷新（Date.now() 非响应式，需 tick 驱动） */
+const now = ref(Date.now())
+let timer: number | undefined
+
+watch(
+  () => props.show,
+  (open) => {
+    if (open) {
+      if (timer === undefined) timer = window.setInterval(() => (now.value = Date.now()), 1000)
+    } else if (timer !== undefined) {
+      window.clearInterval(timer)
+      timer = undefined
+    }
+  },
+)
+onUnmounted(() => {
+  if (timer !== undefined) window.clearInterval(timer)
+})
 
 /** 最新在前 */
 const ordered = computed(() => [...tasks.entries].sort((a, b) => b.startedAt - a.startedAt))
@@ -76,7 +95,7 @@ function clearFinished() {
       </header>
 
       <div v-if="ordered.length === 0" class="empty">
-        <n-empty description="暂无任务" size="small" />
+        <EmptyState description="暂无任务" illustration="📋" size="small" />
       </div>
 
       <template v-else>
@@ -114,7 +133,7 @@ function clearFinished() {
             </span>
             <div class="detail-actions">
               <span v-if="selected.status === 'running'" class="elapsed">
-                {{ formatElapsed(Date.now() - selected.startedAt) }}
+                {{ formatElapsed(now - selected.startedAt) }}
               </span>
               <n-button
                 v-if="selected.status === 'running'"

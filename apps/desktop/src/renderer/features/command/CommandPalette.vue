@@ -105,7 +105,11 @@ function buildItems(): PaletteItem[] {
         message.warning('没有可用的发行版')
         return
       }
-      await terminal.open(name)
+      const id = await terminal.open(name)
+      if (!id) {
+        message.error(errorLine(terminal.lastError, '新建终端失败'))
+        return
+      }
       await router.push('/terminal')
     },
   })

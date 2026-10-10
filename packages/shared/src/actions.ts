@@ -98,7 +98,7 @@ export function assertSafeActionId(id: unknown): string {
   const bad = (msg: string): never => {
     throw createAppError('CONFIG_INVALID', {
       message: msg,
-      suggestion: '动作 id 只能包含字母/数字/中划线/下划线/点，且不得以 - 开头',
+      suggestion: '动作 id 不得包含 \\ / : * ? " < > | 或控制字符，长度 1–100',
     })
   }
   if (!s || s.length > 100) bad('动作 id 非法（空或超过 100 字符）')

@@ -203,4 +203,30 @@ describe('useTerminalStore', () => {
     wslAPI.terminal.list.mockRejectedValueOnce(new Error('ipc down'))
     await expect(s.recover()).resolves.toBeUndefined()
   })
+
+  it('孤儿缓冲限额淘汰，且绝不触碰已收编会话的缓冲', () => {
+    const s = useTerminalStore()
+    // 先收编一个"长寿"会话（插入序最旧）
+    const kept = `kept-${Math.random().toString(16).slice(2)}`
+    s.adopt(kept, { distro: 'Ubuntu' })
+    s.appendOutput(kept, 'precious')
+
+    // 灌入超过上限的孤儿输出（从不 adopt）
+    for (let i = 0; i < 24; i++) {
+      s.appendOutput(`orphan-${i}-${Math.random().toString(16).slice(2)}`, 'x')
+    }
+    // 存活会话缓冲不被误删
+    expect(s.getBuffer(kept)).toBe('precious')
+  })
+
+  it('孤儿退出事件暂存供 adopt 补终态；与输出共存', () => {
+    const s = useTerminalStore()
+    const id = `exit-${Math.random().toString(16).slice(2)}`
+    s.appendOutput(id, 'before-exit')
+    s.handleExit(id, 9)
+    const session = s.adopt(id, { distro: 'U' })
+    expect(session!.alive).toBe(false)
+    expect(session!.exitCode).toBe(9)
+    expect(s.getBuffer(id)).toBe('before-exit')
+  })
 })

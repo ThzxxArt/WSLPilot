@@ -24,8 +24,45 @@ const BUFFER_LIMIT = 200 * 1024
 /**
  * adopt 之前到达的退出事件（action 临时 PTY 的 pty:data/pty:exit 可能
  * 先于 TaskHandle 返回到达渲染层 — 竞态防护）。
+ * 孤儿（从不被 adopt 的会话）单独记账并限额淘汰，绝不触碰存活会话的缓冲。
  */
 const pendingExits = new Map<string, number>()
+/** 孤儿缓冲 id（插入序）— 只淘汰孤儿，不影响已收编会话 */
+const orphanIds = new Set<string>()
+const ORPHAN_LIMIT = 16
+
+function dropOrphans(): void {
+  while (orphanIds.size > ORPHAN_LIMIT) {
+    const oldest = orphanIds.values().next().value as string | undefined
+    if (oldest === undefined) break
+    orphanIds.delete(oldest)
+    buffers.delete(oldest)
+    pendingExits.delete(oldest)
+  }
+}
+
+/** 为未收编的会话登记输出缓冲（超限淘汰最旧孤儿） */
+function rememberOrphan(id: string): void {
+  if (buffers.has(id)) return
+  buffers.set(id, '')
+  orphanIds.add(id)
+  dropOrphans()
+}
+
+/** 记录孤儿会话的退出事件（adopt 时补终态；已有输出保留供回放） */
+function rememberExit(id: string, code: number): void {
+  pendingExits.set(id, code)
+  if (!buffers.has(id)) {
+    buffers.set(id, '')
+  }
+  orphanIds.add(id)
+  dropOrphans()
+}
+
+/** 会话被收编：脱离孤儿记账，由 removeLocal 正常清理 */
+function adoptOrphan(id: string): void {
+  orphanIds.delete(id)
+}
 
 export const useTerminalStore = defineStore('terminal', {
   state: () => ({
@@ -111,6 +148,7 @@ export const useTerminalStore = defineStore('terminal', {
       if (existing) return existing
       const exitCode = pendingExits.get(ptyId)
       pendingExits.delete(ptyId)
+      adoptOrphan(ptyId)
       const session: TerminalSession = {
         ptyId,
         title: opts.title?.trim() || opts.distro,
@@ -183,7 +221,7 @@ export const useTerminalStore = defineStore('terminal', {
 
     appendOutput(id: string, chunk: string) {
       // 未知会话的输出也先缓冲：action 临时 PTY 的数据可能早于 adopt 到达（竞态防护）
-      if (!buffers.has(id)) buffers.set(id, '')
+      if (!buffers.has(id)) rememberOrphan(id)
       let buf = (buffers.get(id) ?? '') + chunk
       if (buf.length > BUFFER_LIMIT) {
         // 按码点边界截断，避免劈开代理对（评审 M1）
@@ -202,7 +240,7 @@ export const useTerminalStore = defineStore('terminal', {
       const s = this.sessions.find((x) => x.ptyId === id)
       if (!s) {
         // 退出事件先于 adopt 到达：暂存，adopt 时补终态
-        pendingExits.set(id, code)
+        rememberExit(id, code)
         return
       }
       s.alive = false

@@ -17,9 +17,6 @@ import CommandPalette from './features/command/CommandPalette.vue'
 import { useSettingsStore } from './stores/settings'
 import { useTerminalStore } from './stores/terminal'
 import { attachTaskProgress } from './composables/useTaskProgress'
-import { bindGlobalHotkeys } from './composables/useHotkeys'
-import { useCommandPalette } from './composables/useCommandPalette'
-import { useDistrosStore } from './stores/distros'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
 
@@ -57,7 +54,6 @@ let unsubNavigate: (() => void) | undefined
 let unsubPtyData: (() => void) | undefined
 let unsubPtyExit: (() => void) | undefined
 let unsubTaskProgress: (() => void) | undefined
-let unsubHotkey: (() => void) | undefined
 
 onMounted(async () => {
   // load 内部已降级兜底；此处 finally 保证界面一定走出 loading（review C11）
@@ -91,28 +87,7 @@ onMounted(async () => {
   // ★ 长任务进度应用级常驻：离开备份页也不丢进度（M4）
   unsubTaskProgress = attachTaskProgress()
 
-  // ★ 全局快捷键（§11.5）：⌘K 命令面板 / ⌘N 新终端 / ⌘, 设置 / ⌘R 刷新 / ⌘⇧P 命令可见 / ⌘1..9 切标签
-  const { togglePalette } = useCommandPalette()
-  const distros = useDistrosStore()
-  unsubHotkey = bindGlobalHotkeys({
-    openPalette: togglePalette,
-    newTerminal: () => {
-      const name = distros.defaultDistro?.name ?? distros.items[0]?.name
-      if (name) void terminal.open(name)
-      void router.push('/terminal')
-    },
-    openSettings: () => void router.push('/settings'),
-    refresh: () => void distros.refresh(),
-    toggleRawCommand: () => void settings.setShowRawCommand(!settings.showRawCommand),
-    switchTab: (index) => {
-      const session = terminal.sessions[index]
-      if (session) {
-        terminal.setActive(session.ptyId)
-        void router.push('/terminal')
-      }
-    },
-  })
-
+  // ★ 全局快捷键已下沉到 DefaultLayout（message provider 内，失败可 toast）
   // 外部配置冲突由 ConflictResolver（NDialog）处理，语义见该组件（review C3）
 })
 
@@ -122,7 +97,6 @@ onUnmounted(() => {
   unsubPtyData?.()
   unsubPtyExit?.()
   unsubTaskProgress?.()
-  unsubHotkey?.()
 })
 </script>
 
