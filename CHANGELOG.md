@@ -13,6 +13,28 @@
 
 ### Added
 
+- **M6 网络与设备**：端口转发、镜像网络模式引导、代理配置、usbipd 设备面板（网络与设备面板）
+  - **端口转发**（声明式规则 + `netsh interface portproxy` 应用）
+    - 规则 CRUD 落 `network.jsonc`（id 白名单执行：渲染层只传 id，参数永不进命令行）；启用/停用开关、删除可撤销
+    - 「应用 / 全部应用 / 从系统移除」长任务（流式日志 + 等价命令行 + 可取消）；netsh 写类全局串行锁
+    - 系统对照表：读取 `netsh interface portproxy show all`，逐条标注「已生效 / 指向不同 / 未生效」
+    - `udp` 规则仅记录意图（netsh portproxy 只支持 TCP），应用时显式跳过并在界面标注
+    - 提权失败 → `PERMISSION_DENIED` + 等价命令行（可复制到管理员终端执行；ElevationHelper 属 M7）
+  - **镜像网络模式引导**：检测 `%UserProfile%\.wslconfig` 的 `[wsl2] networkingMode`
+    - 非 `mirrored` 时展示「推荐」提示卡（一键复制配置片段 + 打开所在目录 + 8 秒生效说明）
+    - `mirrored` 时提示无需端口转发，减少误配置
+  - **代理配置**（`network.jsonc.proxy` 为真相源）
+    - 「跟随 Windows 系统代理」读取 HKCU `Internet Settings`（ProxyEnable / ProxyServer）作兜底，本地显式值优先
+    - 「写入代理脚本」把生效代理落成发行版内 `/etc/profile.d/wslpilot-proxy.sh`（root tee + stdin，内容不经 shell）
+    - 可查看脚本原文 / 清除脚本；写入前预览将要生成的内容
+  - **USB 设备（usbipd，可选）**：设备表（BUSID / VID:PID / 描述 / 状态徽章）
+    - 「共享」= `usbipd bind|unbind`（需管理员，长任务）；「附加」= `usbipd attach --wsl`（usbipd 2.0+，免提权）
+    - 未安装 usbipd 时给 `winget install usbipd` 安装引导 + 一键复制，不阻断其它功能
+  - 主进程 `NetworkService` / `UsbipdService`；IPC `network:*` / `devices:*` 共 13 个通道（契约先行的
+    `network:apply` 预留项已交付，预留清单清零）
+  - `kit/tool-output.ts`：Windows 控制台工具输出编码探测（UTF-16LE NUL 结构 → 严格 UTF-8 → GBK 回退），
+    中文报错不再乱码、错误映射可靠
+  - 侧栏新增「USB 设备」；命令面板补齐网络 / USB 设备导航项
 - **M5 配置与动作**：wsl.conf 编辑、注册表详情、自定义动作、命令面板（配置中心化 + ⌘K）
   - **wsl.conf 编辑**：`/etc/wsl.conf` 可视化表单 + 原始文本双模式，逐键最小编辑保留注释
     - 表单覆盖 automount / network / interop / user / boot 全部常见键；未知键只展示不吞掉

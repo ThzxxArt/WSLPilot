@@ -15,6 +15,7 @@ const navItems = [
   { name: 'terminal', title: '终端', icon: '⌨️' },
   { name: 'network', title: '网络', icon: '🌐' },
   { name: 'backup', title: '备份迁移', icon: '💾' },
+  { name: 'devices', title: 'USB 设备', icon: '🔌' },
   { name: 'settings', title: '设置', icon: '⚙️' },
 ]
 

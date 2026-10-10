@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { CH, type ChannelName } from './channels'
 import { assertSafeDistroName } from './errors'
 import { assertSafeActionId } from './actions'
+import { assertSafeRuleId } from './network'
+import { assertSafeBusId } from './usbipd'
 import { FS_WRITE_LIMIT_BYTES, WSL_CONF_MAX_BYTES } from './constants'
 
 /**
@@ -30,6 +32,38 @@ export const nameSchema = z
 
 /** 会话/任务 id：非空 + 长度上限 */
 export const idSchema = z.string().min(1).max(200)
+
+/** 端口转发规则 id（network.jsonc 执行白名单的键）— IPC 边界与执行边界同一校验 */
+export const ruleIdSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .superRefine((s, ctx) => {
+    try {
+      assertSafeRuleId(s)
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: e instanceof Error ? e.message : '规则 id 非法',
+      })
+    }
+  })
+
+/** usbipd BUSID（`1-2` / `2-1.3`） */
+export const busIdSchema = z
+  .string()
+  .min(1)
+  .max(40)
+  .superRefine((s, ctx) => {
+    try {
+      assertSafeBusId(s)
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: e instanceof Error ? e.message : 'BUSID 非法',
+      })
+    }
+  })
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -276,9 +310,21 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     distro: nameSchema.optional(),
   }),
 
-  // 网络（M6 有意预留）：契约先行，handler/preload/renderer 未实现
-  // 预留清单由 channels.test.ts 守护，禁止静默扩大
-  [CH.networkApply]: z.string().min(1).max(100),
+  // 网络（M6）：id 一律来自 network.jsonc 声明（执行白名单），渲染层无法传任意命令
+  [CH.networkApply]: ruleIdSchema,
+  [CH.networkRemove]: ruleIdSchema,
+  [CH.networkProxyApply]: z.object({ distro: nameSchema }),
+  [CH.networkProxyClear]: z.object({ distro: nameSchema }),
+  [CH.networkProxyState]: z.object({ distro: nameSchema }),
+
+  // USB 设备（M6 usbipd）：BUSID 形如 `1-2` / `2-1.3`，严格白名单
+  [CH.devicesBind]: busIdSchema,
+  [CH.devicesUnbind]: busIdSchema,
+  [CH.devicesDetach]: busIdSchema,
+  [CH.devicesAttach]: z.object({
+    busId: busIdSchema,
+    distro: nameSchema.optional(),
+  }),
 }
 
 /** 校验入参；通道约定：invoke 只传一个参数（对象或原始值） */

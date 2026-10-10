@@ -66,6 +66,29 @@ Renderer ── wslconf:read/write ──▶ WslConfService（cat / root tee + s
 - **命令面板**：`shared/fuzzy.ts` 模糊打分 + `renderer/features/command/palette.ts` 前缀/分组/最近使用；
   最近使用持久化到 `ui-state.recentCommands`。
 
+## 网络与设备（M6）
+
+```
+Renderer ── network:apply/applyAll/remove ─▶ NetworkService（netsh portproxy，串行锁）
+         ── network:status ───────────────▶ 镜像模式检测 + 系统转发表 + Windows 代理
+         ── network:proxyApply/Clear ─────▶ /etc/profile.d/wslpilot-proxy.sh（root tee + stdin）
+         ── devices:list/bind/attach ─────▶ UsbipdService（usbipd.exe list/bind/unbind/attach/detach）
+```
+
+- **端口转发**：声明式规则只来自 `network.jsonc`（执行白名单），渲染层只传 `id`；
+  `netsh interface portproxy add|delete v4tov4 …` 一律参数数组，绝不拼接 shell。
+  netsh 提权失败映射 `PERMISSION_DENIED` 并附等价命令行（ElevationHelper 属 M7）。
+  `udp` 规则只记录意图（netsh portproxy 仅支持 TCP），应用时显式跳过。
+- **镜像引导**：解析 `%UserProfile%\.wslconfig` 的 `[wsl2] networkingMode`；非 `mirrored` 时给
+  「推荐」提示卡 + 可复制配置片段 + 打开所在目录（`app:openPath` 仅允许目录）。
+- **代理**：`network.jsonc.proxy` 为真相源；`useWindowsProxy` 时读取 HKCU `Internet Settings`
+  （ProxyEnable / ProxyServer）作兜底，本地显式值优先。生效代理落成
+  `/etc/profile.d/wslpilot-proxy.sh`（可查看原文、可清除），绝不改发行版业务数据。
+- **usbipd（可选）**：`usbipd list` 解析 BUSID / VID:PID / STATE；bind / unbind 需管理员 → 长任务；
+  `attach --wsl`（usbipd 2.0+）无需提权。未安装时给 `winget install usbipd` 安装引导，不阻断其它功能。
+- **输出解码**：`kit/tool-output.ts` 先探测 UTF-16LE（NUL 结构）→ 严格 UTF-8 → GBK 回退，
+  否则中文报错变乱码、错误映射全部失效。
+
 ## 安全
 
 | 层       | 措施                                                                                                                                                                      |

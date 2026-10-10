@@ -16,6 +16,8 @@ import type { TaskRunner } from '../services/task-runner'
 import type { WslConfService } from '../services/wslconf-service'
 import type { ActionRunner } from '../services/action-runner'
 import type { FsBridge } from '../services/fs-bridge'
+import type { NetworkService } from '../services/network-service'
+import type { UsbipdService } from '../services/usbipd-service'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
 import { registerDistroHandlers } from './handlers/distros'
@@ -25,6 +27,8 @@ import { registerIoHandlers } from './handlers/io'
 import { registerWslConfHandlers } from './handlers/wslconf'
 import { registerActionHandlers } from './handlers/actions'
 import { registerFsHandlers } from './handlers/fs'
+import { registerNetworkHandlers } from './handlers/network'
+import { registerDeviceHandlers } from './handlers/devices'
 
 export interface IpcContext {
   configService: ConfigService
@@ -53,6 +57,8 @@ export function registerIpcHandlers(
     wslconf: WslConfService
     runner: ActionRunner
     fsBridge: FsBridge
+    network: NetworkService
+    devices: UsbipdService
   },
 ): void {
   const routes = new Map<string, Handler>()
@@ -68,6 +74,8 @@ export function registerIpcHandlers(
   registerWslConfHandlers(add, deps)
   registerActionHandlers(add, deps)
   registerFsHandlers(add, deps)
+  registerNetworkHandlers(add, deps)
+  registerDeviceHandlers(add, deps)
 
   for (const [channel, handler] of routes) {
     ipcMain.handle(channel, async (_event, ...args) => {

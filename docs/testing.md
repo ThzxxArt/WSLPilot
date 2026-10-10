@@ -22,14 +22,18 @@
 
 ### 1. 单元测试（`npm test`）
 
-| 模块                | 覆盖点                                            |
-| ------------------- | ------------------------------------------------- |
-| `exec-wsl`          | `parseDistroList`（含中文、`*` 默认标记、多空格） |
-| `jsonc`             | 解析容错、错误行号、最小编辑保留注释              |
-| `atomic-write`      | 原子替换、崩溃不留半截文件                        |
-| `config-schema`     | zod 校验、默认值填充、部分数据合并                |
-| `config-migrations` | v1→v2 迁移链                                      |
-| `errors`            | 错误码目录、结构化序列化                          |
+| 模块                | 覆盖点                                                                          |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `exec-wsl`          | `parseDistroList`（含中文、`*` 默认标记、多空格）                               |
+| `tool-output`       | Windows 工具输出编码探测（UTF-16LE / UTF-8 / GBK）                              |
+| `run-tool`          | netsh / usbipd 执行封装（参数数组、失败不抛）                                   |
+| `network`           | netsh 参数与等价命令、portproxy 解析、`.wslconfig` 镜像模式、代理脚本、表单校验 |
+| `usbipd`            | `usbipd list` 解析、BUSID 白名单、bind/attach 命令构建                          |
+| `jsonc`             | 解析容错、错误行号、最小编辑保留注释                                            |
+| `atomic-write`      | 原子替换、崩溃不留半截文件                                                      |
+| `config-schema`     | zod 校验、默认值填充、部分数据合并                                              |
+| `config-migrations` | v1→v2 迁移链                                                                    |
+| `errors`            | 错误码目录、结构化序列化                                                        |
 
 ### 2. IPC 契约测试
 
@@ -37,7 +41,7 @@
 action / setVersion 的字符+字节双上限用例）；无参（void）通道豁免。此外：
 
 - `channels.test.ts`：通道清单互斥全覆盖、带参必登记 schema、**预留通道清单受控**
-  （当前仅 `network:apply` 为 M6 契约先行预留，新增预留必须显式登记）
+  （M6 交付网络与设备通道后当前无预留项；新增预留必须显式登记）
 - `preload-contract.test.ts`：逐方法断言 invoke 通道名 + 参数形状可过 `IPC_SCHEMAS` 校验
   （preload 桥与 schema 零漂移）
 - `ipc-router.test.ts`：handler 注册、错误序列化、参数校验拦截
@@ -88,7 +92,7 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（质量根治后）**：单测 Lines 94%+ / Branches 85%+ / Functions 94%+；组件 Lines 98%+ / Branches 91%+ / Functions 87%+。
+**当前基线（M6 交付后）**：单测 Lines 95%+ / Branches 87%+ / Functions 95%+；组件 Lines 98%+ / Branches 91%+ / Functions 84%+。
 
 **覆盖范围**：
 

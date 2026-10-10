@@ -6,7 +6,7 @@ import {
   configKeySchema,
   utf8Bytes,
 } from '../src/ipc-schema'
-import { CH } from '../src/channels'
+import { CH, INVOKE_CHANNELS } from '../src/channels'
 
 describe('ipc-schema', () => {
   it('parses distro name', () => {
@@ -276,5 +276,76 @@ describe('ipc-schema · M4 备份迁移通道', () => {
     expect(utf8Bytes('abc')).toBe(3)
     expect(utf8Bytes('中')).toBe(3)
     expect(utf8Bytes('')).toBe(0)
+  })
+})
+
+describe('ipc-schema · M6 网络与设备通道', () => {
+  it('network:apply / remove 只接受安全规则 id', () => {
+    expect(parseIpcArgs(CH.networkApply, ['dev-3000'])).toBe('dev-3000')
+    expect(() => parseIpcArgs(CH.networkApply, [''])).toThrow()
+    expect(() => parseIpcArgs(CH.networkApply, ['a/b'])).toThrow()
+    expect(() => parseIpcArgs(CH.networkApply, ['a\u0001b'])).toThrow()
+    expect(() => parseIpcArgs(CH.networkApply, ['x'.repeat(101)])).toThrow()
+
+    expect(parseIpcArgs(CH.networkRemove, ['dev-3000'])).toBe('dev-3000')
+    expect(() => parseIpcArgs(CH.networkRemove, ['a:b'])).toThrow()
+  })
+
+  it('proxy 通道要求合法发行版名', () => {
+    expect(parseIpcArgs(CH.networkProxyApply, [{ distro: 'Ubuntu' }])).toEqual({ distro: 'Ubuntu' })
+    expect(parseIpcArgs(CH.networkProxyClear, [{ distro: 'Ubuntu' }])).toEqual({ distro: 'Ubuntu' })
+    expect(parseIpcArgs(CH.networkProxyState, [{ distro: 'Ubuntu' }])).toEqual({ distro: 'Ubuntu' })
+    expect(() => parseIpcArgs(CH.networkProxyApply, [{ distro: '' }])).toThrow()
+    expect(() => parseIpcArgs(CH.networkProxyApply, [{}])).toThrow()
+    expect(() => parseIpcArgs(CH.networkProxyState, [{ distro: 'a\u0000b' }])).toThrow()
+  })
+
+  it('devices 通道校验 BUSID 与可选发行版', () => {
+    expect(parseIpcArgs(CH.devicesBind, ['1-2'])).toBe('1-2')
+    expect(parseIpcArgs(CH.devicesUnbind, ['2-1.3'])).toBe('2-1.3')
+    expect(parseIpcArgs(CH.devicesDetach, ['1-2'])).toBe('1-2')
+    expect(() => parseIpcArgs(CH.devicesBind, ['evil; rm'])).toThrow()
+    expect(() => parseIpcArgs(CH.devicesDetach, ['not-a-busid'])).toThrow()
+    expect(() => parseIpcArgs(CH.devicesBind, [''])).toThrow()
+
+    expect(parseIpcArgs(CH.devicesAttach, [{ busId: '1-2' }])).toEqual({ busId: '1-2' })
+    expect(parseIpcArgs(CH.devicesAttach, [{ busId: '1-2', distro: 'Ubuntu' }])).toEqual({
+      busId: '1-2',
+      distro: 'Ubuntu',
+    })
+    expect(() => parseIpcArgs(CH.devicesAttach, [{ busId: 'x y' }])).toThrow()
+    expect(() => parseIpcArgs(CH.devicesAttach, [{ busId: '1-2', distro: 'a/b' }])).toThrow()
+  })
+
+  it('M6 invoke 通道都已登记 schema 或属 void 清单', () => {
+    const m6 = [
+      CH.networkStatus,
+      CH.networkApply,
+      CH.networkApplyAll,
+      CH.networkRemove,
+      CH.networkProxyApply,
+      CH.networkProxyClear,
+      CH.networkProxyState,
+      CH.devicesStatus,
+      CH.devicesList,
+      CH.devicesBind,
+      CH.devicesUnbind,
+      CH.devicesAttach,
+      CH.devicesDetach,
+    ]
+    const voids = new Set<string>([
+      CH.networkStatus,
+      CH.networkApplyAll,
+      CH.devicesStatus,
+      CH.devicesList,
+    ])
+    for (const ch of m6) {
+      if (voids.has(ch)) {
+        expect(IPC_SCHEMAS[ch], `void 通道不应有 schema: ${ch}`).toBeUndefined()
+      } else {
+        expect(IPC_SCHEMAS[ch], `缺少 schema: ${ch}`).toBeTruthy()
+      }
+      expect(INVOKE_CHANNELS).toContain(ch)
+    }
   })
 })

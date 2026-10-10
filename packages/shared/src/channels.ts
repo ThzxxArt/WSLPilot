@@ -61,8 +61,22 @@ export const CH = {
   // actions
   actionRun: 'action:run',
 
-  // network
+  // network（M6）
+  networkStatus: 'network:status',
   networkApply: 'network:apply',
+  networkApplyAll: 'network:applyAll',
+  networkRemove: 'network:remove',
+  networkProxyApply: 'network:proxyApply',
+  networkProxyClear: 'network:proxyClear',
+  networkProxyState: 'network:proxyState',
+
+  // devices（M6 usbipd，可选）
+  devicesStatus: 'devices:status',
+  devicesList: 'devices:list',
+  devicesBind: 'devices:bind',
+  devicesUnbind: 'devices:unbind',
+  devicesAttach: 'devices:attach',
+  devicesDetach: 'devices:detach',
 
   // app
   appGetVersion: 'app:getVersion',
@@ -118,7 +132,19 @@ export const INVOKE_CHANNELS = [
   CH.metricsSample,
   CH.taskCancel,
   CH.actionRun,
+  CH.networkStatus,
   CH.networkApply,
+  CH.networkApplyAll,
+  CH.networkRemove,
+  CH.networkProxyApply,
+  CH.networkProxyClear,
+  CH.networkProxyState,
+  CH.devicesStatus,
+  CH.devicesList,
+  CH.devicesBind,
+  CH.devicesUnbind,
+  CH.devicesAttach,
+  CH.devicesDetach,
   CH.appGetVersion,
   CH.appOpenConfigDir,
   CH.appGetWslVersion,

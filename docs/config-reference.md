@@ -89,24 +89,35 @@
 
 ## network.jsonc — 端口转发与代理
 
-> **注意（M6 未生效）**：本文件当前只作为声明式意图存储，端口转发/代理的应用逻辑在 M6 交付；
-> 在此之前内容不会产生任何系统效果。
+> **M6 已生效**：端口转发规则可一键应用到系统（`netsh interface portproxy`），代理配置可写入
+> 发行版内 `/etc/profile.d/wslpilot-proxy.sh`。规则本身仍是声明式意图——应用前不产生系统效果。
 
-端口转发应用时生成 `netsh interface portproxy` 命令并需用户确认（提权）。
+端口转发应用时生成 `netsh interface portproxy add v4tov4 …` 参数数组并执行（**需管理员权限**；
+权限不足时给出等价命令行，可在管理员终端中手动执行）。
 
-| 字段                                   | 说明                                     |
-| -------------------------------------- | ---------------------------------------- |
-| `portForwarding[].id`                  | 规则 id                                  |
-| `portForwarding[].distro`              | 目标发行版                               |
-| `portForwarding[].listenAddress`       | 监听地址（默认 `0.0.0.0`）               |
-| `portForwarding[].listenPort`          | 监听端口（1–65535）                      |
-| `portForwarding[].connectAddress`      | 转发地址（默认 `127.0.0.1`）             |
-| `portForwarding[].connectPort`         | 转发端口                                 |
-| `portForwarding[].enabled`             | 是否启用                                 |
-| `portForwarding[].protocol`            | `tcp` \| `udp`（udp 仅记录意图）         |
-| `proxy.useWindowsProxy`                | 跟随系统代理                             |
-| `proxy.httpProxy` / `proxy.httpsProxy` | 代理地址                                 |
-| `proxy.noProxy`                        | 不代理列表（默认 `localhost,127.0.0.1`） |
+| 字段                                   | 说明                                                             |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `portForwarding[].id`                  | 规则 id（执行白名单键；禁止 `\ / : * ? " < > \|` 与控制字符）    |
+| `portForwarding[].distro`              | 目标发行版（记录意图，便于对照与查找）                           |
+| `portForwarding[].listenAddress`       | 监听地址（默认 `0.0.0.0`）                                       |
+| `portForwarding[].listenPort`          | 监听端口（1–65535）                                              |
+| `portForwarding[].connectAddress`      | 转发地址（默认 `127.0.0.1`）                                     |
+| `portForwarding[].connectPort`         | 转发端口                                                         |
+| `portForwarding[].enabled`             | 是否启用（「全部应用」只应用启用中的规则）                       |
+| `portForwarding[].protocol`            | `tcp` \| `udp`（**udp 仅记录意图**：netsh portproxy 只支持 TCP） |
+| `proxy.useWindowsProxy`                | 跟随系统代理（读取 HKCU `Internet Settings` 的 ProxyServer）     |
+| `proxy.httpProxy` / `proxy.httpsProxy` | 代理地址（本地显式值优先于系统代理）                             |
+| `proxy.noProxy`                        | 不代理列表（默认 `localhost,127.0.0.1`）                         |
+
+- 规则条数上限 **100**；`id` 唯一。
+- **应用**（`network:apply` / `network:applyAll`）写入系统转发表；**从系统移除**（`network:remove`）
+  只删系统条目，配置里的规则保留；**删除规则**只改配置。
+- 系统侧对照：面板读取 `netsh interface portproxy show all`，逐条标注「已生效 / 指向不同 / 未生效 / 仅记录」。
+- **镜像网络模式**：面板读取 `%UserProfile%\.wslconfig` 的 `[wsl2] networkingMode`；非 `mirrored`
+  时展示引导（复制配置片段 → `wsl --shutdown` → 重启发行版，完全停止约 8 秒后生效）。
+  镜像模式下 Windows 与 WSL 共用网络栈，端口转发通常不再需要。
+- **代理落点**：`/etc/profile.d/wslpilot-proxy.sh`（写入走 `wsl -d <name> -u root -e tee` + stdin，
+  内容不经 shell）。脚本仅导出 `http_proxy/https_proxy/no_proxy` 等环境变量，可随时「清除」或手工编辑。
 
 ## ui-state.jsonc / state.jsonc
 

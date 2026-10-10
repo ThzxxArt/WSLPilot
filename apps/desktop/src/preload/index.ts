@@ -14,10 +14,16 @@ import {
   type IoImportRequest,
   type IoMoveRequest,
   type Metrics,
+  type NetworkStatus,
   type OverviewMetrics,
+  type PortForwardRule,
+  type ProxyConfig,
+  type ProxyScriptState,
   type RegistryDetail,
   type TaskHandle,
   type TaskProgress,
+  type UsbDevice,
+  type UsbipdStatus,
   type WslAction,
 } from '@wslpilot/shared'
 
@@ -149,6 +155,58 @@ const api = {
       ipcRenderer.invoke(CH.fsRevealInExplorer, { distro, path }),
   },
 
+  network: {
+    /** 镜像模式 + 系统转发表 + Windows 代理（M6） */
+    status: (): Promise<NetworkStatus> => ipcRenderer.invoke(CH.networkStatus),
+    /** 应用单条转发规则（规则 id 来自 network.jsonc 白名单） */
+    apply: (ruleId: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.networkApply, ruleId),
+    /** 应用全部启用的 TCP 规则 */
+    applyAll: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.networkApplyAll),
+    /** 从系统移除该监听（配置里的规则保留） */
+    remove: (ruleId: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.networkRemove, ruleId),
+    /** 代理配置写入发行版内 /etc/profile.d/wslpilot-proxy.sh */
+    proxyApply: (distro: string): Promise<{ distro: string }> =>
+      ipcRenderer.invoke(CH.networkProxyApply, { distro }),
+    proxyClear: (distro: string): Promise<{ distro: string }> =>
+      ipcRenderer.invoke(CH.networkProxyClear, { distro }),
+    proxyState: (distro: string): Promise<ProxyScriptState> =>
+      ipcRenderer.invoke(CH.networkProxyState, { distro }),
+    /** 规则清单（读 network.jsonc）；异常形状降级为空列表 */
+    listRules: (): Promise<PortForwardRule[]> =>
+      ipcRenderer
+        .invoke(CH.configGet, 'network')
+        .then((f: { portForwarding?: unknown } | null) =>
+          Array.isArray(f?.portForwarding) ? (f.portForwarding as PortForwardRule[]) : [],
+        ),
+    /** 写回规则清单（整表替换） */
+    saveRules: (rules: PortForwardRule[]): Promise<unknown> =>
+      ipcRenderer.invoke(CH.configSet, { fileKey: 'network', patch: { portForwarding: rules } }),
+    /** 代理配置（读 network.jsonc） */
+    getProxy: (): Promise<ProxyConfig> =>
+      ipcRenderer.invoke(CH.configGet, 'network').then((f: { proxy?: ProxyConfig } | null) =>
+        f?.proxy
+          ? f.proxy
+          : {
+              useWindowsProxy: false,
+              httpProxy: '',
+              httpsProxy: '',
+              noProxy: 'localhost,127.0.0.1',
+            },
+      ),
+    saveProxy: (proxy: ProxyConfig): Promise<unknown> =>
+      ipcRenderer.invoke(CH.configSet, { fileKey: 'network', patch: { proxy } }),
+  },
+
+  devices: {
+    status: (): Promise<UsbipdStatus> => ipcRenderer.invoke(CH.devicesStatus),
+    list: (): Promise<UsbDevice[]> => ipcRenderer.invoke(CH.devicesList),
+    bind: (busId: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.devicesBind, busId),
+    unbind: (busId: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.devicesUnbind, busId),
+    attach: (busId: string, distro?: string): Promise<void> =>
+      ipcRenderer.invoke(CH.devicesAttach, distro ? { busId, distro } : { busId }),
+    detach: (busId: string): Promise<void> => ipcRenderer.invoke(CH.devicesDetach, busId),
+  },
+
   task: {
     cancel: (taskId: string): Promise<boolean> => ipcRenderer.invoke(CH.taskCancel, taskId),
     onProgress: (cb: (p: TaskProgress) => void): (() => void) => {
@@ -196,11 +254,17 @@ export type {
   DistroView,
   DistroMeta,
   Metrics,
+  NetworkStatus,
   OverviewMetrics,
+  PortForwardRule,
+  ProxyConfig,
+  ProxyScriptState,
   TaskHandle,
   TaskProgress,
   BackupFileInfo,
   RegistryDetail,
+  UsbDevice,
+  UsbipdStatus,
   WslAction,
   DirEntry,
   FsReadResult,

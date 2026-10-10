@@ -157,6 +157,25 @@ function makeDeps() {
       write: vi.fn(async () => {}),
       revealInExplorer: vi.fn(async () => {}),
     } as any,
+    network: {
+      status: vi.fn(async () => ({})),
+      listPortProxy: vi.fn(async () => []),
+      findRule: vi.fn(),
+      applyRule: vi.fn(async () => {}),
+      applyAll: vi.fn(async () => {}),
+      removeRule: vi.fn(async () => {}),
+      proxyState: vi.fn(async () => ({ path: '', exists: false, content: '' })),
+      proxyApply: vi.fn(async () => {}),
+      proxyClear: vi.fn(async () => {}),
+    } as any,
+    devices: {
+      status: vi.fn(async () => ({ installed: false, version: '' })),
+      list: vi.fn(async () => []),
+      bind: vi.fn(async () => {}),
+      unbind: vi.fn(async () => {}),
+      attach: vi.fn(async () => {}),
+      detach: vi.fn(async () => {}),
+    } as any,
   }
 }
 

@@ -15,6 +15,8 @@ import { createIoService } from './services/io-service'
 import { createWslConfService } from './services/wslconf-service'
 import { createActionRunner } from './services/action-runner'
 import { createFsBridge } from './services/fs-bridge'
+import { createNetworkService } from './services/network-service'
+import { createUsbipdService } from './services/usbipd-service'
 import { readBootSettings } from './settings-boot'
 import { isQuitting, markQuitting } from './app-state'
 
@@ -204,6 +206,10 @@ async function bootstrap() {
   const runner = createActionRunner({ logger, configService, wsl, pty })
   const fsBridge = createFsBridge({ logger })
 
+  // M6：端口转发 / 镜像模式 / 代理 + usbipd 设备
+  const network = createNetworkService({ logger, configService })
+  const devices = createUsbipdService({ logger })
+
   registerIpcHandlers(
     ipcMain,
     {
@@ -216,7 +222,7 @@ async function bootstrap() {
       io,
       tasks,
     },
-    { wsl, registry, pty, io, tasks, wslconf, runner, fsBridge },
+    { wsl, registry, pty, io, tasks, wslconf, runner, fsBridge, network, devices },
   )
 
   createTray({

@@ -198,8 +198,9 @@ function buildItems(): PaletteItem[] {
   items.push(navItem('nav-dashboard', '驾驶舱', '/dashboard', '全局概览', undefined, '🛫'))
   items.push(navItem('nav-distros', '发行版', '/distros', '列表与操作', undefined, '🐧'))
   items.push(navItem('nav-terminal', '终端', '/terminal', '多标签工作区', undefined, '🖥️'))
-  items.push(navItem('nav-network', '网络', '/network', undefined, undefined, '🌐'))
+  items.push(navItem('nav-network', '网络', '/network', '端口转发 / 镜像 / 代理', undefined, '🌐'))
   items.push(navItem('nav-backup', '备份与迁移', '/backup', undefined, undefined, '💾'))
+  items.push(navItem('nav-devices', 'USB 设备', '/devices', 'usbipd 绑定管理', undefined, '🔌'))
   items.push(navItem('nav-settings', '设置', '/settings', undefined, undefined, '⚙️'))
 
   // ── 设置 ──

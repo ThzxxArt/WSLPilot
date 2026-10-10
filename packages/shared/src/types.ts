@@ -118,16 +118,80 @@ export interface PortForwardRule {
   protocol: 'tcp' | 'udp'
 }
 
+export interface ProxyConfig {
+  useWindowsProxy: boolean
+  httpProxy: string
+  httpsProxy: string
+  noProxy: string
+}
+
 export interface NetworkConfig {
   $schemaVersion: number
   portForwarding: PortForwardRule[]
-  proxy: {
-    useWindowsProxy: boolean
-    httpProxy: string
-    httpsProxy: string
-    noProxy: string
-  }
+  proxy: ProxyConfig
 }
+
+/** `.wslconfig` 的 `[wsl2] networkingMode`（M6 镜像引导） */
+export type NetworkMode = 'mirrored' | 'nat' | 'bridged' | 'virtioproxy' | 'unknown'
+
+/** `netsh interface portproxy show all` 的一条系统级转发 */
+export interface PortProxyEntry {
+  listenAddress: string
+  listenPort: number
+  connectAddress: string
+  connectPort: number
+  /** netsh 隧道类型（当前固定 v4tov4） */
+  kind: string
+}
+
+/** Windows 系统代理（`useWindowsProxy` 时作为回退来源） */
+export interface WindowsProxyInfo {
+  enabled: boolean
+  /** ProxyServer 原值（可能形如 `127.0.0.1:7890` 或 `http=…;https=…`） */
+  server: string
+  /** ProxyOverride（分号分隔，对应 no_proxy） */
+  override: string
+}
+
+/** `network:status` 返回（M6） */
+export interface NetworkStatus {
+  /** `%UserProfile%\.wslconfig` 绝对路径 */
+  wslconfigPath: string
+  wslconfigExists: boolean
+  mode: NetworkMode
+  /** 检测到的 networkingMode 原值（未配置为 ''） */
+  modeRaw: string
+  /** 非镜像模式时建议引导开启镜像 */
+  mirrorRecommended: boolean
+  /** 系统当前端口代理表（netsh show all） */
+  portProxy: PortProxyEntry[]
+  windowsProxy: WindowsProxyInfo | null
+}
+
+/** `network:proxyState` 返回（发行版内代理脚本当前状态） */
+export interface ProxyScriptState {
+  path: string
+  exists: boolean
+  content: string
+}
+
+/** usbipd 设备状态（`usbipd list` STATE 列） */
+export type UsbipdState = 'not-attached' | 'shared' | 'attached' | 'not-shared' | 'unknown'
+
+export interface UsbDevice {
+  busId: string
+  vid: string
+  pid: string
+  description: string
+  state: UsbipdState
+}
+
+export interface UsbipdStatus {
+  installed: boolean
+  version: string
+}
+
+export type UsbipdOp = 'bind' | 'unbind' | 'attach' | 'detach'
 
 export interface Metrics {
   memUsedKB: number
@@ -165,7 +229,8 @@ export const EMPTY_OVERVIEW: OverviewMetrics = {
   perDistro: {},
 }
 
-export type TaskType = 'install' | 'export' | 'import' | 'move' | 'convert' | 'action'
+export type TaskType =
+  'install' | 'export' | 'import' | 'move' | 'convert' | 'action' | 'network' | 'device'
 export type TaskStatus = 'running' | 'success' | 'failed' | 'canceled'
 
 export interface TaskProgress {

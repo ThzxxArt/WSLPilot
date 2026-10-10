@@ -46,6 +46,19 @@ test.describe('WSLPilot 启动冒烟', () => {
       timeout: 15_000,
     })
 
+    // 网络页（M6）：镜像模式卡 / 端口转发表 / 代理配置三个面板可见
+    await window.getByRole('button', { name: '网络', exact: true }).click()
+    await expect(window.getByText('网络模式', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(window.getByText('端口转发', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(window.getByText('代理配置', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(window.getByText('新建规则', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // USB 设备页（M6 usbipd）：安装引导或设备表二者必有其一（静态文案，不依赖是否装了 usbipd）
+    await window.getByRole('button', { name: 'USB 设备', exact: true }).click()
+    await expect(window.getByText('usbipd 绑定与附加管理', { exact: false })).toBeVisible({
+      timeout: 15_000,
+    })
+
     // 命令面板（M5 ⌘K）：全局快捷键唤起，Esc 关闭
     await window.keyboard.press('Control+KeyK')
     await expect(window.locator('input[aria-label="命令面板搜索"]')).toBeVisible({

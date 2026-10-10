@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { assertSafeRuleId, MAX_PORT_FORWARD_RULES } from './network'
 
 /** settings.jsonc schema — v2 */
 export const generalSettingsSchema = z.object({
@@ -95,8 +96,22 @@ export const networkFileSchema = z.object({
   portForwarding: z
     .array(
       z.object({
-        id: z.string(),
-        distro: z.string(),
+        // 规则是 netsh 应用的执行白名单键：id 必须可安全引用（与 IPC/执行边界同一规则）
+        id: z
+          .string()
+          .min(1)
+          .max(100)
+          .superRefine((s, ctx) => {
+            try {
+              assertSafeRuleId(s)
+            } catch (e) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: e instanceof Error ? e.message : '规则 id 非法',
+              })
+            }
+          }),
+        distro: z.string().min(1),
         listenAddress: z.string().default('0.0.0.0'),
         listenPort: z.number().int().min(1).max(65535),
         connectAddress: z.string().default('127.0.0.1'),
@@ -105,6 +120,7 @@ export const networkFileSchema = z.object({
         protocol: z.enum(['tcp', 'udp']).default('tcp'),
       }),
     )
+    .max(MAX_PORT_FORWARD_RULES)
     .default([]),
   proxy: z
     .object({
@@ -156,7 +172,16 @@ export const stateFileSchema = z.object({
   lastTaskResult: z
     .object({
       // 与 types.ts 联合类型对齐（review M8）：zod 是唯一运行时校验器
-      type: z.enum(['install', 'export', 'import', 'move', 'convert', 'action']),
+      type: z.enum([
+        'install',
+        'export',
+        'import',
+        'move',
+        'convert',
+        'action',
+        'network',
+        'device',
+      ]),
       distro: z.string(),
       status: z.enum(['running', 'success', 'failed', 'canceled']),
       finishedAt: z.string(),

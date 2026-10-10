@@ -88,6 +88,10 @@ export function taskTypeLabel(type: string): string {
       return '版本转换'
     case 'action':
       return '自定义动作'
+    case 'network':
+      return '网络转发'
+    case 'device':
+      return 'USB 设备'
     default:
       return type
   }

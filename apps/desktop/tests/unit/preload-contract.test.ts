@@ -222,6 +222,76 @@ describe('preload 契约', () => {
     )
   })
 
+  it('network / devices 域（M6）', () => {
+    callAndCheck('network.status', () => exposed.network.status(), CH.networkStatus)
+    callAndCheck(
+      'network.apply',
+      () => exposed.network.apply('dev-3000'),
+      CH.networkApply,
+      'dev-3000',
+    )
+    callAndCheck('network.applyAll', () => exposed.network.applyAll(), CH.networkApplyAll)
+    callAndCheck(
+      'network.remove',
+      () => exposed.network.remove('dev-3000'),
+      CH.networkRemove,
+      'dev-3000',
+    )
+    callAndCheck(
+      'network.proxyApply',
+      () => exposed.network.proxyApply('U'),
+      CH.networkProxyApply,
+      {
+        distro: 'U',
+      },
+    )
+    callAndCheck(
+      'network.proxyClear',
+      () => exposed.network.proxyClear('U'),
+      CH.networkProxyClear,
+      {
+        distro: 'U',
+      },
+    )
+    callAndCheck(
+      'network.proxyState',
+      () => exposed.network.proxyState('U'),
+      CH.networkProxyState,
+      {
+        distro: 'U',
+      },
+    )
+    callAndCheck('network.listRules', () => exposed.network.listRules(), CH.configGet, 'network')
+    callAndCheck('network.saveRules', () => exposed.network.saveRules([]), CH.configSet, {
+      fileKey: 'network',
+      patch: { portForwarding: [] },
+    })
+    callAndCheck('network.getProxy', () => exposed.network.getProxy(), CH.configGet, 'network')
+    const proxy = {
+      useWindowsProxy: false,
+      httpProxy: 'http://a:1',
+      httpsProxy: '',
+      noProxy: 'localhost',
+    }
+    callAndCheck('network.saveProxy', () => exposed.network.saveProxy(proxy), CH.configSet, {
+      fileKey: 'network',
+      patch: { proxy },
+    })
+
+    callAndCheck('devices.status', () => exposed.devices.status(), CH.devicesStatus)
+    callAndCheck('devices.list', () => exposed.devices.list(), CH.devicesList)
+    callAndCheck('devices.bind', () => exposed.devices.bind('1-2'), CH.devicesBind, '1-2')
+    callAndCheck('devices.unbind', () => exposed.devices.unbind('1-2'), CH.devicesUnbind, '1-2')
+    callAndCheck('devices.attach', () => exposed.devices.attach('1-2', 'U'), CH.devicesAttach, {
+      busId: '1-2',
+      distro: 'U',
+    })
+    callAndCheck('devices.attach 无发行版', () => exposed.devices.attach('1-2'), CH.devicesAttach, {
+      busId: '1-2',
+    })
+    callAndCheck('devices.detach', () => exposed.devices.detach('1-2'), CH.devicesDetach, '1-2')
+  })
+
   it('app 域', () => {
     callAndCheck('app.getVersion', () => exposed.app.getVersion(), CH.appGetVersion)
     callAndCheck('app.openConfigDir', () => exposed.app.openConfigDir(), CH.appOpenConfigDir)

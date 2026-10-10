@@ -38,6 +38,12 @@ export const router = createRouter({
       meta: { title: '备份迁移', icon: 'backup' },
     },
     {
+      path: '/devices',
+      name: 'devices',
+      component: () => import('../views/DevicesView.vue'),
+      meta: { title: 'USB 设备', icon: 'devices' },
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),

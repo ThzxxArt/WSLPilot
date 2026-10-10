@@ -15,6 +15,11 @@ const VOID_INVOKE_CHANNELS = new Set<string>([
   CH.appWindowMinimize,
   CH.appWindowMaximize,
   CH.appWindowClose,
+  // M6 网络 / 设备
+  CH.networkStatus,
+  CH.networkApplyAll,
+  CH.devicesStatus,
+  CH.devicesList,
 ])
 
 describe('IPC 契约一致性（review M1）', () => {
@@ -53,10 +58,11 @@ describe('IPC 契约一致性（review M1）', () => {
   })
 
   it('预留通道（契约先行、未实现）显式受控，禁止静默扩大（review M2）', () => {
-    // 有意预留：有 schema + 入册 INVOKE_CHANNELS，但 handler/preload/renderer 未实现（M6 网络）
-    const RESERVED = new Set<string>([CH.networkApply])
+    // 有意预留：有 schema + 入册 INVOKE_CHANNELS，但 handler/preload/renderer 未实现。
+    // M6 已交付网络与设备通道，当前无预留项。
+    const RESERVED = new Set<string>([])
     // 清单即声明：新增预留必须改这里，否则本用例失败
-    expect([...RESERVED].sort()).toEqual([CH.networkApply])
+    expect([...RESERVED].sort()).toEqual([])
     for (const ch of RESERVED) {
       expect(IPC_SCHEMAS[ch as ChannelName], `预留通道缺 schema: ${ch}`).toBeTruthy()
       expect(INVOKE_CHANNELS).toContain(ch)

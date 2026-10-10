@@ -139,6 +139,8 @@ describe('label helpers', () => {
     expect(taskTypeLabel('install')).toBe('安装')
     expect(taskTypeLabel('convert')).toBe('版本转换')
     expect(taskTypeLabel('action')).toBe('自定义动作')
+    expect(taskTypeLabel('network')).toBe('网络转发')
+    expect(taskTypeLabel('device')).toBe('USB 设备')
     expect(taskTypeLabel('weird')).toBe('weird')
 
     expect(taskStatusLabel('running')).toBe('进行中')
