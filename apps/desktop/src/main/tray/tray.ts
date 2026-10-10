@@ -58,12 +58,23 @@ export function createTray(opts: TrayOptions): Tray {
     return win
   }
 
-  const navigate = (path: string) => {
-    void showWindow().then((win) => {
-      if (win && !win.isDestroyed()) {
-        win.webContents.send(CH.appNavigate, path)
-      }
+  /** 托盘事件回调必须吞掉拒绝，否则重建失败会变成 unhandled rejection */
+  const showWindowSafe = (): void => {
+    void showWindow().catch((e: unknown) => {
+      opts.logger.warn('tray show window failed', { error: String(e) })
     })
+  }
+
+  const navigate = (path: string) => {
+    void showWindow()
+      .then((win) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send(CH.appNavigate, path)
+        }
+      })
+      .catch((e: unknown) => {
+        opts.logger.warn('tray navigate failed', { error: String(e) })
+      })
   }
 
   /** 菜单按 settings 现值构建；勾选后写回 settings（主进程同步系统登录项） */
@@ -72,7 +83,7 @@ export function createTray(opts: TrayOptions): Tray {
     return Menu.buildFromTemplate([
       {
         label: '打开 WSLPilot',
-        click: showWindow,
+        click: showWindowSafe,
       },
       { type: 'separator' },
       {
@@ -124,7 +135,7 @@ export function createTray(opts: TrayOptions): Tray {
   // 设置变更后重建菜单（勾选态与设置页保持一致）
   opts.configService.onChange('settings', refreshMenu)
 
-  tray.on('double-click', showWindow)
+  tray.on('double-click', showWindowSafe)
 
   opts.logger.info('tray created')
   return tray

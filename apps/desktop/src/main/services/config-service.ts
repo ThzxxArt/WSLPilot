@@ -434,6 +434,10 @@ export async function createConfigService(
           // 只把「相对 cache 变化的叶子」打回磁盘：
           // 早期实现拿全量对象当补丁，会把外部编辑过的字段一并回退（review M-3 根治）
           const leaves = diffLeafPaths(current, validated.data as unknown)
+          // 无变更：不要白写一次盘（否则每次调用都产生备份轮转，挤掉真实备份）
+          if (leaves.length === 0) {
+            return current
+          }
           writeText = originalText
           if (probe.errors.length === 0 && probe.data !== undefined) {
             for (const { path, value } of leaves) {

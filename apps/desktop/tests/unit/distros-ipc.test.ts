@@ -123,6 +123,14 @@ function makeDeps() {
         values: { DistributionName: 'Ubuntu' },
       })),
       listGuids: vi.fn(async () => []),
+      listAll: vi.fn(async () => [
+        {
+          name: 'Ubuntu',
+          guid: '{GUID-1}',
+          basePath: 'C:\\WSL\\Ubuntu',
+          defaultUid: 1000,
+        },
+      ]),
     } as any,
     io: {
       runExport: vi.fn(async () => ({})),
@@ -200,6 +208,41 @@ describe('distros + meta IPC handlers', () => {
     const list = await wrapped.get(CH.distrosList)({})
     expect(deps.wsl.listWithMeta).toHaveBeenCalled()
     expect(list[0].meta.alias).toBe('主力')
+  })
+
+  /**
+   * `wsl -l -v` 本就不含 GUID/BasePath/DefaultUid，必须由注册表补齐，
+   * 否则迁移向导永远显示「注册表信息不可用」（review C-1 根治）。
+   */
+  it('distros:list 补齐 Lxss 深层信息（GUID/BasePath/DefaultUid）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    const list = await wrapped.get(CH.distrosList)({})
+    expect(deps.registry.listAll).toHaveBeenCalled()
+    expect(list[0].guid).toBe('{GUID-1}')
+    expect(list[0].basePath).toBe('C:\\WSL\\Ubuntu')
+    expect(list[0].defaultUid).toBe(1000)
+  })
+
+  it('注册表不可用时降级不阻断（设计书 §9.2）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    deps.registry.listAll.mockRejectedValueOnce(new Error('registry down'))
+    const list = await wrapped.get(CH.distrosList)({})
+    // 仍返回列表，只是没有深层信息
+    expect(list).toHaveLength(1)
+    expect(list[0].guid).toBeUndefined()
+  })
+
+  it('发行版名不区分大小写也能命中注册表信息', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    deps.wsl.listWithMeta.mockResolvedValueOnce([
+      { name: 'UBUNTU', state: 'Running', version: 2, isDefault: true, meta: null },
+    ])
+    const list = await wrapped.get(CH.distrosList)({})
+    expect(list[0].guid).toBe('{GUID-1}')
+    expect(list[0].basePath).toBe('C:\\WSL\\Ubuntu')
   })
 
   it('distros:start / terminate / shutdown / setDefault', async () => {

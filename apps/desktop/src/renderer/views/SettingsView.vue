@@ -61,33 +61,25 @@ async function browseBackupDir() {
 }
 
 /** 文本输入防抖落盘（review M8）：停止输入 400ms 后写，失败回滚并提示 */
-function makeDebouncedSetter<T>(read: () => T, write: (v: T) => Promise<unknown>) {
+/**
+ * 文本类设置的防抖落盘。
+ * 失败回滚与提示由 settings store 的 persistField + 布局层统一处理
+ * （review M-3 根治后此处不再自管回滚，避免双重回滚把值写反）。
+ */
+function makeDebouncedSetter<T>(write: (v: T) => Promise<unknown>) {
   let timer: number | undefined
   return (value: T) => {
     if (timer) window.clearTimeout(timer)
     timer = window.setTimeout(() => {
       timer = undefined
-      const before = read()
-      void write(value).catch((e: unknown) => {
-        message.error(errorLine(e, '保存失败'))
-        void write(before) // 用写前的值回滚
-      })
+      void write(value)
     }, 400)
   }
 }
 
-const setFontFamilyDebounced = makeDebouncedSetter(
-  () => settings.terminalFontFamily,
-  (v: string) => settings.setTerminalFontFamily(v),
-)
-const setBackupDirDebounced = makeDebouncedSetter(
-  () => settings.backupDefaultDir,
-  (v: string) => settings.setBackupDefaultDir(v),
-)
-const setDefaultShellDebounced = makeDebouncedSetter(
-  () => settings.wslDefaultShell,
-  (v: string) => settings.setWslDefaultShell(v),
-)
+const setFontFamilyDebounced = makeDebouncedSetter((v: string) => settings.setTerminalFontFamily(v))
+const setBackupDirDebounced = makeDebouncedSetter((v: string) => settings.setBackupDefaultDir(v))
+const setDefaultShellDebounced = makeDebouncedSetter((v: string) => settings.setWslDefaultShell(v))
 
 /** 配置文件逐个打开（§12.7） */
 const configFiles: { key: 'settings' | 'distros' | 'actions' | 'network'; label: string }[] = [

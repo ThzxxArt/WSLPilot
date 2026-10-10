@@ -131,45 +131,51 @@ export function createRegistryService(
     return parseGuidFull(guid, out)
   }
 
-  async function listGuids(): Promise<Array<{ guid: string; distributionName: string }>> {
+  /**
+   * 一遍读完全部 GUID 的深层信息（listGuids / listAll / detail 共用，避免重复查注册表）。
+   * `fresh` 语义：
+   * - 展示类（distros:list 每 5s 轮询）走 TTL 缓存，避免把注册表打爆
+   * - **安全校验类必须 fresh**（迁移的「当前位置」判断用到 stale 数据会放行错误目标）
+   */
+  const CACHE_TTL_MS = 30_000
+  let cache: { at: number; items: Array<Partial<DistroRuntime> & { name: string }> } | null = null
+
+  async function readAll(fresh = false): Promise<Array<Partial<DistroRuntime> & { name: string }>> {
+    if (!fresh && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.items
     const out = await query(['query', LXSS])
     const ids = extractGuids(out)
-    const guids: Array<{ guid: string; distributionName: string }> = []
+    const items: Array<Partial<DistroRuntime> & { name: string }> = []
     for (const guid of ids) {
       const info = await readGuid(guid)
-      if (info.name) {
-        guids.push({ guid, distributionName: info.name })
-      }
+      if (info.name) items.push({ ...info, name: info.name })
     }
-    return guids
+    cache = { at: Date.now(), items }
+    return items
+  }
+
+  async function listGuids(): Promise<Array<{ guid: string; distributionName: string }>> {
+    return (await readAll()).flatMap((d) =>
+      d.guid ? [{ guid: d.guid, distributionName: d.name }] : [],
+    )
   }
 
   async function listAll(): Promise<Array<Partial<DistroRuntime> & { name: string }>> {
-    const guids = await listGuids()
-    const out: Array<Partial<DistroRuntime> & { name: string }> = []
-    for (const g of guids) {
-      const info = await readGuid(g.guid)
-      if (info.name) out.push({ ...info, name: info.name })
-    }
-    return out
+    return readAll()
   }
 
   return {
     async detail(name) {
       const lower = String(name ?? '').toLowerCase()
-      const all = await listAll()
+      // 安全校验用数据必须新鲜：迁移目标判断依赖它（review 自查）
+      const all = await readAll(true)
       return all.find((d) => d.name.toLowerCase() === lower) ?? {}
     },
 
     async detailFull(name) {
-      const guids = await listGuids()
       const lower = name.toLowerCase()
-      for (const g of guids) {
-        if (g.distributionName.toLowerCase() === lower) {
-          return readGuidFull(g.guid)
-        }
-      }
-      return null
+      const hit = (await readAll()).find((d) => d.name.toLowerCase() === lower)
+      if (!hit?.guid) return null
+      return readGuidFull(hit.guid)
     },
 
     listGuids,

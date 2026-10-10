@@ -77,12 +77,19 @@ async function startRename(s: TerminalSession) {
   renamingId.value = s.ptyId
   renameDraft.value = s.title
   await nextTick()
-  const el = document.querySelector<HTMLInputElement>('.tab input.rename-input')
+  // class 挂在 n-input 包裹层上，真正的 <input> 是它的后代（review 自查）
+  const el = document.querySelector<HTMLElement>('.tab .rename-input')?.querySelector('input')
   el?.focus()
   el?.select()
 }
 
+/**
+ * 提交重命名。必须先判 `renamingId`：
+ * Enter 提交后输入框被 v-if 卸载，blur 会再触发一次；Esc 取消同样会触发 blur。
+ * 没有这道守卫就会「重复 emit」甚至「Esc 也改名」（review 自查发现）。
+ */
 function commitRename(s: TerminalSession) {
+  if (renamingId.value !== s.ptyId) return
   const t = renameDraft.value.trim()
   renamingId.value = ''
   if (t && t !== s.title) emit('rename', s.ptyId, t)

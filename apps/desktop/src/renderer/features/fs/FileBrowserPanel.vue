@@ -50,9 +50,13 @@ const crumbs = computed(() => {
   return list
 })
 
-async function load() {
+/**
+ * 真正的加载动作（不做确认）。
+ * 确认必须由调用方**在改动 path/file 之前**完成 —— 否则用户点「留在此页」时
+ * path 已经变了，面包屑与列表不一致（review 自查发现）。
+ */
+async function reload() {
   if (!props.distroName) return
-  if (!(await confirmDiscard())) return
   loading.value = true
   error.value = ''
   file.value = null
@@ -66,19 +70,26 @@ async function load() {
   }
 }
 
-function goTo(p: string) {
+/** 刷新当前目录（保留未保存确认） */
+async function load() {
+  if (!(await confirmDiscard())) return
+  await reload()
+}
+
+async function goTo(p: string) {
+  // 先确认再改 path：取消时面包屑不许动
+  if (!(await confirmDiscard())) return
   path.value = p
-  void load()
+  await reload()
 }
 
 async function enter(e: DirEntry) {
+  if (!(await confirmDiscard())) return
   if (e.isDirectory) {
-    if (!(await confirmDiscard())) return
     path.value = e.path
-    await load()
+    await reload()
     return
   }
-  if (!(await confirmDiscard())) return
   try {
     const r = await window.wslAPI.fs.read(props.distroName, e.path)
     file.value = {
@@ -148,9 +159,11 @@ function formatTime(e: DirEntry): string {
 onMounted(load)
 watch(
   () => props.distroName,
-  () => {
+  async () => {
+    // 发行版切换同样先确认；取消时保留当前视图（宁可显示旧数据也不静默丢用户修改）
+    if (!(await confirmDiscard())) return
     path.value = '/'
-    void load()
+    await reload()
   },
 )
 </script>
