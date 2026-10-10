@@ -144,7 +144,7 @@ describe('tray', () => {
     expect(win.focus).toHaveBeenCalled()
   })
 
-  it('menu navigate sends CH.appNavigate and shows window', () => {
+  it('menu navigate sends CH.appNavigate and shows window', async () => {
     const win = {
       isMinimized: () => false,
       isDestroyed: () => false,
@@ -160,8 +160,41 @@ describe('tray', () => {
 
     const settingsItem = trayMenu.items.find((i: any) => i.label === '设置')
     settingsItem.click()
+    // navigate 走异步重建入口（窗口可能需要重建），等 microtask 清空
+    await new Promise((r) => setTimeout(r, 0))
     expect(win.show).toHaveBeenCalled()
     expect(win.webContents.send).toHaveBeenCalledWith('app:navigate', '/settings')
+  })
+
+  it('窗口被销毁时经 ensureWindow 重建后再导航（review M-12）', async () => {
+    const dead = {
+      isMinimized: () => false,
+      isDestroyed: () => true,
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { send: vi.fn() },
+    }
+    const rebuilt = {
+      isMinimized: () => false,
+      isDestroyed: () => false,
+      show: vi.fn(),
+      focus: vi.fn(),
+      webContents: { send: vi.fn() },
+    }
+    const ensureWindow = vi.fn(async () => rebuilt as any)
+    createTray({
+      getMainWindow: () => dead as any,
+      ensureWindow,
+      logger: makeLogger(),
+      configService: makeConfigService(),
+    })
+
+    const settingsItem = trayMenu.items.find((i: any) => i.label === '设置')
+    settingsItem.click()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(ensureWindow).toHaveBeenCalled()
+    expect(rebuilt.show).toHaveBeenCalled()
+    expect(rebuilt.webContents.send).toHaveBeenCalledWith('app:navigate', '/settings')
   })
 
   it('quit menu item marks quitting and quits', () => {

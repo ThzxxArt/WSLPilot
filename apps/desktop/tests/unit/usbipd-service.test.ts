@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   createUsbipdService,
   isToolMissing,
+  isUnknownOptionError,
   USBIPD_INSTALL_HINT,
 } from '../../src/main/services/usbipd-service'
 import type { TaskControl } from '../../src/main/services/task-runner'
@@ -149,6 +150,30 @@ describe('UsbipdService 操作', () => {
       '2-1',
     ])
     expect(tool.calls[1]!.args).toEqual(['detach', '--busid', '2-1'])
+  })
+
+  it('--distribution 不被识别时退回默认发行版（review M-14 根治）', async () => {
+    const tool = makeTool([{ code: 1, stderr: 'unknown option --distribution' }, { code: 0 }])
+    const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
+    await svc.attach('2-1', 'Ubuntu')
+    // 第一次带 --distribution，第二次退回默认发行版
+    expect(tool.calls).toHaveLength(2)
+    expect(tool.calls[0]!.args).toContain('--distribution')
+    expect(tool.calls[1]!.args).toEqual(['attach', '--wsl', '--busid', '2-1'])
+  })
+
+  it('非「参数不识别」的 attach 失败不重试', async () => {
+    const tool = makeTool([{ code: 1, stderr: 'device not shared' }, { code: 0 }])
+    const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
+    await expect(svc.attach('2-1', 'Ubuntu')).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    expect(tool.calls).toHaveLength(1)
+  })
+
+  it('isUnknownOptionError 识别参数错误', () => {
+    expect(isUnknownOptionError({ detail: 'unknown option --distribution' })).toBe(true)
+    expect(isUnknownOptionError(new Error('unrecognized argument'))).toBe(true)
+    expect(isUnknownOptionError({ detail: 'device not shared' })).toBe(false)
+    expect(isUnknownOptionError(null)).toBe(false)
   })
 
   it('提权失败映射 PERMISSION_DENIED', async () => {

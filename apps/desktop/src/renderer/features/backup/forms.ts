@@ -113,9 +113,21 @@ export function exportCommandPreview(form: ExportForm): string {
   return previewExportCommand(buildExportRequest(form))
 }
 
-export function validateImportForm(form: ImportForm): string | null {
+/**
+ * 导入表单校验。
+ * `existingNames` 为当前已注册发行版名：重名必须**硬拦截**，
+ * 否则用户一路「下一步 → 开始」才在长任务里炸出 wsl --import 同名冲突（review M-11）。
+ */
+export function validateImportForm(
+  form: ImportForm,
+  existingNames: readonly string[] = [],
+): string | null {
   if (!isValidDistroName(form.name))
     return '请填写合法的新发行版名称（不能包含 \\ / : * ? " < > |）'
+  const n = form.name.trim()
+  if (existingNames.some((d) => d === n)) {
+    return `发行版「${n}」已存在，请换一个名称，或先注销原有发行版`
+  }
   const err = requireField(form.archivePath, '备份文件路径')
   if (err) return err
   if (form.inPlace && form.format !== 'vhd') {

@@ -171,8 +171,10 @@ function setKeepRecent(v: number | null) {
       </div>
       <div class="setting-line">
         <div>
-          <div class="label">界面语言</div>
-          <div class="hint">system 跟随操作系统语言</div>
+          <div class="label">组件语言</div>
+          <div class="hint">
+            仅影响组件库内置文案（日期选择、分页等）；应用界面文案目前仅提供简体中文
+          </div>
         </div>
         <n-select
           :value="settings.locale"

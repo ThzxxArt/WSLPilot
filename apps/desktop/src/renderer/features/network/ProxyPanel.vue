@@ -12,7 +12,6 @@ import {
   type WindowsProxyInfo,
 } from '@wslpilot/shared'
 import { proxyToForm, validateProxyForm, type ProxyForm } from './forms'
-import { errorLine } from '../../composables/useAppError'
 
 /**
  * 代理配置面板（M6 · 设计书 §12.6）。
@@ -25,11 +24,14 @@ const props = defineProps<{
   windowsProxy: WindowsProxyInfo | null
   proxyScript: ProxyScriptState | null
   saving?: boolean
+  /** 「写入代理脚本」进行中（父级串行保存+写入时为 true） */
+  applying?: boolean
 }>()
 
 const emit = defineEmits<{
   save: [ProxyConfig]
-  apply: [distro: string]
+  /** 保存并写入发行版（父级串行 await，杜绝"写入旧代理"竞态 — review M-9） */
+  apply: [distro: string, proxy: ProxyConfig]
   clear: [distro: string]
   inspect: [distro: string]
 }>()
@@ -37,7 +39,6 @@ const emit = defineEmits<{
 const message = useMessage()
 const form = reactive<ProxyForm>(proxyToForm(props.proxy))
 const targetDistro = ref('')
-const busy = ref(false)
 
 watch(
   () => props.proxy,
@@ -106,20 +107,14 @@ async function applyToDistro() {
     message.warning(error.value)
     return
   }
-  busy.value = true
-  try {
-    emit('save', {
-      useWindowsProxy: form.useWindowsProxy,
-      httpProxy: form.httpProxy.trim(),
-      httpsProxy: form.httpsProxy.trim(),
-      noProxy: form.noProxy.trim(),
-    })
-    emit('apply', targetDistro.value)
-  } catch (e) {
-    message.error(errorLine(e, '应用代理失败'))
-  } finally {
-    busy.value = false
-  }
+  // 一次 emit 携带配置：父级串行「保存 → 写入」，
+  // 避免 save 与 apply 两个独立 IPC 之间配置被写入旧值（review M-9）
+  emit('apply', targetDistro.value, {
+    useWindowsProxy: form.useWindowsProxy,
+    httpProxy: form.httpProxy.trim(),
+    httpsProxy: form.httpsProxy.trim(),
+    noProxy: form.noProxy.trim(),
+  })
 }
 
 function clearFromDistro() {
@@ -192,7 +187,7 @@ function inspect() {
         <n-button
           size="small"
           type="primary"
-          :loading="busy"
+          :loading="applying"
           :disabled="!!error"
           @click="applyToDistro"
         >

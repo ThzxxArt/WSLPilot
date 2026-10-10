@@ -15,8 +15,8 @@ import { toAppError, type AppError } from '@shared/errors'
  */
 const cfg = defaultConfig('settings')
 
-export const useSettingsStore = defineStore('settings', {
-  state: () => ({
+function initialState() {
+  return {
     loaded: false,
     accent: cfg.general.accent as AccentName,
     locale: cfg.general.locale as AppSettings['general']['locale'],
@@ -44,8 +44,16 @@ export const useSettingsStore = defineStore('settings', {
     backupKeepRecent: cfg.backup.keepRecent as number,
     backupAutoBeforeDestructive: cfg.backup.autoBackupBeforeDestructive as boolean,
     lastError: null as AppError | null,
+    /** 落盘失败时间戳：界面监听它给出一次性提示（review M-3） */
+    persistErrorAt: 0,
     version: '',
-  }),
+  }
+}
+
+type SettingsState = ReturnType<typeof initialState>
+
+export const useSettingsStore = defineStore('settings', {
+  state: initialState,
 
   actions: {
     /**
@@ -91,131 +99,150 @@ export const useSettingsStore = defineStore('settings', {
       this.loaded = true
     },
 
+    /**
+     * 乐观更新 + 失败回滚的统一落盘入口（review M-3 根治）。
+     * 早期 21 个 setter 都是「先改 state 再 await config.set，不 catch」——
+     * 落盘失败时开关显示已改、settings.jsonc 未改，重启后悄悄回滚，用户完全不知情。
+     * 现在：失败回滚 UI 值 + 记录 lastError + 推进 persistErrorAt 供界面提示。
+     */
+    async persistField<K extends keyof SettingsState>(
+      field: K,
+      value: SettingsState[K],
+      patch: Record<string, unknown>,
+    ): Promise<boolean> {
+      // Pinia 的 this 含 actions，写字段要收敛到状态面
+      const state = this as unknown as SettingsState
+      const prev = state[field]
+      state[field] = value
+      try {
+        await window.wslAPI.config.set('settings', patch)
+        return true
+      } catch (e) {
+        state[field] = prev
+        this.lastError = toAppError(e)
+        this.persistErrorAt = Date.now()
+        return false
+      }
+    },
+
     async setAccent(accent: AccentName) {
-      this.accent = accent
-      await window.wslAPI.config.set('settings', { general: { accent } })
+      return this.persistField('accent', accent, { general: { accent } })
     },
 
     async setLocale(locale: AppSettings['general']['locale']) {
-      this.locale = locale
-      await window.wslAPI.config.set('settings', { general: { locale } })
+      return this.persistField('locale', locale, { general: { locale } })
     },
 
     async setReduceMotion(reduceMotion: boolean) {
-      this.reduceMotion = reduceMotion
-      await window.wslAPI.config.set('settings', { general: { reduceMotion } })
+      return this.persistField('reduceMotion', reduceMotion, { general: { reduceMotion } })
     },
 
     async setAutoRefreshOnStart(autoRefreshOnStart: boolean) {
-      this.autoRefreshOnStart = autoRefreshOnStart
-      await window.wslAPI.config.set('settings', { general: { autoRefreshOnStart } })
+      return this.persistField('autoRefreshOnStart', autoRefreshOnStart, {
+        general: { autoRefreshOnStart },
+      })
     },
 
     async setPollIntervalMs(pollIntervalMs: number) {
-      this.pollIntervalMs = pollIntervalMs
-      await window.wslAPI.config.set('settings', { general: { pollIntervalMs } })
+      return this.persistField('pollIntervalMs', pollIntervalMs, { general: { pollIntervalMs } })
     },
 
     async setCloseBehavior(closeBehavior: AppSettings['general']['closeBehavior']) {
-      this.closeBehavior = closeBehavior
-      await window.wslAPI.config.set('settings', { general: { closeBehavior } })
+      return this.persistField('closeBehavior', closeBehavior, { general: { closeBehavior } })
     },
 
     /** 开机自启：settings.jsonc 为真相源，主进程监听变更同步系统登录项 */
     async setLaunchAtLogin(launchAtLogin: boolean) {
-      this.launchAtLogin = launchAtLogin
-      await window.wslAPI.config.set('settings', { general: { launchAtLogin } })
+      return this.persistField('launchAtLogin', launchAtLogin, { general: { launchAtLogin } })
     },
 
     async setShowRawCommand(showRawCommand: boolean) {
-      this.showRawCommand = showRawCommand
-      await window.wslAPI.config.set('settings', { advanced: { showRawCommand } })
+      return this.persistField('showRawCommand', showRawCommand, {
+        advanced: { showRawCommand },
+      })
     },
 
     async setConfirmDestructive(confirmDestructive: boolean) {
-      this.confirmDestructive = confirmDestructive
-      await window.wslAPI.config.set('settings', { advanced: { confirmDestructive } })
+      return this.persistField('confirmDestructive', confirmDestructive, {
+        advanced: { confirmDestructive },
+      })
     },
 
     async setLogLevel(logLevel: LogLevel) {
-      this.logLevel = logLevel
-      await window.wslAPI.config.set('settings', { advanced: { logLevel } })
+      return this.persistField('logLevel', logLevel, { advanced: { logLevel } })
     },
 
     /** 硬件加速：需重启生效（主进程启动早期读取） */
     async setHardwareAcceleration(hardwareAcceleration: boolean) {
-      this.hardwareAcceleration = hardwareAcceleration
-      await window.wslAPI.config.set('settings', { advanced: { hardwareAcceleration } })
+      return this.persistField('hardwareAcceleration', hardwareAcceleration, {
+        advanced: { hardwareAcceleration },
+      })
     },
 
     async setWslDefaultShell(defaultShell: string) {
-      this.wslDefaultShell = defaultShell
-      await window.wslAPI.config.set('settings', { wsl: { defaultShell } })
+      return this.persistField('wslDefaultShell', defaultShell, { wsl: { defaultShell } })
     },
 
     async setWslAutoShutdownAfterConfigChange(autoShutdownAfterConfigChange: boolean) {
-      this.wslAutoShutdownAfterConfigChange = autoShutdownAfterConfigChange
-      await window.wslAPI.config.set('settings', { wsl: { autoShutdownAfterConfigChange } })
+      return this.persistField('wslAutoShutdownAfterConfigChange', autoShutdownAfterConfigChange, {
+        wsl: { autoShutdownAfterConfigChange },
+      })
     },
 
     async setTerminalFontFamily(fontFamily: string) {
-      this.terminalFontFamily = fontFamily
-      await window.wslAPI.config.set('settings', { terminal: { fontFamily } })
+      return this.persistField('terminalFontFamily', fontFamily, { terminal: { fontFamily } })
     },
 
     async setTerminalFontSize(fontSize: number) {
-      this.terminalFontSize = fontSize
-      await window.wslAPI.config.set('settings', { terminal: { fontSize } })
+      return this.persistField('terminalFontSize', fontSize, { terminal: { fontSize } })
     },
 
     async setTerminalLineHeight(lineHeight: number) {
-      this.terminalLineHeight = lineHeight
-      await window.wslAPI.config.set('settings', { terminal: { lineHeight } })
+      return this.persistField('terminalLineHeight', lineHeight, { terminal: { lineHeight } })
     },
 
     async setTerminalCursorStyle(cursorStyle: 'block' | 'underline' | 'bar') {
-      this.terminalCursorStyle = cursorStyle
-      await window.wslAPI.config.set('settings', { terminal: { cursorStyle } })
+      return this.persistField('terminalCursorStyle', cursorStyle, {
+        terminal: { cursorStyle },
+      })
     },
 
     async setTerminalCursorBlink(cursorBlink: boolean) {
-      this.terminalCursorBlink = cursorBlink
-      await window.wslAPI.config.set('settings', { terminal: { cursorBlink } })
+      return this.persistField('terminalCursorBlink', cursorBlink, {
+        terminal: { cursorBlink },
+      })
     },
 
     async setTerminalScrollback(scrollback: number) {
-      this.terminalScrollback = scrollback
-      await window.wslAPI.config.set('settings', { terminal: { scrollback } })
+      return this.persistField('terminalScrollback', scrollback, { terminal: { scrollback } })
     },
 
     async setTerminalCopyOnSelect(copyOnSelect: boolean) {
-      this.terminalCopyOnSelect = copyOnSelect
-      await window.wslAPI.config.set('settings', { terminal: { copyOnSelect } })
+      return this.persistField('terminalCopyOnSelect', copyOnSelect, {
+        terminal: { copyOnSelect },
+      })
     },
 
     async setTerminalTheme(theme: TerminalTheme) {
-      this.terminalTheme = theme
-      await window.wslAPI.config.set('settings', { terminal: { theme } })
+      return this.persistField('terminalTheme', theme, { terminal: { theme } })
     },
 
     async setBackupDefaultDir(defaultDir: string) {
-      this.backupDefaultDir = defaultDir
-      await window.wslAPI.config.set('settings', { backup: { defaultDir } })
+      return this.persistField('backupDefaultDir', defaultDir, { backup: { defaultDir } })
     },
 
     async setBackupFormat(format: BackupFormat) {
-      this.backupFormat = format
-      await window.wslAPI.config.set('settings', { backup: { format } })
+      return this.persistField('backupFormat', format, { backup: { format } })
     },
 
     async setBackupKeepRecent(keepRecent: number) {
-      this.backupKeepRecent = keepRecent
-      await window.wslAPI.config.set('settings', { backup: { keepRecent } })
+      return this.persistField('backupKeepRecent', keepRecent, { backup: { keepRecent } })
     },
 
     async setBackupAutoBeforeDestructive(autoBackupBeforeDestructive: boolean) {
-      this.backupAutoBeforeDestructive = autoBackupBeforeDestructive
-      await window.wslAPI.config.set('settings', { backup: { autoBackupBeforeDestructive } })
+      return this.persistField('backupAutoBeforeDestructive', autoBackupBeforeDestructive, {
+        backup: { autoBackupBeforeDestructive },
+      })
     },
   },
 })

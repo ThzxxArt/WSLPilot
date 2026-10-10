@@ -90,6 +90,8 @@ function clampPercent(p: number | null): number | null {
 export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
   const tasks = new Map<string, TaskRecord>()
   const cancelRequested = new Set<string>()
+  /** 已进入 execute 的任务（区分「排队中」与「执行中」— review M-2） */
+  const started = new Set<string>()
   const cancelFns = new Map<string, Set<() => void>>()
   const waiters = new Map<string, Set<(rec: TaskRecord) => void>>()
   /** lockKey → 队尾 promise */
@@ -167,10 +169,12 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
         emitProgress(rec, line)
       },
       isCanceled() {
-        return cancelRequested.has(rec.taskId)
+        // 协作风控必须同时看任务状态：dispose() 会清空 cancelRequested，
+        // 只查 Set 会让退出窗口里的重活（大文件导出/迁移）继续跑出残局（review M-1）
+        return rec.status !== 'running' || cancelRequested.has(rec.taskId)
       },
       throwIfCanceled() {
-        if (cancelRequested.has(rec.taskId)) {
+        if (rec.status !== 'running' || cancelRequested.has(rec.taskId)) {
           throw createAppError('TASK_CANCELED', {
             message: `任务已取消：${rec.type}${rec.distro ? ` ${rec.distro}` : ''}`,
           })
@@ -196,9 +200,11 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
   }
 
   async function execute(rec: TaskRecord, run: (ctl: TaskControl) => Promise<void>): Promise<void> {
+    started.add(rec.taskId)
     // 开跑前守卫：已请求取消 或 已被 dispose 结算的任务不得执行副作用
     // （dispose 会清空 cancelRequested，必须同时看 rec.status — 核验修复）
     if (cancelRequested.has(rec.taskId) || rec.status !== 'running') {
+      cancelRequested.delete(rec.taskId)
       settle(rec, 'canceled', '任务在开始前被取消')
       return
     }
@@ -284,6 +290,13 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
           }
         }
       }
+      // 排队中（lockKey 等待）的任务没有 cancelFns，必须立刻结算，
+      // 否则要等前一个任务跑完才见效：waitFor 永挂、列表显示"运行中"，
+      // 且与 dispose() 的立即结算语义不一致（review M-2）
+      if (!started.has(taskId)) {
+        cancelRequested.delete(taskId)
+        settle(rec, 'canceled', '任务在开始前被取消')
+      }
       return true
     },
 
@@ -329,6 +342,7 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
       }
       // 兜底清理，防残留状态（review M26）
       cancelRequested.clear()
+      started.clear()
       cancelFns.clear()
       waiters.clear()
       locks.clear()

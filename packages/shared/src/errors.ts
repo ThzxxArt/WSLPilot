@@ -61,7 +61,8 @@ export const ERROR_CATALOG: Record<
 > = {
   WSL_NOT_INSTALLED: {
     message: '系统未启用 WSL',
-    suggestion: '点击「一键安装 WSL」或运行 wsl --install',
+    // 不要指向不存在的 UI 按钮（review C-2）：引导必须可执行
+    suggestion: '请在管理员终端运行 wsl --install，完成后重启应用',
     recoverable: true,
   },
   WSL_NOT_FOUND: {

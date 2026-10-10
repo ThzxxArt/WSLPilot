@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NSpin, NTag, useMessage } from 'naive-ui'
+import { NButton, NSpin, NTag, useDialog, useMessage } from 'naive-ui'
 import { CodeEditor } from '@ui/components'
 import type { DirEntry } from '@shared/types'
 import { errorLine } from '../../composables/useAppError'
@@ -8,6 +8,7 @@ import { errorLine } from '../../composables/useAppError'
 const props = defineProps<{ distroName: string }>()
 
 const message = useMessage()
+const dialog = useDialog()
 const path = ref('/')
 const entries = ref<DirEntry[]>([])
 const loading = ref(false)
@@ -18,8 +19,25 @@ const file = ref<{
   dirty: boolean
   truncated: boolean
   binary: boolean
+  sizeBytes: number
 } | null>(null)
 const saving = ref(false)
+
+/** 未保存修改的丢弃确认（§13.4 破坏性操作二次确认） */
+function confirmDiscard(): Promise<boolean> {
+  if (!file.value?.dirty) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '放弃未保存的修改？',
+      content: `「${file.value!.path}」有未保存的修改，离开将丢失。`,
+      positiveText: '放弃修改',
+      negativeText: '留在此页',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
 
 const crumbs = computed(() => {
   const segs = path.value.split('/').filter(Boolean)
@@ -34,6 +52,7 @@ const crumbs = computed(() => {
 
 async function load() {
   if (!props.distroName) return
+  if (!(await confirmDiscard())) return
   loading.value = true
   error.value = ''
   file.value = null
@@ -54,10 +73,12 @@ function goTo(p: string) {
 
 async function enter(e: DirEntry) {
   if (e.isDirectory) {
+    if (!(await confirmDiscard())) return
     path.value = e.path
     await load()
     return
   }
+  if (!(await confirmDiscard())) return
   try {
     const r = await window.wslAPI.fs.read(props.distroName, e.path)
     file.value = {
@@ -66,6 +87,7 @@ async function enter(e: DirEntry) {
       dirty: false,
       truncated: r.truncated,
       binary: r.binary,
+      sizeBytes: r.sizeBytes,
     }
   } catch (err) {
     message.error(errorLine(err, '读取文件失败'))
@@ -74,6 +96,11 @@ async function enter(e: DirEntry) {
 
 async function saveFile() {
   if (!file.value) return
+  // 超限截断的文件禁止写回：保存会把前缀整文件覆盖回去，静默毁掉剩余内容
+  if (file.value.truncated) {
+    message.warning('该文件超过在线编辑上限，禁止写回以免截断原文件')
+    return
+  }
   saving.value = true
   try {
     await window.wslAPI.fs.write(props.distroName, file.value.path, file.value.text)
@@ -87,13 +114,14 @@ async function saveFile() {
 }
 
 function onEdit(v: string) {
-  if (file.value) {
+  if (file.value && !file.value.truncated) {
     file.value.text = v
     file.value.dirty = true
   }
 }
 
-function closeFile() {
+async function closeFile() {
+  if (!(await confirmDiscard())) return
   file.value = null
 }
 
@@ -194,7 +222,7 @@ watch(
             <n-button
               size="tiny"
               type="primary"
-              :disabled="!file.dirty || file.binary"
+              :disabled="!file.dirty || file.binary || file.truncated"
               :loading="saving"
               @click="saveFile"
             >
@@ -203,6 +231,11 @@ watch(
           </div>
         </div>
         <p v-if="file.binary" class="hint">二进制文件不支持在线编辑，请在终端中处理。</p>
+        <!-- 超限截断：编辑器只读，禁止保存 —— 否则会把截断后的内容整文件覆盖回去（review C1） -->
+        <p v-else-if="file.truncated" class="hint">
+          文件超过 {{ Math.round(file.sizeBytes / 1024) }}KB 的在线编辑上限，仅展示前缀。
+          为避免保存时截断原文件，此处禁止编辑；请在终端中用 vim/nano 处理。
+        </p>
         <CodeEditor
           v-else
           :model-value="file.text"

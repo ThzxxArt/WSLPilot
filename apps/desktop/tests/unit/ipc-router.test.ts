@@ -24,6 +24,7 @@ vi.mock('electron', () => {
 import { registerIpcHandlers } from '../../src/main/ipc/router'
 import {
   CH,
+  INVOKE_CHANNELS,
   serializeIpcError,
   deserializeIpcError,
   createAppError,
@@ -214,6 +215,23 @@ describe('IPC router + handlers', () => {
     expect(channels).toContain(CH.fsRead)
     expect(channels).toContain(CH.fsWrite)
     expect(channels).toContain(CH.fsRevealInExplorer)
+  })
+
+  /**
+   * 契约四方对账（review：测试假信心根治）。
+   * 通道契约实际是四方：CH 常量 / INVOKE_CHANNELS / **handler 注册表** / preload API。
+   * 以前只对账前三者中的两个，新增通道只加 CH + schema + preload 不写 handler，
+   * 所有测试照样全绿，渲染层 invoke 运行时才炸「No handler registered」。
+   * 这里把 handler 注册表也纳入集合相等断言，缺口立刻可见。
+   */
+  it('handler 注册表与 INVOKE_CHANNELS 集合相等（无断链、无重复注册）', () => {
+    const { wrapped } = register(makeCtx())
+    const registered = [...wrapped.keys()].sort()
+    const expected = [...INVOKE_CHANNELS].sort()
+    expect(registered).toEqual(expected)
+    // 防重复注册（Map 会静默覆盖，size 对不上才暴露）
+    expect(wrapped.size).toBe(INVOKE_CHANNELS.length)
+    expect(new Set(registered).size).toBe(registered.length)
   })
 
   it('config:get loads by fileKey', async () => {

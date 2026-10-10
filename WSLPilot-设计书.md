@@ -174,7 +174,7 @@ WSLPilot 要求三层同时达标：功能层是地基，行为层是好用的�
 | 文件监听    | **chokidar**                                              | 外部编辑器改动配置后热加载                                                                            |
 | 系统调用    | Node `execFile`（Buffer 模式）                            | 规避 shell 注入，UTF-16LE 解码                                                                        |
 | 注册表读取  | **registry-js** 或 `reg.exe` 封装                         | 读取 Lxss 深层信息                                                                                    |
-| 日志        | **pino**                                                  | 结构化文本日志（非数据库）                                                                            |
+| 日志        | **自研轻量 logger**（`@wslpilot/kit`）                    | 结构化 JSON 行文本日志、按天滚动、级别可控（非数据库）；如需可替换为 pino                             |
 | 测试        | **Vitest + @vue/test-utils + Playwright**                 | 单元/组件/E2E 全覆盖                                                                                  |
 | 打包        | **electron-builder**（NSIS + portable）                   | 安装包与免安装版                                                                                      |
 | 代码质量    | **ESLint + Prettier + Stylelint + commitlint + husky**    | 工程规范                                                                                              |
@@ -583,7 +583,6 @@ WSLPilot/
   "wsl": {
     "defaultShell": "",
     "autoShutdownAfterConfigChange": false,
-    "installSource": "store", // store | web
   },
   "terminal": {
     "fontFamily": "Cascadia Mono, Consolas, monospace",
@@ -843,7 +842,6 @@ export interface AppSettings {
   wsl: {
     defaultShell: string
     autoShutdownAfterConfigChange: boolean
-    installSource: 'store' | 'web'
   }
   terminal: {
     fontFamily: string
@@ -1620,7 +1618,7 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 核心便捷性组件，`Ctrl/⌘+K` 唤起：
 
 - 全屏半透明模糊遮罩，中央浮出玻璃拟态面板。
-- 输入即过滤，支持模糊匹配（Fuse.js）。
+- 输入即过滤，支持模糊匹配（自研打分 `@wslpilot/shared/fuzzy`：连续 / 词首 / 前缀 / 缺口，无第三方依赖）。
 - 结果分组：发行版、动作、导航、设置项。
 - 每项显示图标、标题、副标题、快捷键提示（Kbd）。
 - `↑↓` 导航，`Enter` 执行，`Esc` 关闭。
@@ -1724,7 +1722,7 @@ export interface AppError {
 
 ### 15.3 日志
 
-- `pino` 写结构化文本日志到 `logs/app-YYYYMMDD.log`，按天滚动。
+- `@wslpilot/kit` 的轻量 logger 写结构化 JSON 行日志到 `logs/app-YYYYMMDD.log`，按天滚动。
 - 级别由设置控制。
 - 提供"打开日志目录""导出诊断包"（打包近期日志 + 配置脱敏副本）。
 

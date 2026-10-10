@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { NButton, NSelect, NPopover } from 'naive-ui'
+import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { NButton, NInput, NPopover, NSelect } from 'naive-ui'
 import type { TerminalSession } from '../../stores/terminal'
 
 const props = defineProps<{
@@ -22,6 +22,12 @@ const emit = defineEmits<{
 const newDistro = ref(props.defaultDistro || '')
 
 const canCreate = computed(() => props.sessions.filter((s) => s.alive).length < props.maxSessions)
+
+/** 拖拽排序的 window 监听器清理（组件卸载时兜底，防泄漏 — review M-12） */
+const dragCleanups: Array<() => void> = []
+onUnmounted(() => {
+  while (dragCleanups.length > 0) dragCleanups.pop()!()
+})
 
 function onTabMouseDown(e: MouseEvent, index: number) {
   if (e.button === 1) {
@@ -48,14 +54,42 @@ function onTabMouseDown(e: MouseEvent, index: number) {
   const onUp = () => {
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
+    const i = dragCleanups.indexOf(cleanup)
+    if (i >= 0) dragCleanups.splice(i, 1)
+  }
+  const cleanup = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
   }
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
+  dragCleanups.push(cleanup)
 }
 
-function startRename(s: TerminalSession) {
-  const t = window.prompt('重命名标签', s.title)
-  if (t !== null) emit('rename', s.ptyId, t)
+/**
+ * 双击重命名：Electron 未实现 `window.prompt`（返回 undefined，旧实现还会因
+ * `title.trim()` 抛 TypeError），改为标签行内输入（review M-7 根治）。
+ */
+const renamingId = ref('')
+const renameDraft = ref('')
+
+async function startRename(s: TerminalSession) {
+  renamingId.value = s.ptyId
+  renameDraft.value = s.title
+  await nextTick()
+  const el = document.querySelector<HTMLInputElement>('.tab input.rename-input')
+  el?.focus()
+  el?.select()
+}
+
+function commitRename(s: TerminalSession) {
+  const t = renameDraft.value.trim()
+  renamingId.value = ''
+  if (t && t !== s.title) emit('rename', s.ptyId, t)
+}
+
+function cancelRename() {
+  renamingId.value = ''
 }
 
 function submitNew() {
@@ -84,7 +118,18 @@ function submitNew() {
         @keydown.space.prevent="emit('select', s.ptyId)"
       >
         <span class="dot" :class="{ on: s.alive }" />
-        <span class="label">{{ s.title }}</span>
+        <n-input
+          v-if="renamingId === s.ptyId"
+          v-model:value="renameDraft"
+          class="rename-input"
+          size="tiny"
+          :autosize="{ minRows: 1, maxRows: 1 }"
+          @click.stop
+          @blur="commitRename(s)"
+          @keyup.enter="commitRename(s)"
+          @keyup.esc="cancelRename"
+        />
+        <span v-else class="label">{{ s.title }}</span>
         <button class="close" :aria-label="`关闭 ${s.title}`" @click.stop="emit('close', s.ptyId)">
           ×
         </button>
@@ -163,6 +208,13 @@ function submitNew() {
 .tab.dead .label {
   opacity: 0.55;
   text-decoration: line-through;
+}
+
+.rename-input {
+  width: 110px;
+
+  --n-height: 22px !important;
+  --n-font-size: 12px !important;
 }
 
 .dot {

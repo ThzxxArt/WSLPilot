@@ -1,5 +1,5 @@
 import type { DistroRuntime, RegistryDetail } from '@wslpilot/shared'
-import type { Logger } from '@wslpilot/kit'
+import { decodeToolOutput, type Logger } from '@wslpilot/kit'
 
 /**
  * Lxss 注册表只读查询。
@@ -11,6 +11,12 @@ export interface RegistryService {
   /** 完整 Lxss 详情（M5 注册表详情：GUID / BasePath / Flags / 原始键值） */
   detailFull(name: string): Promise<RegistryDetail | null>
   listGuids(): Promise<Array<{ guid: string; distributionName: string }>>
+  /**
+   * 一次性读取全部发行版的深层信息（GUID / BasePath / DefaultUid / Version）。
+   * `distros:list` 用它补齐 `DistroRuntime`，否则迁移向导永远显示「注册表信息不可用」。
+   * 读取失败抛错，由调用方决定降级（§9.2：失败降级 undefined，不阻断主流程）。
+   */
+  listAll(): Promise<Array<Partial<DistroRuntime> & { name: string }>>
 }
 
 const LXSS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss'
@@ -96,9 +102,10 @@ export async function defaultRegQuery(args: string[]): Promise<string> {
     timeout: 5000,
     maxBuffer: 4 * 1024 * 1024,
   })
-  return Buffer.isBuffer(stdout)
-    ? stdout.toString('utf16le').replace(/\0/g, '')
-    : String(stdout ?? '')
+  // reg.exe 是控制台工具：重定向后按系统代码页输出，不是稳定 UTF-16LE。
+  // 硬编码 utf16le 在中文/英文 Windows 上会乱码 → pickRegValue 全部失配 →
+  // basePath/GUID 拿不到，连带迁移校验、进度估算一起失效（review M-8）。
+  return decodeToolOutput(stdout as unknown as Buffer)
 }
 
 export function createRegistryService(
@@ -137,17 +144,21 @@ export function createRegistryService(
     return guids
   }
 
+  async function listAll(): Promise<Array<Partial<DistroRuntime> & { name: string }>> {
+    const guids = await listGuids()
+    const out: Array<Partial<DistroRuntime> & { name: string }> = []
+    for (const g of guids) {
+      const info = await readGuid(g.guid)
+      if (info.name) out.push({ ...info, name: info.name })
+    }
+    return out
+  }
+
   return {
     async detail(name) {
-      const guids = await listGuids()
-      const lower = name.toLowerCase()
-      for (const g of guids) {
-        // 发行版名不区分大小写（review M11）
-        if (g.distributionName.toLowerCase() === lower) {
-          return readGuid(g.guid)
-        }
-      }
-      return {}
+      const lower = String(name ?? '').toLowerCase()
+      const all = await listAll()
+      return all.find((d) => d.name.toLowerCase() === lower) ?? {}
     },
 
     async detailFull(name) {
@@ -162,5 +173,6 @@ export function createRegistryService(
     },
 
     listGuids,
+    listAll,
   }
 }

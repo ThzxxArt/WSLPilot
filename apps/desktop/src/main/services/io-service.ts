@@ -96,6 +96,27 @@ export function assertSafeIoPath(input: string, label = '路径'): string {
   return resolve(expandEnv(s))
 }
 
+/**
+ * 生成一个**规范备份名**（`<name>_<YYYYMMDD-HHmmss>.<ext>`）且不与目录内现有文件冲突。
+ * 覆盖保护的保留副本必须用这个命名，才能被 listBackups / rotateBackups / cleanupBackups 认出来；
+ * 否则退化成永远删不掉也看不见的幽灵文件（review M-6 根治）。
+ */
+export function uniqueBackupName(
+  dir: string,
+  name: string,
+  format: BackupFormat,
+  at: Date = new Date(),
+  exists: (p: string) => boolean = existsSync,
+): string {
+  for (let i = 0; i < 1000; i++) {
+    const stamp = new Date(at.getTime() + i * 1000)
+    const candidate = join(dir, exportFileName(name, format, stamp))
+    if (!exists(candidate)) return candidate
+  }
+  // 理论不可达；兜底保证唯一（1000 秒内同名备份不现实）
+  return join(dir, exportFileName(name, format, new Date(at.getTime() + 86_400_000)))
+}
+
 // ─────────────────────── 服务实现 ───────────────────────
 
 export function createIoService(deps: IoServiceDeps): IoService {
@@ -219,11 +240,14 @@ export function createIoService(deps: IoServiceDeps): IoService {
     if (parent && !existsSync(parent)) {
       await fs.mkdir(parent, { recursive: true })
     }
-    // 已存在文件不静默覆盖：改名保留为 .bak-<ts>（安全网 — review M12）
+    // 已存在文件不静默覆盖：改名保留为**规范备份名**（安全网 — review M12）。
+    // 命名必须落进 `<name>_<stamp>.<ext>` 族，否则 listBackups / rotateBackups 全都看不见它，
+    // 磁盘会悄悄涨（review：`.bak-<ts>` 幽灵文件根治）。
+    let preserved: string | null = null
     if (existsSync(finalPath)) {
-      const backupName = `${finalPath}.bak-${Date.now()}`
+      preserved = await uniqueBackupName(parent, name, format)
       try {
-        await fs.rename(finalPath, backupName)
+        await fs.rename(finalPath, preserved)
       } catch (e) {
         // rename 失败（文件被占用等）必须中止，绝不动原文件（核验修复）
         throw createAppError('IO_ERROR', {
@@ -232,7 +256,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
           suggestion: '请关闭占用该文件的程序，或换一个导出路径',
         })
       }
-      ctl.log(`目标已存在，原文件已保留为 ${basename(backupName)}`)
+      ctl.log(`目标已存在，原文件已保留为 ${basename(preserved)}`)
     }
 
     const args = ['--export', name, finalPath, ...(format === 'vhd' ? ['--vhd'] : [])]
@@ -252,40 +276,63 @@ export function createIoService(deps: IoServiceDeps): IoService {
       ctl,
       `正在导出 ${name}`,
     )
+    /**
+     * 导出失败/取消的残局回滚：删掉半截归档、把保留的原文件还原回去。
+     * 否则用户在规范文件名下拿到的是截断归档（后续 import 必失败），
+     * 真备份被改名后还看不见 —— 静默毁数据（review C-2）。
+     */
+    const rollbackPartial = async (): Promise<void> => {
+      await fs.unlink(finalPath).catch(() => {})
+      if (preserved) {
+        await fs.rename(preserved, finalPath).catch((e: unknown) => {
+          logger.warn('restore preserved backup failed', {
+            from: preserved,
+            to: finalPath,
+            error: String(e),
+          })
+        })
+        preserved = null
+      }
+    }
     try {
-      await spawnTask(args, ctl)
+      try {
+        await spawnTask(args, ctl)
+      } catch (e) {
+        await rollbackPartial()
+        throw e
+      }
+      // spawnTask 成功 = 任务成功（成功优先语义，取消信号不再改判 — 核验修复）
+      const st = await fs.stat(finalPath).catch(() => null)
+      if (!st) {
+        await rollbackPartial()
+        throw createAppError('IO_ERROR', {
+          message: '导出结束但未找到输出文件',
+          detail: finalPath,
+          rawCommand: getRawCommand('wsl.exe', args),
+        })
+      }
+
+      ctl.report(100, '导出完成')
+      ctl.log(`导出完成：${finalPath}（${formatBytes(st.size)}）`)
+
+      // 备份轮转（设计书 §12.7 保留数量）——保留副本已是规范名，自然进轮转
+      const keep = backupSettings().keepRecent
+      try {
+        const removed = await rotateBackups(parent, name, keep)
+        if (removed > 0) ctl.log(`备份轮转：已清理 ${removed} 份旧备份（保留最近 ${keep} 份）`)
+      } catch (e) {
+        logger.warn('rotate backups failed', { error: String(e) })
+      }
+
+      return {
+        name: basename(finalPath),
+        path: finalPath,
+        sizeBytes: st.size,
+        modifiedAt: st.mtime.toISOString(),
+        format,
+      }
     } finally {
       stop()
-    }
-    // spawnTask 成功 = 任务成功（成功优先语义，取消信号不再改判 — 核验修复）
-
-    const st = await fs.stat(finalPath).catch(() => null)
-    if (!st) {
-      throw createAppError('IO_ERROR', {
-        message: '导出结束但未找到输出文件',
-        detail: finalPath,
-        rawCommand: getRawCommand('wsl.exe', args),
-      })
-    }
-
-    ctl.report(100, '导出完成')
-    ctl.log(`导出完成：${finalPath}（${formatBytes(st.size)}）`)
-
-    // 备份轮转（设计书 §12.7 保留数量）
-    const keep = backupSettings().keepRecent
-    try {
-      const removed = await rotateBackups(dirname(finalPath), name, keep)
-      if (removed > 0) ctl.log(`备份轮转：已清理 ${removed} 份旧备份（保留最近 ${keep} 份）`)
-    } catch (e) {
-      logger.warn('rotate backups failed', { error: String(e) })
-    }
-
-    return {
-      name: basename(finalPath),
-      path: finalPath,
-      sizeBytes: st.size,
-      modifiedAt: st.mtime.toISOString(),
-      format,
     }
   }
 
@@ -453,13 +500,32 @@ export function createIoService(deps: IoServiceDeps): IoService {
         suggestion: '请先创建该目录，或选择已存在的位置',
       })
     }
-    const detail = await registry.detail(name).catch(() => ({}) as { basePath?: string })
+    // 注册表读不到当前位置就**不能**做安全校验：静默跳过等于把破坏性操作当安全（review M-7）
+    const detail = await registry.detail(name).catch((e: unknown) => {
+      throw createAppError('IO_ERROR', {
+        message: `无法读取 ${name} 的当前位置，迁移已中止`,
+        detail: e instanceof Error ? e.message : String(e),
+        suggestion: '请确认 WSL 服务（LxssManager）正常后重试',
+      })
+    })
+    if (!detail.basePath) {
+      throw createAppError('IO_ERROR', {
+        message: `注册表中没有 ${name} 的安装位置，迁移已中止`,
+        suggestion: '请先启动一次该发行版，或检查注册表 Lxss 项是否完整',
+      })
+    }
     // Windows 路径比较：大小写与分隔符归一（review M20）
     const norm = (s: string) => resolve(s).toLowerCase().replace(/\//g, '\\')
-    if (detail.basePath && norm(detail.basePath) === norm(newPath)) {
+    const from = norm(detail.basePath)
+    const to = norm(newPath)
+    const isSame = from === to
+    // 同样拒绝「包含关系」：把发行版移进自己的子目录（或反过来）会毁掉 vhdx
+    const isNested = to.startsWith(`${from}\\`) || from.startsWith(`${to}\\`)
+    if (isSame || isNested) {
       throw createAppError('IO_ERROR', {
-        message: '迁移目标与当前位置相同',
-        suggestion: '请选择不同的磁盘位置',
+        message: isSame ? '迁移目标与当前位置相同' : '迁移目标与当前位置存在包含关系，无法安全迁移',
+        detail: `当前：${detail.basePath} → 目标：${newPath}`,
+        suggestion: '请选择既不相同也不互为子目录的磁盘位置',
       })
     }
 

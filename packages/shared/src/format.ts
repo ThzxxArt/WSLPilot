@@ -46,3 +46,45 @@ export function stateLabel(s: string): string {
       return s || '未知'
   }
 }
+
+/**
+ * 发行版图标 → emoji（`distros.jsonc` 的 `DistroMeta.icon` 唯一消费点）。
+ * 此前该字段「能写不能看」：详情页可编辑但卡片永远显示 🐧（幽灵字段根治）。
+ */
+const ICON_EMOJI: Record<string, string> = {
+  ubuntu: '🐧',
+  debian: '🌀',
+  fedora: '🎩',
+  alpine: '🏔️',
+  arch: '⛰️',
+  manjaro: '🌿',
+  opensuse: '🦎',
+  suse: '🦎',
+  kali: '🐉',
+  mint: '🍃',
+  raspbian: '🍓',
+  oracle: '🔴',
+  rocky: '🪨',
+  alma: '⚪',
+  centos: '💠',
+  gentoo: '🦊',
+  void: '⬛',
+  nixos: '❄️',
+  docker: '🐳',
+  linux: '🐧',
+}
+
+/**
+ * 解析图标：`meta.icon` 优先（显式声明压过推断），其次发行版名前缀，最后 🐧。
+ * 未识别的图标名回退 🐧，不抛错。
+ */
+export function distroIconEmoji(icon?: string, name?: string): string {
+  const pick = (s: string | undefined): string | undefined => {
+    const key = String(s ?? '')
+      .trim()
+      .toLowerCase()
+      .split(/[-_\s]/)[0]
+    return key ? ICON_EMOJI[key] : undefined
+  }
+  return pick(icon) ?? pick(name) ?? '🐧'
+}

@@ -134,7 +134,9 @@ const canNext = computed(() => {
   if (step.value === 1) {
     if (mode.value === 'export') return !!exportForm.value.name
     if (mode.value === 'move') return !!moveForm.value.name
-    return !!importForm.value.name.trim()
+    // 导入：名称非空且不与现有发行版重名（重名在第 2 步也会被 validateCurrent 拦）
+    const n = importForm.value.name.trim()
+    return !!n && !distros.items.some((d) => d.name === n)
   }
   if (step.value === 2) return validateCurrent() === null
   return true
@@ -144,7 +146,13 @@ const needAck = computed(() => mode.value === 'move' && settings.confirmDestruct
 
 function validateCurrent(): string | null {
   if (mode.value === 'export') return validateExportForm(exportForm.value)
-  if (mode.value === 'import') return validateImportForm(importForm.value)
+  if (mode.value === 'import') {
+    // 重名硬拦截：否则 wsl --import 会在长任务里才报同名冲突（review M-11）
+    return validateImportForm(
+      importForm.value,
+      distros.items.map((d) => d.name),
+    )
+  }
   return validateMoveForm(moveForm.value)
 }
 
@@ -271,8 +279,10 @@ async function refreshBackups() {
 }
 
 onMounted(() => {
-  // 默认格式跟随设置（§12.7 备份默认值）
+  // 默认格式跟随设置（§12.7 备份默认值）——导入同样跟随，
+  // 否则「默认格式」设置只对导出半生效（review 幽灵配置根治）
   exportForm.value = { ...DEFAULT_EXPORT_FORM, format: settings.backupFormat }
+  importForm.value = { ...DEFAULT_IMPORT_FORM, format: settings.backupFormat }
   void distros.refresh()
   void refreshBackups()
 })

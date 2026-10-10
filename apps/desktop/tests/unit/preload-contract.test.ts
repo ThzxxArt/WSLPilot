@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 /**
  * preload 契约测试（review C4 根治）：
@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  * 2) 参数形状能通过 IPC_SCHEMAS 校验（与 ipc-schema 零漂移）
  * 3) 事件订阅/退订闭环
  */
-const invoke = vi.fn(async (..._args: unknown[]) => undefined)
+const invoke = vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const on = vi.fn((..._args: unknown[]) => undefined)
 const removeListener = vi.fn((..._args: unknown[]) => undefined)
 let exposed: Record<string, any> = {}
@@ -28,18 +28,41 @@ vi.mock('electron', () => ({
 const { CH, parseIpcArgs } = await import('@wslpilot/shared')
 await import('../../src/preload/index')
 
+/** invoke 透传哨兵：用于断言 preload 方法把结果 return 出来（丢 return 也是回归） */
+const PASSTHROUGH = { __passthrough__: true } as const
+
+/** 非直接透传的方法（内部做了形状变换），单独断言变换结果 */
+const DERIVED = new Set(['actions.list', 'network.listRules', 'network.getProxy'])
+
+/** 待校验的返回值（afterEach 统一 await，避免把每个用例改 async） */
+const pendingResults: Array<{ path: string; result: unknown }> = []
+
 beforeEach(() => {
   vi.clearAllMocks()
+  invoke.mockResolvedValue(PASSTHROUGH)
 })
 
-/** 调用一个 preload 方法并校验其 invoke 契约 */
+afterEach(async () => {
+  const batch = pendingResults.splice(0)
+  for (const { path, result } of batch) {
+    if (DERIVED.has(path)) continue
+    // 丢掉 return 会让 result 变成 undefined —— 这里必须红（review：测试假信心根治）
+    await expect(result, `${path} 应透传 invoke 返回值`).resolves.toBe(PASSTHROUGH)
+  }
+})
+
+/**
+ * 调用一个 preload 方法并校验其 invoke 契约：
+ * 1) 通道名正确 2) 参数过 ipc-schema 校验 3) 返回值透传
+ */
 function callAndCheck(
   path: string,
   fn: () => Promise<unknown>,
   expectedChannel: string,
   ...expectedArgs: unknown[]
 ): void {
-  void fn()
+  const result = fn()
+  pendingResults.push({ path, result })
   expect(invoke, `${path} 应调用 ${expectedChannel}`).toHaveBeenCalledWith(
     expectedChannel,
     ...expectedArgs,
@@ -51,6 +74,48 @@ function callAndCheck(
 }
 
 describe('preload 契约', () => {
+  it('exposed API 面与契约清单零漂移', () => {
+    // 新增 preload 域/方法而不补契约测试时，本用例必须红
+    expect(Object.keys(exposed).sort()).toEqual(
+      [
+        'actions',
+        'app',
+        'config',
+        'devices',
+        'distros',
+        'fs',
+        'io',
+        'meta',
+        'metrics',
+        'network',
+        'task',
+        'terminal',
+        'wslconf',
+      ].sort(),
+    )
+    expect(Object.keys(exposed.config).sort()).toEqual(
+      ['get', 'onChanged', 'onConflict', 'openExternal', 'resolveConflict', 'set'].sort(),
+    )
+    expect(Object.keys(exposed.network).sort()).toEqual(
+      [
+        'apply',
+        'applyAll',
+        'getProxy',
+        'listRules',
+        'proxyApply',
+        'proxyClear',
+        'proxyState',
+        'remove',
+        'saveProxy',
+        'saveRules',
+        'status',
+      ].sort(),
+    )
+    expect(Object.keys(exposed.devices).sort()).toEqual(
+      ['attach', 'bind', 'detach', 'list', 'status', 'unbind'].sort(),
+    )
+  })
+
   it('config 域通道与参数形状', () => {
     callAndCheck('config.get', () => exposed.config.get('settings'), CH.configGet, 'settings')
     callAndCheck(

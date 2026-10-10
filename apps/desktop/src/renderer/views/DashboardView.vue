@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NPopconfirm, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useDistrosStore } from '../stores/distros'
@@ -53,10 +53,16 @@ onMounted(() => {
     .catch(() => {})
 })
 
-const { start: startPolling } = usePolling(() => void refreshAll(), {
+const { start: startPolling, stop: stopPolling } = usePolling(() => void refreshAll(), {
   intervalMs: pollInterval,
 })
-startPolling()
+// settings.general.autoRefreshOnStart 必须真正关掉轮询：
+// 早期实现只挡首刷，提示语「关闭后仅在手动点击刷新时查询」不成立（review M-2 根治）
+watch(
+  () => settings.autoRefreshOnStart,
+  (on) => (on ? startPolling() : stopPolling()),
+  { immediate: true },
+)
 
 const memLabel = computed(() => metrics.memLabel)
 

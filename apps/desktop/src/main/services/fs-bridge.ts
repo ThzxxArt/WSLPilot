@@ -210,12 +210,15 @@ export function createFsBridge(deps: FsBridgeDeps): FsBridge {
       try {
         const size = Math.min(st.size, READ_LIMIT)
         const buf = Buffer.alloc(size)
-        if (size > 0) await fh.read(buf, 0, size, 0)
-        if (isBinary(buf)) {
+        // 9p/UNC 会短读（stat 与 read 之间文件还可能被截断）：
+        // 必须按 bytesRead 裁剪，否则尾部补零会把纯文本误判成二进制（review M-9）
+        const bytesRead = size > 0 ? (await fh.read(buf, 0, size, 0)).bytesRead : 0
+        const body = buf.subarray(0, bytesRead)
+        if (isBinary(body)) {
           return { text: '', sizeBytes: st.size, truncated, binary: true }
         }
         return {
-          text: buf.toString('utf8'),
+          text: body.toString('utf8'),
           sizeBytes: st.size,
           truncated,
           binary: false,

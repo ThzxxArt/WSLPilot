@@ -211,8 +211,9 @@ describe('NetworkService.findRule', () => {
 })
 
 describe('NetworkService.applyRule / removeRule', () => {
-  it('应用 TCP 规则生成 netsh 参数数组', async () => {
-    const tool = makeTool([{ code: 0 }])
+  it('应用 TCP 规则生成 netsh 参数数组（先查后加，幂等）', async () => {
+    // 第一次调用是 `show all`（幂等检查），第二次才是 add
+    const tool = makeTool([{ code: 0, stdout: '' }, { code: 0 }])
     const svc = createNetworkService({
       logger: logger(),
       configService: configReader(),
@@ -221,7 +222,8 @@ describe('NetworkService.applyRule / removeRule', () => {
     const ctl = makeCtl()
     await svc.applyRule('dev-3000', ctl)
     expect(tool.calls[0]!.program).toBe('netsh.exe')
-    expect(tool.calls[0]!.args).toEqual([
+    expect(tool.calls[0]!.args).toEqual(['interface', 'portproxy', 'show', 'all'])
+    expect(tool.calls[1]!.args).toEqual([
       'interface',
       'portproxy',
       'add',
@@ -233,6 +235,22 @@ describe('NetworkService.applyRule / removeRule', () => {
     ])
     expect(ctl.log).toHaveBeenCalledWith(expect.stringContaining('netsh.exe'))
     expect(ctl.report).toHaveBeenCalledWith(100, expect.stringContaining('dev-3000'))
+  })
+
+  it('已存在监听时先 delete 再 add（改端口不残留）', async () => {
+    const tool = makeTool([
+      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 3000' },
+      { code: 0 },
+      { code: 0 },
+    ])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runTool: tool.fn,
+    })
+    const ctl = makeCtl()
+    await svc.applyRule('dev-3000', ctl)
+    expect(tool.calls.map((c) => c.args[2])).toEqual(['show', 'delete', 'add'])
   })
 
   it('UDP 规则拒绝应用并给出建议', async () => {
@@ -272,8 +290,8 @@ describe('NetworkService.applyRule / removeRule', () => {
     })
   })
 
-  it('removeRule 生成 delete 命令', async () => {
-    const tool = makeTool([{ code: 0 }])
+  it('removeRule 生成 delete 命令（系统有该监听时）', async () => {
+    const tool = makeTool([{ code: 0, stdout: '0.0.0.0 3000 127.0.0.1 3000' }, { code: 0 }])
     const svc = createNetworkService({
       logger: logger(),
       configService: configReader(),
@@ -281,7 +299,7 @@ describe('NetworkService.applyRule / removeRule', () => {
     })
     const ctl = makeCtl()
     await svc.removeRule('dev-3000', ctl)
-    expect(tool.calls[0]!.args).toEqual([
+    expect(tool.calls[1]!.args).toEqual([
       'interface',
       'portproxy',
       'delete',
@@ -291,11 +309,25 @@ describe('NetworkService.applyRule / removeRule', () => {
     ])
     expect(ctl.report).toHaveBeenCalledWith(100, expect.stringContaining('dev-3000'))
   })
+
+  it('removeRule 幂等：系统中无该监听时直接成功', async () => {
+    const tool = makeTool([{ code: 0, stdout: '' }])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runTool: tool.fn,
+    })
+    const ctl = makeCtl()
+    await svc.removeRule('dev-3000', ctl)
+    // 只有 show 一次，没有 delete
+    expect(tool.calls).toHaveLength(1)
+    expect(ctl.report).toHaveBeenCalledWith(100, expect.stringContaining('已无该监听'))
+  })
 })
 
 describe('NetworkService.applyAll', () => {
   it('跳过 UDP 与停用规则，只应用启用中的 TCP', async () => {
-    const tool = makeTool([{ code: 0 }])
+    const tool = makeTool([{ code: 0, stdout: '' }, { code: 0 }])
     const svc = createNetworkService({
       logger: logger(),
       configService: configReader(),
@@ -303,8 +335,9 @@ describe('NetworkService.applyAll', () => {
     })
     const ctl = makeCtl()
     await svc.applyAll(ctl)
-    expect(tool.calls).toHaveLength(1)
-    expect(tool.calls[0]!.args).toContain('listenport=3000')
+    // show 一次 + add 一次
+    expect(tool.calls).toHaveLength(2)
+    expect(tool.calls[1]!.args).toContain('listenport=3000')
     expect(ctl.log).toHaveBeenCalledWith(expect.stringContaining('跳过 UDP 规则 udp-rule'))
     expect(ctl.report).toHaveBeenCalledWith(100, expect.stringContaining('成功 1 条'))
   })
@@ -323,8 +356,17 @@ describe('NetworkService.applyAll', () => {
   })
 
   it('失败项聚合后抛出汇总错误', async () => {
-    const tool = makeTool([{ code: 1, stderr: '拒绝访问' }, { code: 0 }])
-    const twoRules = RULES.filter((r) => r.protocol === 'tcp' && r.enabled)
+    const twoRules = [
+      { ...RULES[0]!, id: 'a-1', listenPort: 3000 },
+      { ...RULES[0]!, id: 'a-2', listenPort: 3001, connectPort: 3001 },
+    ]
+    // 两条规则的 add 都失败（show 正常）
+    const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 1, stderr: '拒绝访问' },
+      { code: 0, stdout: '' },
+      { code: 1, stderr: '拒绝访问' },
+    ])
     const svc = createNetworkService({
       logger: logger(),
       configService: configReader(twoRules),
@@ -333,7 +375,7 @@ describe('NetworkService.applyAll', () => {
     await expect(svc.applyAll(makeCtl())).rejects.toMatchObject({
       code: 'TASK_FAILED',
     })
-    expect(tool.calls).toHaveLength(1)
+    expect(tool.calls).toHaveLength(4)
   })
 
   it('取消时中断后续应用', async () => {
@@ -355,9 +397,9 @@ describe('NetworkService.applyAll', () => {
       },
     })
     await expect(svc.applyAll(ctl)).rejects.toThrow(/canceled/)
-    // 只跑了第一条（启用中的 TCP），后续规则因取消未继续
+    // 第一条规则：show（触发取消信号）→ add 前的 throwIfCanceled 抛出，不再往下
     expect(calls).toHaveLength(1)
-    expect(calls[0]).toContain('listenport=3000')
+    expect(calls[0]).toContain('show')
   })
 })
 

@@ -6,6 +6,7 @@ import { createLogger, type Logger } from '@wslpilot/kit'
 import { APP_NAME, CH, type TaskProgress } from '@wslpilot/shared'
 import { createMainWindow } from './window/main-window'
 import { decideClose } from './window/close-policy'
+import { makeWindowOpenHandler, makeWillNavigateHandler } from './window/navigation-guard'
 import { createTray } from './tray/tray'
 import { createWslService } from './services/wsl-service'
 import { createRegistryService } from './services/registry-service'
@@ -87,29 +88,24 @@ if (!gotLock) {
     if (win && !win.isDestroyed()) {
       win.show()
       win.focus()
+      return
     }
+    // 窗口被销毁后重建（review M-12）：macOS dock / 二次唤起都走这里
+    void ensureWindowRef?.()
   })
 
   // 安全基线：禁止新建窗口；http(s) 导航转系统浏览器，其余拦截（review M23）
   app.on('web-contents-created', (_e, contents) => {
-    contents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://') || url.startsWith('http://')) {
-        void shell.openExternal(url)
-      }
-      return { action: 'deny' }
-    })
-    contents.on('will-navigate', (event, url) => {
-      event.preventDefault()
-      if (url.startsWith('https://') || url.startsWith('http://')) {
-        void shell.openExternal(url)
-      }
-    })
+    contents.setWindowOpenHandler(makeWindowOpenHandler(shell))
+    contents.on('will-navigate', makeWillNavigateHandler(shell))
   })
 
   app.setName(APP_NAME)
 }
 
 let mainWindow: BrowserWindow | null = null
+/** 窗口重建入口（bootstrap 装配；activate 事件在 bootstrap 之前注册 — review M-12） */
+let ensureWindowRef: (() => Promise<BrowserWindow | null>) | null = null
 
 async function bootstrap() {
   Menu.setApplicationMenu(null)
@@ -133,28 +129,6 @@ async function bootstrap() {
   }
   applySettingsSideEffects()
   configService.onChange('settings', applySettingsSideEffects)
-
-  mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
-
-  // close 决策必须同步（preventDefault 只在同步派发期有效）。
-  // 必须在 loadURL 之前注册，否则 loadURL 挂起期间关闭窗口会失去拦截（review M24）
-  mainWindow.on('close', (e) => {
-    const s = configService.loadSync('settings')
-    const decision = decideClose(s.general.closeBehavior, isQuitting())
-    if (decision.action === 'hide') {
-      e.preventDefault()
-      mainWindow?.hide()
-      return
-    }
-    if (decision.action === 'quit') {
-      // 用户选择「关闭即退出」
-      markQuitting()
-      app.quit()
-    }
-  })
 
   const wsl = createWslService(logger)
   const registry = createRegistryService(logger)
@@ -225,16 +199,11 @@ async function bootstrap() {
     { wsl, registry, pty, io, tasks, wslconf, runner, fsBridge, network, devices },
   )
 
-  createTray({
-    getMainWindow: () => mainWindow,
-    logger,
-    configService,
-  })
-
-  await mainWindow.loadURL(
-    process.env.VITE_DEV_SERVER_URL ?? `file://${join(__dirname, '../renderer/index.html')}`,
-  )
-
+  /**
+   * 退出清理必须**先于** loadURL/托盘注册：
+   * loadURL 挂起期间用户退出（或 bootstrap 失败 app.quit()）也要能取消任务、
+   * 杀终端、落盘配置（review M-11）。
+   */
   app.on('will-quit', (e) => {
     if (!isQuitting()) return
     // 先同步取消任务与终端，再等待写队列落盘（review M25）
@@ -249,6 +218,57 @@ async function bootstrap() {
         app.exit(0)
       })
   })
+
+  /** 主窗口生命周期（close 决策 / closed 置空）——重建后也要重挂 */
+  const attachWindowLifecycle = (): void => {
+    const win = mainWindow
+    if (!win) return
+    win.on('closed', () => {
+      mainWindow = null
+    })
+    // close 决策必须同步（preventDefault 只在同步派发期有效）。
+    // 必须在 loadURL 之前注册，否则 loadURL 挂起期间关闭窗口会失去拦截（review M24）
+    win.on('close', (e) => {
+      const s = configService.loadSync('settings')
+      const decision = decideClose(s.general.closeBehavior, isQuitting())
+      if (decision.action === 'hide') {
+        e.preventDefault()
+        win.hide()
+        return
+      }
+      if (decision.action === 'quit') {
+        // 用户选择「关闭即退出」
+        markQuitting()
+        app.quit()
+      }
+    })
+  }
+
+  /** 窗口被销毁后重建（托盘点击 / activate 兜底 — review M-12） */
+  const ensureWindow = async (): Promise<BrowserWindow | null> => {
+    if (mainWindow && !mainWindow.isDestroyed()) return mainWindow
+    mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
+    attachWindowLifecycle()
+    await mainWindow.loadURL(
+      process.env.VITE_DEV_SERVER_URL ?? `file://${join(__dirname, '../renderer/index.html')}`,
+    )
+    return mainWindow
+  }
+  ensureWindowRef = ensureWindow
+
+  mainWindow = await createMainWindow(join(__dirname, '../preload/index.js'), configService)
+  attachWindowLifecycle()
+
+  createTray({
+    getMainWindow: () => mainWindow,
+    ensureWindow,
+    logger,
+    configService,
+  })
+
+  await mainWindow.loadURL(
+    process.env.VITE_DEV_SERVER_URL ?? `file://${join(__dirname, '../renderer/index.html')}`,
+  )
 
   logger.info('window ready')
 }

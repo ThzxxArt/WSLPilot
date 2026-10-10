@@ -1,6 +1,7 @@
 import { BrowserWindow, screen, shell } from 'electron'
 import { join } from 'node:path'
 import type { ConfigService } from '../services/config-service'
+import { makeWindowOpenHandler } from './navigation-guard'
 
 export interface WindowState {
   width: number
@@ -101,13 +102,8 @@ export async function createMainWindow(
   win.on('unmaximize', persistState)
   win.on('closed', clearSaveTimer)
 
-  // 外部链接：仅允许 http/https，且用系统浏览器打开
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) {
-      void shell.openExternal(url)
-    }
-    return { action: 'deny' }
-  })
+  // 外部链接：仅允许 http/https，且用系统浏览器打开（与 index.ts 共用同一守卫）
+  win.webContents.setWindowOpenHandler(makeWindowOpenHandler(shell))
 
   return win
 }

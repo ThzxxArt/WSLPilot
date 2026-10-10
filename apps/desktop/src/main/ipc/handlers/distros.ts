@@ -27,7 +27,28 @@ export function registerDistroHandlers(
   add(CH.distrosList, async (c): Promise<DistroView[]> => {
     const metaFile = await c.configService.load('distros')
     const metaMap = new Map(metaFile.distros.map((d) => [d.name, d]))
-    return wsl.listWithMeta(metaMap)
+    const views = await wsl.listWithMeta(metaMap)
+    // 补齐 Lxss 深层信息（GUID/BasePath/DefaultUid）——`wsl -l -v` 本就不含这些字段。
+    // 不补齐的话迁移向导会永远显示「注册表信息不可用」，而信息其实是可得的（review C-1）。
+    // 失败降级不阻断（设计书 §9.2：读取失败降级为 undefined）。
+    try {
+      const deep = await registry.listAll()
+      const byName = new Map(deep.map((d) => [d.name.toLowerCase(), d]))
+      return views.map((v) => {
+        // 发行版名不区分大小写（review M11）
+        const extra = byName.get(v.name.toLowerCase())
+        if (!extra) return v
+        return {
+          ...v,
+          guid: extra.guid ?? v.guid,
+          basePath: extra.basePath ?? v.basePath,
+          defaultUid: extra.defaultUid ?? v.defaultUid,
+        }
+      })
+    } catch (e) {
+      c.logger.warn('registry enrich failed, deep info unavailable', { error: String(e) })
+      return views
+    }
   })
 
   add(CH.distrosStart, async (_c, name: string) => {

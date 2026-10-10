@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { NButton, NDropdown, NTag } from 'naive-ui'
 import StatusDot from './StatusDot.vue'
-import { stateLabel, type DistroView } from '@wslpilot/shared'
+import { stateLabel, distroIconEmoji, type DistroView } from '@wslpilot/shared'
 import { distroBrandColors } from '../tokens'
 
 const props = withDefaults(
@@ -32,6 +32,8 @@ const brandColor = computed(() => {
 
 const isRunning = computed(() => props.distro.state === 'Running')
 const displayName = computed(() => props.distro.meta?.alias || props.distro.name)
+/** `meta.icon` 真正生效（此前该字段写入即失效 — 幽灵字段根治） */
+const iconEmoji = computed(() => distroIconEmoji(props.distro.meta?.icon, props.distro.name))
 
 const stateText = computed(() => stateLabel(props.distro.state))
 
@@ -62,7 +64,7 @@ function onMore(key: string) {
     <div class="brand-bar" />
     <header class="head">
       <div class="title-row">
-        <span class="icon">🐧</span>
+        <span class="icon">{{ iconEmoji }}</span>
         <div class="names">
           <div class="name">
             {{ displayName }}

@@ -7,6 +7,11 @@ import { markQuitting } from '../app-state'
 
 export interface TrayOptions {
   getMainWindow: () => BrowserWindow | null
+  /**
+   * 主窗口被销毁后的重建入口（渲染进程崩溃 / 外部销毁）。
+   * 没有它，应用会变成「有托盘、开不出窗口」的僵尸（review M-12）。
+   */
+  ensureWindow?: () => Promise<BrowserWindow | null>
   logger: Logger
   configService: ConfigService
 }
@@ -40,20 +45,25 @@ export function createTray(opts: TrayOptions): Tray {
   tray = new Tray(icon)
   tray.setToolTip('WSLPilot — WSL 的驾驶舱')
 
-  const showWindow = () => {
-    const win = opts.getMainWindow()
-    if (!win) return
+  const showWindow = async (): Promise<BrowserWindow | null> => {
+    let win = opts.getMainWindow()
+    if (!win || win.isDestroyed()) {
+      // 窗口被销毁：走重建入口，否则托盘点击静默无效（review M-12）
+      win = (await opts.ensureWindow?.()) ?? null
+    }
+    if (!win || win.isDestroyed()) return null
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()
+    return win
   }
 
   const navigate = (path: string) => {
-    showWindow()
-    const win = opts.getMainWindow()
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(CH.appNavigate, path)
-    }
+    void showWindow().then((win) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(CH.appNavigate, path)
+      }
+    })
   }
 
   /** 菜单按 settings 现值构建；勾选后写回 settings（主进程同步系统登录项） */

@@ -8,6 +8,7 @@
  */
 import {
   assertSafeBusId,
+  assertSafeDistroName,
   buildUsbipdArgs,
   createAppError,
   parseUsbipdList,
@@ -47,7 +48,7 @@ function mapUsbipdFailure(
   r: { stdout: string; stderr: string; code: number },
   rawCommand: string,
   message: string,
-  op: UsbipdOp,
+  op: UsbipdOp | 'list',
 ): never {
   const text = `${r.stderr}\n${r.stdout}`
   if (isToolMissing(text)) {
@@ -66,6 +67,15 @@ function mapUsbipdFailure(
       suggestion: '请以管理员身份运行 WSLPilot，或在管理员终端中执行上述命令',
     })
   }
+  if (op === 'list') {
+    // list 失败不该给 detach 语境的建议（review M-14）
+    throw createAppError('TASK_FAILED', {
+      message,
+      detail: text.trim(),
+      rawCommand,
+      suggestion: '请确认 usbipd 服务正在运行（services.msc → USBIPD），或重新插拔设备后重试',
+    })
+  }
   throw createAppError('TASK_FAILED', {
     message,
     detail: text.trim(),
@@ -77,15 +87,28 @@ function mapUsbipdFailure(
   })
 }
 
+/** 参数不被识别（不同 usbipd 版本的 CLI 选项集不同） */
+export function isUnknownOptionError(e: unknown): boolean {
+  const detail =
+    e && typeof e === 'object' && 'detail' in e
+      ? String((e as { detail?: string }).detail ?? '')
+      : ''
+  const message = e instanceof Error ? e.message : ''
+  return /unknown|unrecognized|invalid (option|argument)|unexpected|未知|无法识别/i.test(
+    `${message}\n${detail}`,
+  )
+}
+
 export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
   const logger = deps.logger
   const tool: RunToolFn = deps.runTool ?? runTool
 
   async function runOp(op: UsbipdOp, busId: string, distro?: string): Promise<void> {
     const id = assertSafeBusId(busId)
-    const args = buildUsbipdArgs(op, id, distro)
-    const rawCommand = previewUsbipdCommand(op, id, distro)
-    logger.info('usbipd op', { op, busId: id, distro })
+    const target = distro?.trim() ? assertSafeDistroName(distro) : undefined
+    const args = buildUsbipdArgs(op, id, target)
+    const rawCommand = previewUsbipdCommand(op, id, target)
+    logger.info('usbipd op', { op, busId: id, distro: target })
     const r = await tool('usbipd.exe', args, { timeoutMs: 30_000 })
     if (r.code !== 0) mapUsbipdFailure(r, rawCommand, `usbipd ${op} 失败（${id}）`, op)
   }
@@ -118,7 +141,7 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
         })
       }
       if (r.code !== 0) {
-        mapUsbipdFailure(r, 'usbipd.exe list', '读取 USB 设备列表失败', 'bind')
+        mapUsbipdFailure(r, 'usbipd.exe list', '读取 USB 设备列表失败', 'list')
       }
       return parseUsbipdList(r.stdout)
     },
@@ -142,7 +165,20 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
     },
 
     async attach(busId, distro) {
-      await runOp('attach', busId, distro)
+      const id = assertSafeBusId(busId)
+      const target = distro?.trim() ? assertSafeDistroName(distro) : undefined
+      try {
+        await runOp('attach', id, target)
+      } catch (e) {
+        // usbipd 各版本 CLI 选项集不同：`--distribution` 并非处处存在。
+        // 直接失败会让「指定发行版附加」100% 不可用，退回默认发行版再试一次（review M-14 根治）。
+        if (target && isUnknownOptionError(e)) {
+          logger.warn('attach --distribution unsupported, retrying default distro', { busId: id })
+          await runOp('attach', id, undefined)
+          return
+        }
+        throw e
+      }
     },
 
     async detach(busId) {

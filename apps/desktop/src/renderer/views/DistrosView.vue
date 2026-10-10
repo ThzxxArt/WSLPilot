@@ -47,7 +47,15 @@ const pollInterval = computed(() => {
   return typeof ms === 'number' && ms >= 1000 ? ms : DEFAULT_POLL_INTERVAL_MS
 })
 
-usePolling(() => void distros.refresh(), { intervalMs: pollInterval }).start()
+const { start: startPolling, stop: stopPolling } = usePolling(() => void distros.refresh(), {
+  intervalMs: pollInterval,
+})
+// settings.general.autoRefreshOnStart 必须真正关掉轮询（review M-2 根治）
+watch(
+  () => settings.autoRefreshOnStart,
+  (on) => (on ? startPolling() : stopPolling()),
+  { immediate: true },
+)
 
 const tagOptions = computed(() => {
   const set = new Set<string>()

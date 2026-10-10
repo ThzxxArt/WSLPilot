@@ -8,7 +8,7 @@
 | ------------------------------------ | --------------------------------------- | --------------------------- | ------------------------------ |
 | `general.autoRefreshOnStart`         | boolean                                 | `true`                      | 启动时自动刷新                 |
 | `general.pollIntervalMs`             | number                                  | `5000`                      | 轮询间隔（1000–60000）         |
-| `general.locale`                     | `system\|zh-CN\|en-US`                  | `system`                    | 界面语言                       |
+| `general.locale`                     | `system\|zh-CN\|en-US`                  | `system`                    | 组件语言（界面文案暂仅中文）   |
 | `general.theme`                      | `light`                                 | `light`                     | 固定浅色                       |
 | `general.accent`                     | `aurora\|sunset\|ocean\|forest\|custom` | `aurora`                    | 强调色                         |
 | `general.closeBehavior`              | `minimizeToTray\|quit`                  | `minimizeToTray`            | 关闭行为                       |

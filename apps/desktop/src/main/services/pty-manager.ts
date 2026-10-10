@@ -127,6 +127,22 @@ export function createPtyManager(
 
   /** 会话退出等待者（动作 runner 监控临时 PTY 退出 — M5） */
   const exitWaiters = new Map<string, Set<(code: number) => void>>()
+  /**
+   * 已退出会话的退出码缓存。
+   * 会话退出即从 sessions 删除，`waitExit` 若只查 sessions 会对"已退出"一律 reject，
+   * 而调用方（动作 runner）拿到的是「会话不存在」这种假失败（review M-10）。
+   */
+  const exitCodes = new Map<string, number>()
+  const EXIT_CODE_CACHE_MAX = 64
+
+  function rememberExit(ptyId: string, code: number): void {
+    exitCodes.set(ptyId, code)
+    while (exitCodes.size > EXIT_CODE_CACHE_MAX) {
+      const oldest = exitCodes.keys().next().value
+      if (oldest === undefined) break
+      exitCodes.delete(oldest)
+    }
+  }
 
   /**
    * 结算退出等待者。
@@ -134,6 +150,7 @@ export function createPtyManager(
    * 不结算会让 waitExit 永挂（取消动作卡死 — review 根治）。
    */
   function settleExit(ptyId: string, code: number): void {
+    rememberExit(ptyId, code)
     const waiters = exitWaiters.get(ptyId)
     if (!waiters) return
     exitWaiters.delete(ptyId)
@@ -338,6 +355,9 @@ export function createPtyManager(
     waitExit(ptyId) {
       const s = sessions.get(ptyId)
       if (!s) {
+        // 已退出会话：直接返回退出码，而不是 reject「会话不存在」（review M-10）
+        const cached = exitCodes.get(ptyId)
+        if (cached !== undefined) return Promise.resolve(cached)
         return Promise.reject(
           createAppError('TASK_FAILED', { message: `终端会话不存在或已关闭：${ptyId}` }),
         )

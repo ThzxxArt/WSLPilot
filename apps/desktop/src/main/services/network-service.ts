@@ -19,6 +19,7 @@ import {
   buildProxyScript,
   canApplyRule,
   createAppError,
+  entryListened,
   parsePortProxyShow,
   parseWslConfigMode,
   previewNetshCommand,
@@ -179,9 +180,19 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
   }
 
   async function applyOne(rule: PortForwardRule, ctl: TaskControl): Promise<void> {
+    ctl.throwIfCanceled()
     const rawCommand = previewNetshCommand(rule, 'add')
     ctl.log(`$ ${rawCommand}`)
     ctl.report(null, `应用转发规则：${rule.id}`)
+    // netsh 对已存在的监听是"报错"而不是覆盖；规则端口被编辑后旧条目也会残留。
+    // 统一走 delete-then-add，保证"重新应用"幂等、改端口不残留（review M-13）
+    const existing = entryListened(await listPortProxy(), rule.listenAddress, rule.listenPort)
+    ctl.throwIfCanceled()
+    if (existing) {
+      const del = previewNetshCommand(rule, 'delete')
+      ctl.log(`$ ${del}`)
+      await netsh(buildPortProxyDeleteArgs(rule), del, `清理旧转发「${rule.id}」失败`)
+    }
     await netsh(buildPortProxyAddArgs(rule), rawCommand, `应用转发规则「${rule.id}」失败`)
     ctl.log(`已应用 ${ruleSummary(rule)}`)
   }
@@ -272,6 +283,14 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
 
     async removeRule(id, ctl) {
       const rule = findRule(id)
+      // 幂等：系统里本来就没有这条监听时直接成功，
+      // 否则「从系统移除」在已移除状态下必报错（review M-13）
+      const listened = entryListened(await listPortProxy(), rule.listenAddress, rule.listenPort)
+      if (!listened) {
+        ctl.log(`系统中已无监听 ${rule.listenAddress}:${rule.listenPort}，无需移除`)
+        ctl.report(100, `系统中已无该监听：${rule.id}`)
+        return
+      }
       const rawCommand = previewNetshCommand(rule, 'delete')
       ctl.log(`$ ${rawCommand}`)
       ctl.report(null, `从系统移除转发：${rule.id}`)

@@ -24,6 +24,7 @@ const notification = useNotification()
 
 const editorShow = ref(false)
 const editing = ref<PortForwardRule | null>(null)
+const proxyApplying = ref(false)
 
 onMounted(() => {
   void network.load()
@@ -166,12 +167,20 @@ async function onSaveProxy(proxy: ProxyConfig) {
   }
 }
 
-async function onProxyApply(distro: string) {
+/**
+ * 「写入代理脚本」：串行「保存 → 写入」。
+ * 必须串行——主进程 proxyApply 从磁盘读配置，并行会在写盘完成前把旧代理写进发行版（review M-9）。
+ */
+async function onProxyApply(distro: string, proxy: ProxyConfig) {
+  proxyApplying.value = true
   try {
+    await network.saveProxy(proxy)
     await network.proxyApply(distro)
     message.success(`代理已写入 ${distro}（${network.proxyScript?.path ?? ''}）`)
   } catch (e) {
     message.error(errorLine(e, '写入代理脚本失败'))
+  } finally {
+    proxyApplying.value = false
   }
 }
 
@@ -268,6 +277,7 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
       :windows-proxy="network.status?.windowsProxy ?? null"
       :proxy-script="network.proxyScript"
       :saving="network.saving"
+      :applying="proxyApplying"
       @save="onSaveProxy"
       @apply="onProxyApply"
       @clear="onProxyClear"

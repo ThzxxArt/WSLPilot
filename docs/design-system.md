@@ -18,7 +18,7 @@ Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变
 
 - **浅色为唯一主调**，不提供深色主题。
 - 品牌色 **Aurora**：`linear-gradient(135deg, #22D3EE, #6366F1, #A855F7)`
-- 强调色可切换：`aurora` / `sunset` / `ocean` / `forest`
+- 强调色可切换：`aurora` / `sunset` / `ocean` / `forest` / `custom`
 
 关键语义色：
 

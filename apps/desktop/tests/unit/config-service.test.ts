@@ -217,7 +217,7 @@ describe('ConfigService', () => {
     expect(svc.getConflict('settings')).toBeNull()
   })
 
-  it('resolveConflict ignore also reloads from disk (no dirty write)', async () => {
+  it('resolveConflict ignore 保留应用内状态（与 reload 语义区分 — review M-5）', async () => {
     await svc.patch('settings', { general: { accent: 'aurora' } })
     const filePath = join(dir, 'settings.jsonc')
     await fs.writeFile(
@@ -226,7 +226,13 @@ describe('ConfigService', () => {
       'utf8',
     )
     const result = (await svc.resolveConflict('settings', 'ignore')) as any
-    expect(result.general.accent).toBe('sunset')
+    // ignore = 忽略外部修改，应用内状态保持不变
+    expect(result.general.accent).toBe('aurora')
+    expect(svc.getConflict('settings')).toBeNull()
+
+    // reload 才是以磁盘为准
+    const reloaded = (await svc.resolveConflict('settings', 'reload')) as any
+    expect(reloaded.general.accent).toBe('sunset')
   })
 
   it('onChange unsubscribe removes listener', async () => {

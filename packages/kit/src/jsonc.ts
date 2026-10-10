@@ -54,9 +54,12 @@ export interface LeafPatch {
 
 /** 把嵌套 patch 打平成叶子路径列表（数组/空对象整体作为一个叶子） */
 export function collectLeafPaths(obj: unknown, prefix: (string | number)[] = []): LeafPatch[] {
-  if (obj === undefined) return []
+  if (prefix.length > 0 && obj === undefined) {
+    // 显式 undefined = 删除该键（jsonc-parser 的 modify 语义）
+    return [{ path: prefix, value: undefined }]
+  }
   if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
-    return [{ path: prefix, value: obj }]
+    return prefix.length === 0 && obj === undefined ? [] : [{ path: prefix, value: obj }]
   }
   const entries = Object.entries(obj as Record<string, unknown>)
   // 空对象：嵌套层作为叶子写入（把字段清成 {}）；
@@ -66,10 +69,67 @@ export function collectLeafPaths(obj: unknown, prefix: (string | number)[] = [])
   }
   const results: LeafPatch[] = []
   for (const [k, v] of entries) {
-    if (v === undefined) continue
     results.push(...collectLeafPaths(v, [...prefix, k]))
   }
   return results
+}
+
+/** 结构等价（键序无关；数组按下标逐项比） */
+export function jsonDeepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    return a.every((v, i) => jsonDeepEqual(v, b[i]))
+  }
+  const ka = Object.keys(a as object)
+  const kb = Object.keys(b as object)
+  if (ka.length !== kb.length) return false
+  return ka.every(
+    (k) =>
+      Object.prototype.hasOwnProperty.call(b, k) &&
+      jsonDeepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  )
+}
+
+/**
+ * 计算 before → after 的**变更叶子**（数组整体视为叶子）。
+ * 用于「读-改-写」只写真正改动的叶子，避免用内存全量覆盖磁盘上外部编辑过的字段。
+ */
+export function diffLeafPaths(
+  before: unknown,
+  after: unknown,
+  prefix: (string | number)[] = [],
+): LeafPatch[] {
+  if (jsonDeepEqual(before, after)) return []
+  const bothPlainObjects =
+    before !== null &&
+    after !== null &&
+    typeof before === 'object' &&
+    typeof after === 'object' &&
+    !Array.isArray(before) &&
+    !Array.isArray(after)
+  if (bothPlainObjects) {
+    const keys = new Set([
+      ...Object.keys(before as Record<string, unknown>),
+      ...Object.keys(after as Record<string, unknown>),
+    ])
+    const out: LeafPatch[] = []
+    for (const k of keys) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue
+      out.push(
+        ...diffLeafPaths(
+          (before as Record<string, unknown>)[k],
+          (after as Record<string, unknown>)[k],
+          [...prefix, k],
+        ),
+      )
+    }
+    return out
+  }
+  // 根层标量替换（理论不会走到）
+  return prefix.length === 0 ? [] : [{ path: prefix, value: after }]
 }
 
 /**

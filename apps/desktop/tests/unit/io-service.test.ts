@@ -19,6 +19,7 @@ import {
   createIoService,
   resolveTargetFile,
   percentOf,
+  uniqueBackupName,
   assertSafeIoPath,
   type SpawnWslFn,
 } from '../../src/main/services/io-service'
@@ -127,6 +128,18 @@ describe('io-service helpers', () => {
     expect(resolveTargetFile('backup', 'vhd')).toMatch(/backup\.vhdx$/)
     expect(resolveTargetFile('backup.tar', 'tar')).toMatch(/backup\.tar$/)
     expect(resolveTargetFile('disk.vhdx', 'vhd')).toMatch(/disk\.vhdx$/)
+  })
+
+  it('uniqueBackupName 生成规范备份名且避让冲突', () => {
+    const at = new Date('2026-12-31T23:59:59Z')
+    const taken = new Set<string>()
+    const exists = (p: string) => taken.has(p)
+    const first = uniqueBackupName('D:\\b', 'Ubuntu', 'tar', at, exists)
+    expect(first.replace(/\\/g, '/')).toMatch(/Ubuntu_\d{8}-\d{6}\.tar$/)
+    taken.add(first)
+    const second = uniqueBackupName('D:\\b', 'Ubuntu', 'tar', at, exists)
+    expect(second).not.toBe(first)
+    expect(second.replace(/\\/g, '/')).toMatch(/Ubuntu_\d{8}-\d{6}\.tar$/)
   })
 
   it('percentOf returns null when total unknown and clamps to 99', () => {
@@ -817,7 +830,7 @@ describe('IoService backups listing & rotation', () => {
     expect(resolveTargetFile('out.tar', 'tar')).toMatch(/out\.tar$/)
   })
 
-  it('导出目标已存在时改名保留为 .bak-<ts>（review M12）', async () => {
+  it('导出目标已存在时改名保留为规范备份名（可进列表与轮转 — review M-6）', async () => {
     const calls: string[][] = []
     const spawn = makeSpawnFn(calls, () => ({
       before: async (args) => {
@@ -838,7 +851,42 @@ describe('IoService backups listing & rotation', () => {
     )
     await io.runExport({ name: 'Ubuntu', path: target, format: 'tar' }, makeCtl([]) as never)
     const files = await fs.readdir(localOut)
-    expect(files.some((f) => f.startsWith('exists.tar.bak-'))).toBe(true)
+    // 保留副本必须是 `<name>_<stamp>.<ext>`，否则 listBackups / rotateBackups 认不出
+    expect(files.some((f) => /^Ubuntu_\d{8}-\d{6}\.tar$/.test(f))).toBe(true)
+    expect(files.some((f) => f.includes('.bak-'))).toBe(false)
+    // 列表里能看见它
+    const list = await io.listBackups(localOut)
+    expect(list.some((b) => /^Ubuntu_\d{8}-\d{6}\.tar$/.test(b.name))).toBe(true)
+  })
+
+  it('导出失败/取消会回滚：删半截归档 + 还原保留的原文件（review C-2）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      // 只写半截文件然后失败
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(4))
+      },
+      code: 1,
+    }))
+    const localDistro = await tmp()
+    const localOut = await tmp()
+    await fs.writeFile(join(localDistro, 'ext4.vhdx'), Buffer.alloc(64))
+    const target = join(localOut, 'exists.tar')
+    await fs.writeFile(target, 'OLD-CONTENT')
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: localDistro,
+        spawn,
+      }),
+    )
+    await expect(
+      io.runExport({ name: 'Ubuntu', path: target, format: 'tar' }, makeCtl([]) as never),
+    ).rejects.toBeTruthy()
+    // 半截归档必须被删掉，原文件必须回到原名
+    const files = await fs.readdir(localOut)
+    expect(files).toEqual(['exists.tar'])
+    expect(await fs.readFile(target, 'utf8')).toBe('OLD-CONTENT')
   })
 
   it('目标被占用无法改名时中止导出、不覆盖原文件（核验修复）', async () => {

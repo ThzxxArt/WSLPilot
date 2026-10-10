@@ -17,6 +17,7 @@ import {
 import {
   atomicWrite,
   applyPatchJsonc,
+  diffLeafPaths,
   modifyJsonc,
   parseJsoncSafe,
   stringifyJsonc,
@@ -89,8 +90,22 @@ export async function createConfigService(
   const listeners = new Map<ConfigKey, Set<() => void>>()
   const conflicts = new Map<ConfigKey, { fileKey: ConfigKey; detail: string }>()
   let writeQueue: Promise<unknown> = Promise.resolve()
-  /** 最近一次自写内容哈希 —— 用内容识别 chokidar 事件是否为自写（比时间窗可靠） */
-  const lastSelfWriteHash = new Map<ConfigKey, string>()
+  /**
+   * 最近若干次自写内容哈希 —— 用内容识别 chokidar 事件是否为自写（比时间窗可靠）。
+   * 必须是**多条**：同 key 连续两次快速写（patch 排队执行）时，第一条的哈希会被第二条覆盖，
+   * 两个事件若都在第二次写后才到，第一条会被误判为外部修改 → 假冲突弹窗（review M-15）。
+   */
+  const SELF_WRITE_HASH_KEEP = 8
+  const lastSelfWriteHash = new Map<ConfigKey, string[]>()
+  function rememberSelfWrite(key: ConfigKey, hash: string): void {
+    const list = lastSelfWriteHash.get(key) ?? []
+    list.push(hash)
+    if (list.length > SELF_WRITE_HASH_KEEP) list.splice(0, list.length - SELF_WRITE_HASH_KEEP)
+    lastSelfWriteHash.set(key, list)
+  }
+  function isSelfWrite(key: ConfigKey, hash: string): boolean {
+    return (lastSelfWriteHash.get(key) ?? []).includes(hash)
+  }
   const watchers: FSWatcher[] = []
 
   const filePath = (key: ConfigKey) => join(userDataDir, CONFIG_FILE_NAMES[key])
@@ -104,7 +119,7 @@ export async function createConfigService(
       const header = `WSLPilot ${CONFIG_FILE_NAMES[key]} — 可手工编辑；写回时尽量保留注释`
       const content = stringifyJsonc(defaults, header)
       await atomicWrite(path, content)
-      lastSelfWriteHash.set(key, hashText(content))
+      rememberSelfWrite(key, hashText(content))
       logger.info('config created', { key, path })
     }
   }
@@ -137,15 +152,18 @@ export async function createConfigService(
       const migratedVersion =
         typeof migrated.$schemaVersion === 'number' ? migrated.$schemaVersion : currentVersion
       if (migratedVersion === target) {
+        // 只写「迁移真正改动的叶子」（含嵌套新增/改值），并保留原文注释。
+        // 早期版本只写顶层新键：settings v1→v2 的 accent 等嵌套新键不会落盘却盖了版本章，
+        // 属于"假迁移"（review M-4 根治）。
+        const leaves = diffLeafPaths(before, migrated).filter(
+          (l) => !(l.path.length === 1 && FORBIDDEN_KEYS.has(String(l.path[0]))),
+        )
         let nextText = modifyJsonc(originalText, ['$schemaVersion'], target)
-        for (const [k, v] of Object.entries(migrated)) {
-          if (k === '$schemaVersion') continue
-          if (!(k in before) && !FORBIDDEN_KEYS.has(k)) {
-            nextText = modifyJsonc(nextText, [k], v)
-          }
+        for (const { path, value } of leaves) {
+          nextText = modifyJsonc(nextText, path, value)
         }
         await atomicWrite(filePath(key), nextText)
-        lastSelfWriteHash.set(key, hashText(nextText))
+        rememberSelfWrite(key, hashText(nextText))
       } else {
         logger.warn('config migration incomplete, keeping original file', {
           key,
@@ -225,7 +243,7 @@ export async function createConfigService(
     }
     await backupFile(key)
     await atomicWrite(filePath(key), content)
-    lastSelfWriteHash.set(key, hashText(content))
+    rememberSelfWrite(key, hashText(content))
     conflicts.delete(key)
   }
 
@@ -263,8 +281,11 @@ export async function createConfigService(
   )
   watchers.push(configWatcher)
 
+  /** Windows 路径归一（大小写 + 分隔符）：chokidar 回报的路径与 join 结果可能不一致 */
+  const normPath = (p: string) => p.replace(/\//g, '\\').toLowerCase()
+
   configWatcher.on('change', (changedPath: string) => {
-    const key = FILE_KEYS.find((k) => filePath(k) === changedPath)
+    const key = FILE_KEYS.find((k) => normPath(filePath(k)) === normPath(changedPath))
     if (!key) return
 
     void (async () => {
@@ -272,7 +293,7 @@ export async function createConfigService(
         const text = await fs.readFile(filePath(key), 'utf8')
         const h = hashText(text)
         // 内容哈希等于最近一次自写 → 自写回环，忽略
-        if (h === lastSelfWriteHash.get(key)) return
+        if (isSelfWrite(key, h)) return
 
         const parsed = parseJsoncSafe(text)
         if (parsed.errors.length > 0) {
@@ -287,7 +308,7 @@ export async function createConfigService(
         const current = cache.get(key)
         if (JSON.stringify(sanitized) === JSON.stringify(current)) {
           cache.set(key, sanitized)
-          lastSelfWriteHash.set(key, h)
+          rememberSelfWrite(key, h)
           conflicts.delete(key)
           notify(key)
           return
@@ -383,11 +404,10 @@ export async function createConfigService(
     },
 
     /**
-     * 读-改-写。写回时对用户可编辑文件做最小叶子编辑保留注释
-     * （设计书 §9.3：绝不静默丢弃用户注释 — review M7）；
+     * 读-改-写。写回时只对**真正改动的叶子**做最小编辑，保留其余注释，
+     * 也保留外部编辑器改动过的无关字段（设计书 §9.3：绝不静默丢弃用户注释 — review M7）。
      * state/uiState 是机器缓存，整文件序列化。
-     * 契约：fn 应返回**完整对象**（spread 风格）；只增改不删键——
-     * 需要删键的场景请用 replace()。
+     * 契约：fn 应返回**完整对象**（spread 风格）；需要删键的场景请用 replace()。
      */
     async update(key, fn) {
       return enqueueWrite(async () => {
@@ -411,10 +431,17 @@ export async function createConfigService(
         } else {
           const originalText = await readRaw(key)
           const probe = parseJsoncSafe(originalText)
-          writeText =
-            probe.errors.length === 0 && probe.data !== undefined
-              ? applyPatchJsonc(originalText, validated.data as unknown as Record<string, unknown>)
-              : stringifyJsonc(validated.data)
+          // 只把「相对 cache 变化的叶子」打回磁盘：
+          // 早期实现拿全量对象当补丁，会把外部编辑过的字段一并回退（review M-3 根治）
+          const leaves = diffLeafPaths(current, validated.data as unknown)
+          writeText = originalText
+          if (probe.errors.length === 0 && probe.data !== undefined) {
+            for (const { path, value } of leaves) {
+              writeText = modifyJsonc(writeText, path, value)
+            }
+          } else {
+            writeText = stringifyJsonc(validated.data)
+          }
         }
         await writeContent(key, writeText)
         cache.set(key, validated.data as ConfigMap[typeof key])
@@ -444,6 +471,15 @@ export async function createConfigService(
 
     async resolveConflict(key: ConfigKey, action: ConfigConflictAction) {
       return enqueueWrite(async () => {
+        if (action === 'ignore') {
+          // 「忽略」= 保留应用内状态，只清掉冲突标记（下次写回会把应用内状态覆盖回去）。
+          // 早期实现与 reload 同语义，三选一只做出两种行为，属半成品（review M-5 根治）
+          conflicts.delete(key)
+          notify(key)
+          logger.info('config conflict ignored (keep in-memory state)', { key })
+          return cache.get(key) as ConfigMap[ConfigKey]
+        }
+
         const text = await fs.readFile(filePath(key), 'utf8')
 
         if (action === 'overwrite') {
@@ -453,9 +489,9 @@ export async function createConfigService(
           return current
         }
 
-        // reload / ignore → 以磁盘为准
+        // reload → 以磁盘为准
         const sanitized = await parseAndSanitize(key, text)
-        lastSelfWriteHash.set(key, hashText(text))
+        rememberSelfWrite(key, hashText(text))
         cache.set(key, sanitized)
         conflicts.delete(key)
         notify(key)
