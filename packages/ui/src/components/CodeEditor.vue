@@ -39,6 +39,12 @@ function onInput(e: Event) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // Esc 交还焦点：Tab 被编辑器捕获（插入缩进），必须给键盘用户逃生口（无障碍 §11.4）
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    ;(e.target as HTMLTextAreaElement).blur()
+    return
+  }
   // Tab 插入空格缩进；Shift+Tab 反缩进
   if (e.key === 'Tab' && !props.readonly) {
     e.preventDefault()

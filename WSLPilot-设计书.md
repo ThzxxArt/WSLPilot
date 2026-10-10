@@ -575,8 +575,8 @@ WSLPilot/
     "autoRefreshOnStart": true,
     "pollIntervalMs": 5000,
     "locale": "system", // system | zh-CN | en-US
-    "theme": "light", // 固定浅色主题（不提供深色）
-    "accent": "aurora", // aurora | sunset | ocean | forest | custom
+    // 浅色为唯一主题（不提供深色）；该策略不做成可写配置
+    "accent": "aurora", // aurora | sunset | ocean | forest
     "closeBehavior": "minimizeToTray", // minimizeToTray | quit
     "launchAtLogin": false,
     "reduceMotion": false, // 关闭/减弱动效
@@ -834,8 +834,8 @@ export interface AppSettings {
     autoRefreshOnStart: boolean
     pollIntervalMs: number
     locale: 'system' | 'zh-CN' | 'en-US'
-    theme: 'light' // 固定浅色主题
-    accent: 'aurora' | 'sunset' | 'ocean' | 'forest' | 'custom'
+    // 浅色为唯一主题（不提供深色）；该策略不做成可写配置
+    accent: 'aurora' | 'sunset' | 'ocean' | 'forest'
     closeBehavior: 'minimizeToTray' | 'quit'
     launchAtLogin: boolean
     reduceMotion: boolean

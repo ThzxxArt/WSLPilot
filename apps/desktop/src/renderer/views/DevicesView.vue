@@ -39,6 +39,8 @@ const distroOptions = computed(() => [
 ])
 
 const installed = computed(() => devices.status.installed)
+/** 已安装但调用失败（服务异常等）：如实提示，不误导重装 */
+const statusError = computed(() => devices.status.error ?? '')
 
 function stateType(state: UsbDevice['state']): 'success' | 'info' | 'warning' | 'default' {
   switch (state) {
@@ -136,6 +138,14 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
             </n-button>
           </div>
         </div>
+      </EmptyState>
+    </section>
+
+    <!-- usbipd 已安装但调用失败：如实提示（不是"未安装"，不要误导重装） -->
+    <section v-else-if="installed && statusError && !devices.loading" class="card">
+      <EmptyState description="usbipd 调用失败，无法读取设备列表" illustration="⚠">
+        <p class="install-text">{{ statusError }}</p>
+        <n-button size="small" secondary @click="() => devices.refresh()">重新检测</n-button>
       </EmptyState>
     </section>
 

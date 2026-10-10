@@ -102,16 +102,30 @@ describe('backup naming & rotation pattern', () => {
   it('exportFileName embeds sortable timestamp and sanitizes illegal chars', () => {
     const at = new Date(2026, 0, 2, 3, 4, 5)
     expect(exportFileName('Ubuntu-22.04', 'tar', at)).toBe('Ubuntu-22.04_20260102-030405.tar')
-    expect(exportFileName('a:b', 'vhd', at)).toBe('a_b_20260102-030405.vhdx')
+    // 非法字符 %XX 转义（不与 `_` 形态碰撞）
+    expect(exportFileName('a:b', 'vhd', at)).toBe('a%3Ab_20260102-030405.vhdx')
   })
 
-  it('sanitizes ALL illegal chars (review C3 regression)', () => {
+  it('sanitizes ALL illegal chars（%XX 无碰撞转义 — review C3 + 数据安全回归）', () => {
     const at = new Date(2026, 0, 2, 3, 4, 5)
-    expect(exportFileName('a:b:c', 'tar', at)).toBe('a_b_c_20260102-030405.tar')
-    expect(exportFileName('a/b\\c:d*e', 'tar', at)).toBe('a_b_c_d_e_20260102-030405.tar')
-    expect(exportFileName('q?"<>|', 'tar', at)).toBe('q______20260102-030405.tar')
+    expect(exportFileName('a:b:c', 'tar', at)).toBe('a%3Ab%3Ac_20260102-030405.tar')
+    expect(exportFileName('a/b\\c:d*e', 'tar', at)).toBe('a%2Fb%5Cc%3Ad%2Ae_20260102-030405.tar')
+    expect(exportFileName('q?"<>|', 'tar', at)).toBe('q%3F%22%3C%3E%7C_20260102-030405.tar')
     const withControl = exportFileName('a\u0000b', 'tar', at)
-    expect(withControl).toBe('a_b_20260102-030405.tar')
+    expect(withControl).toBe('a%00b_20260102-030405.tar')
+    // `%` 自身先转义，保证映射可往返无碰撞
+    expect(exportFileName('a%2Ab', 'tar', at)).toBe('a%252Ab_20260102-030405.tar')
+  })
+
+  it('命名无碰撞：`a*b` 与 `a_b` 不同文件族（轮转绝不误删）', () => {
+    const at = new Date(2026, 0, 2, 3, 4, 5)
+    const withStar = exportFileName('a*b', 'tar', at)
+    const withUnderscore = exportFileName('a_b', 'tar', at)
+    expect(withStar).not.toBe(withUnderscore)
+    // 各自的轮转正则只匹配自己的文件
+    expect(backupFileRegex('a*b').test(withStar)).toBe(true)
+    expect(backupFileRegex('a*b').test(withUnderscore)).toBe(false)
+    expect(backupFileRegex('a_b').test(withUnderscore)).toBe(true)
   })
 
   it('round-trip: regex always matches its own exportFileName (review C3)', () => {

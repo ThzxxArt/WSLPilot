@@ -92,7 +92,7 @@ export function suggestRuleId(existing: readonly PortForwardRule[], listenPort: 
   return `${base}-${Date.now()}`
 }
 
-export type RuleSystemState = 'applied' | 'listening' | 'mismatch' | 'none' | 'udp-only'
+export type RuleSystemState = 'applied' | 'mismatch' | 'none' | 'udp-only'
 
 /** `addr:port` 展示（IPv6 用 [] 包裹） */
 export function formatRuleRange(address: string, port: number): string {
@@ -124,7 +124,6 @@ export function ruleSystemState(
 
 const SYSTEM_STATE_LABEL: Record<RuleSystemState, string> = {
   applied: '已生效',
-  listening: '监听中',
   mismatch: '指向不同',
   none: '未生效',
   'udp-only': '仅记录',
@@ -168,13 +167,13 @@ export function proxyToForm(proxy: ProxyConfig): ProxyForm {
   }
 }
 
-/** 代理表单校验：至少有一项生效，否则提示（允许清空，但要显式确认语义） */
+/**
+ * 代理表单校验：全空 = 显式「不配置代理」（允许保存，即关闭代理）；
+ * 填写的值不得含空白字符。目标是可往返表达「关闭」态，而不是逼用户留一个假地址。
+ */
 export function validateProxyForm(form: ProxyForm): string | null {
   const http = form.httpProxy.trim()
   const https = form.httpsProxy.trim()
-  if (!form.useWindowsProxy && !http && !https) {
-    return '请填写 HTTP/HTTPS 代理地址，或开启「跟随系统代理」'
-  }
   for (const [label, value] of [
     ['HTTP 代理', http],
     ['HTTPS 代理', https],

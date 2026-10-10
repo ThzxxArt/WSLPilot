@@ -39,7 +39,7 @@ describe('ConfigService', () => {
     const next = await svc.patch('settings', { general: { accent: 'ocean', reduceMotion: true } })
     expect(next.general.accent).toBe('ocean')
     expect(next.general.reduceMotion).toBe(true)
-    expect(next.general.theme).toBe('light') // 其他字段不变
+    expect(next.general.closeBehavior).toBe('minimizeToTray') // 其他字段不变
 
     const reloaded = await svc.load('settings')
     expect(reloaded.general.accent).toBe('ocean')
@@ -77,7 +77,6 @@ describe('ConfigService', () => {
         autoRefreshOnStart: true,
         pollIntervalMs: 5000,
         locale: 'zh-CN',
-        theme: 'light',
         accent: 'sunset',
         closeBehavior: 'quit',
         launchAtLogin: true,

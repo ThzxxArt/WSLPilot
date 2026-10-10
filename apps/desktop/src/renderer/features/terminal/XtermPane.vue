@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
+import { useMessage } from 'naive-ui'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { DEFAULT_TERMINAL_PREFS, resolveTerminalTheme, type TerminalFontPrefs } from './theme'
+import { chunkTerminalInput } from './input-chunk'
+import { errorLine } from '../../composables/useAppError'
 import { useSettingsStore } from '../../stores/settings'
 
 const props = defineProps({
@@ -27,6 +30,7 @@ const emit = defineEmits<{
 
 const host = ref<HTMLElement | null>(null)
 const settings = useSettingsStore()
+const message = useMessage()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
@@ -81,10 +85,20 @@ onMounted(() => {
   doFit()
 
   t.onData((data) => {
-    void window.wslAPI.terminal.input(props.ptyId, data)
+    // 超过 IPC 上限的粘贴必须分片（否则 zod 拒绝后输入静默丢失 — review 根治）
+    for (const chunk of chunkTerminalInput(data)) {
+      void window.wslAPI.terminal.input(props.ptyId, chunk).catch((e: unknown) => {
+        message.error(errorLine(e, '终端输入发送失败'))
+      })
+    }
   })
   t.onResize(({ cols, rows }) => {
-    void window.wslAPI.terminal.resize(props.ptyId, cols, rows)
+    // 尺寸夹到 IPC schema 上限内：宁可静默夹紧，也不要被拒后 xterm 与 PTY 永久失步
+    void window.wslAPI.terminal
+      .resize(props.ptyId, Math.min(cols, 500), Math.min(rows, 200))
+      .catch((e: unknown) => {
+        message.error(errorLine(e, '终端尺寸同步失败'))
+      })
   })
   t.onCursorMove(() => {
     emit('cursorMove', {

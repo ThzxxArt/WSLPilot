@@ -92,7 +92,7 @@ describe('自动更新服务（M7 §17）', () => {
     expect(isDevModeSkipError('Skip checkForUpdates because application is not packed')).toBe(true)
   })
 
-  it('check 异常：开发模式错误归为 idle，其余归为 error', async () => {
+  it('check 异常：仅「未打包/开发」归为 idle；其余如实 error（不过宽误判）', async () => {
     const updater = makeUpdater()
     const svc = createUpdateService({
       logger,
@@ -100,8 +100,17 @@ describe('自动更新服务（M7 §17）', () => {
       isPackaged: true,
       updater,
     })
-    updater.checkForUpdates.mockRejectedValueOnce(new Error('Cannot find app-update.yml'))
+    updater.checkForUpdates.mockRejectedValueOnce(
+      new Error('Skip checkForUpdates because application is not packed'),
+    )
     expect((await svc.check()).status).toBe('idle')
+
+    // 回归：这些不是开发模式（此前 app-update.yml/cannot check updates 被误判为开发，
+    // 打包环境 publish 配置损坏时给出误导状态）
+    expect(isDevModeSkipError('Cannot find app-update.yml')).toBe(false)
+    expect(isDevModeSkipError('Cannot check updates: ENOTFOUND')).toBe(false)
+    updater.checkForUpdates.mockRejectedValueOnce(new Error('Cannot find app-update.yml'))
+    expect((await svc.check()).status).toBe('error')
 
     updater.checkForUpdates.mockRejectedValueOnce(new Error('network down'))
     const state = await svc.check()
@@ -190,7 +199,30 @@ describe('自动更新服务（M7 §17）', () => {
     expect(logger.info).toHaveBeenCalled()
   })
 
-  it('初始状态可查询（update:status 用）', async () => {
+  it('download 已是 downloaded 状态直接返回（不重复下载）', async () => {
+    const updater = makeUpdater()
+    const svc = createUpdateService({
+      logger,
+      currentVersion: '0.1.0',
+      isPackaged: true,
+      updater,
+    })
+    updater.checkForUpdates.mockImplementation(async () => {
+      updater.emit('update-available', { version: '2.0.0' })
+      return null
+    })
+    await svc.check()
+    updater.downloadUpdate.mockImplementation(async () => {
+      updater.emit('update-downloaded', { version: '2.0.0' })
+      return []
+    })
+    await svc.download()
+    const second = await svc.download()
+    expect(second.status).toBe('downloaded')
+    expect(updater.downloadUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('初始状态可查询（update:status 用）；feedUrl 从 getFeedURL 回填（非幽灵字段）', async () => {
     const updater = makeUpdater()
     const svc = createUpdateService({
       logger,
@@ -205,7 +237,7 @@ describe('自动更新服务（M7 §17）', () => {
       releaseNotes: undefined,
       percent: undefined,
       error: undefined,
-      feedUrl: undefined,
+      feedUrl: 'https://github.com/ThzxxArt/WSLPilot',
     })
   })
 

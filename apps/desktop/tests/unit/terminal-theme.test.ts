@@ -46,7 +46,7 @@ describe('terminal theme', () => {
     expect(follow.selectionBackground).toContain('rgba(14, 165, 233')
 
     // 未知强调色回退 aurora
-    const fallback = resolveTerminalTheme('follow-app', 'custom')
+    const fallback = resolveTerminalTheme('follow-app', 'nope' as never)
     expect(fallback.cursor).toBe('#6366F1')
   })
 })

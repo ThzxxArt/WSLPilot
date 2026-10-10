@@ -32,7 +32,7 @@ export function registerUpdateHandlers(add: AddFn, _ctx: IpcContext): void {
 
   add(CH.updateDownload, async (c): Promise<UpdateState> => requireUpdater(c).download())
 
-  add(CH.updateInstall, (c): void => {
+  add(CH.updateInstall, async (c): Promise<void> => {
     requireUpdater(c).install()
   })
 }

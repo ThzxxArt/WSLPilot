@@ -31,6 +31,7 @@ import {
   ruleSummary,
   type ElevationOpResult,
   type ElevationRequest,
+  type ElevationRunResult,
   type NetworkConfig,
   type NetworkStatus,
   type PortForwardRule,
@@ -71,8 +72,11 @@ export interface NetworkServiceDeps {
   runWslWithStdin?: RunWslStdinFn
   /** Windows 系统代理读取（默认走注册表） */
   readWindowsProxy?: () => Promise<WindowsProxyInfo | null>
-  /** 提权助手（M7）：直接执行权限不足时改由独立提权进程执行（§14.3） */
-  elevation?: { runOne(req: ElevationRequest): Promise<ElevationOpResult> }
+  /** 提权助手（M7）：直接执行权限不足时改由独立提权进程执行（§14.3）；run 支持批量合并 UAC */
+  elevation?: {
+    runOne(req: ElevationRequest): Promise<ElevationOpResult>
+    run(reqs: readonly ElevationRequest[]): Promise<ElevationRunResult>
+  }
 }
 
 export interface NetworkService {
@@ -166,14 +170,16 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
 
   /**
    * netsh portproxy 执行入口（M7 提权接线）：
-   * 直接执行失败且属权限问题时，改由提权助手执行（一次 UAC；§14.3）；
+   * 直接执行失败且属权限问题时，改由提权助手执行（§14.3）；
    * 用户取消授权 → PERMISSION_DENIED + 等价命令行（可复制到管理员终端）。
+   * 传入 deferElevation 时**只登记**待提权请求（批量模式：applyAll 合并一次 UAC）。
    */
   async function netshRule(
     target: PortProxyTarget,
     op: 'add' | 'delete',
     message: string,
     log?: (line: string) => void,
+    deferElevation?: (req: ElevationRequest) => void,
   ): Promise<void> {
     const args = op === 'add' ? buildPortProxyAddArgs(target) : buildPortProxyDeleteArgs(target)
     const rawCommand = previewNetshCommand(target, op)
@@ -192,6 +198,10 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
                 connectPort: target.connectPort,
               }
             : { listenAddress: target.listenAddress, listenPort: target.listenPort },
+      }
+      if (deferElevation) {
+        deferElevation(req)
+        return
       }
       if (deps.elevation) {
         log?.(`权限不足，改由提权助手执行：${ELEVATION_OP_LABEL[req.op]}…`)
@@ -218,6 +228,32 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     mapNetshFailure(r, rawCommand, message)
   }
 
+  /**
+   * 批量提权（合并 UAC 会话，§14.3）：applyAll 收集全部待提权操作，一次授权完成。
+   * 返回逐操作结果（ok 标志），由调用方统计成败；取消 UAC → 抛 PERMISSION_DENIED。
+   */
+  async function runElevationBatch(
+    requests: ElevationRequest[],
+    log?: (line: string) => void,
+  ): Promise<ElevationOpResult[]> {
+    if (!deps.elevation) {
+      throw createAppError('PERMISSION_DENIED', {
+        message: `需要管理员权限（${requests.length} 项操作）`,
+        suggestion: '请以管理员身份运行 WSLPilot 后重新应用',
+      })
+    }
+    log?.(`权限不足，改由提权助手合并执行 ${requests.length} 项（一次 UAC）…`)
+    logger.info('netsh batch elevation', { ops: requests.map((x) => x.op) })
+    const run = await deps.elevation.run(requests)
+    if (run.canceled) {
+      throw createAppError('PERMISSION_DENIED', {
+        message: '已取消管理员授权，批量应用未完成',
+        suggestion: ELEVATION_SUGGESTION,
+      })
+    }
+    return run.results
+  }
+
   async function listPortProxy(): Promise<PortProxyEntry[]> {
     try {
       const r = await tool('netsh.exe', buildPortProxyShowArgs(), { timeoutMs: 15_000 })
@@ -232,7 +268,11 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     }
   }
 
-  async function applyOne(rule: PortForwardRule, ctl: TaskControl): Promise<void> {
+  async function applyOne(
+    rule: PortForwardRule,
+    ctl: TaskControl,
+    deferElevation?: (req: ElevationRequest) => void,
+  ): Promise<void> {
     ctl.throwIfCanceled()
     const rawCommand = previewNetshCommand(rule, 'add')
     ctl.log(`$ ${rawCommand}`)
@@ -244,9 +284,21 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     if (existing) {
       const del = previewNetshCommand(rule, 'delete')
       ctl.log(`$ ${del}`)
-      await netshRule(rule, 'delete', `清理旧转发「${rule.id}」失败`, (l) => ctl.log(l))
+      await netshRule(
+        rule,
+        'delete',
+        `清理旧转发「${rule.id}」失败`,
+        (l) => ctl.log(l),
+        deferElevation,
+      )
     }
-    await netshRule(rule, 'add', `应用转发规则「${rule.id}」失败`, (l) => ctl.log(l))
+    await netshRule(
+      rule,
+      'add',
+      `应用转发规则「${rule.id}」失败`,
+      (l) => ctl.log(l),
+      deferElevation,
+    )
     ctl.log(`已应用 ${ruleSummary(rule)}`)
   }
 
@@ -301,6 +353,10 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
       const errors: string[] = []
       let applied = 0
       let skipped = 0
+      // 批量提权收集器：直接执行权限不足的 op 登记于此，循环后**合并一次 UAC**（§14.3）
+      const pending: Array<{ req: ElevationRequest; ruleId: string }> = []
+      const deferredRuleIds = new Set<string>()
+
       for (let i = 0; i < list.length; i++) {
         const rule = list[i]!
         ctl.throwIfCanceled()
@@ -310,8 +366,11 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
           continue
         }
         try {
-          await applyOne(rule, ctl)
-          applied++
+          await applyOne(rule, ctl, (req) => {
+            pending.push({ req, ruleId: rule.id })
+            deferredRuleIds.add(rule.id)
+          })
+          if (!deferredRuleIds.has(rule.id)) applied++
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
           errors.push(`${rule.id}: ${msg}`)
@@ -322,6 +381,38 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
           `应用转发规则 ${i + 1}/${list.length}`,
         )
       }
+
+      // 合并提权（一次 UAC 完成全部待执行项）；无提权助手则全部记为权限失败
+      if (pending.length > 0) {
+        const failedRuleIds = new Set<string>()
+        try {
+          const results = await runElevationBatch(
+            pending.map((p) => p.req),
+            (l) => ctl.log(l),
+          )
+          results.forEach((res, idx) => {
+            const ruleId = pending[idx]?.ruleId ?? ''
+            if (res.ok) {
+              ctl.log(`提权执行成功：${ruleId}`)
+            } else {
+              failedRuleIds.add(ruleId)
+              errors.push(
+                `${ruleId}: 提权执行失败${res.stderr || res.stdout ? `（${(res.stderr || res.stdout).trim().slice(0, 200)}）` : ''}`,
+              )
+            }
+          })
+        } catch (e) {
+          // 取消 UAC / 提权助手不可用：全部待执行项记失败（消息含可执行建议）
+          const msg = e instanceof Error ? e.message : String(e)
+          for (const p of pending) failedRuleIds.add(p.ruleId)
+          errors.push(msg)
+          ctl.log(`批量提权未完成：${msg}`)
+        }
+        for (const ruleId of deferredRuleIds) {
+          if (!failedRuleIds.has(ruleId)) applied++
+        }
+      }
+
       const summary = `应用完成：成功 ${applied} 条，跳过 ${skipped} 条，失败 ${errors.length} 条`
       ctl.log(summary)
       if (errors.length > 0) {

@@ -19,7 +19,7 @@ import {
   type DiagnosticsExportResult,
   type DiagnosticsManifest,
 } from '@wslpilot/shared'
-import { createZip, logsDir, type Logger, type ZipEntry } from '@wslpilot/kit'
+import { atomicWrite, createZip, logsDir, type Logger, type ZipEntry } from '@wslpilot/kit'
 
 /** 收录进诊断包的日志文件数上限（近期） */
 export const DIAGNOSTICS_MAX_LOG_FILES = 10
@@ -166,7 +166,8 @@ export function createDiagnosticsService(deps: DiagnosticsServiceDeps): Diagnost
     entries.push({ name: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` })
 
     const zip = createZip(entries, now())
-    await fs.writeFile(targetPath, zip)
+    // 原子写：保存对话框允许覆盖已存在的诊断包，绝不截断写（防崩溃留下半截 zip）
+    await atomicWrite(targetPath, zip)
     logger.info('diagnostics exported', {
       target: targetPath,
       entries: entries.length,

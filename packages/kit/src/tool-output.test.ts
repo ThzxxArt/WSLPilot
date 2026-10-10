@@ -35,6 +35,12 @@ describe('decodeToolOutput', () => {
     expect(out).toBe('请求的操作需要提升')
   })
 
+  it('GBK 不合法时继续降级 windows-1252（fatal 探测链 — review 根治）', () => {
+    // 0x80 在 GBK 中非法（单独的引导字节），在 windows-1252 中是 €。
+    // 此前非致命 GBK 解码器从不抛错，永远走不到 1252，西欧码页输出被硬解成乱码。
+    expect(decodeToolOutput(Buffer.from([0x80]))).toBe('€')
+  })
+
   it('Uint8Array 也可接受', () => {
     expect(decodeToolOutput(new Uint8Array([0x61, 0x62]))).toBe('ab')
   })

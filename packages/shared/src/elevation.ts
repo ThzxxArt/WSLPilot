@@ -287,9 +287,9 @@ export function buildElevationHelperPayload(
   }
 }
 
-/** 提权失败时的统一建议文案（界面 / 日志共用） */
+/** 提权失败时的统一建议文案（界面 / 日志共用；只指向真实可用的动作） */
 export const ELEVATION_SUGGESTION =
-  '可点击「以管理员身份重试」，或在管理员终端中执行等价命令（UAC 弹窗中选择「是」）'
+  '请重新运行该任务并在 UAC 弹窗中选择「是」；也可把等价命令复制到管理员终端中执行'
 
 /**
  * 提权类失败识别（中英文 Windows 报错）。

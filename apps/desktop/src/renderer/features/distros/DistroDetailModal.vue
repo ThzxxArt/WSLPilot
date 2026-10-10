@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NButton, NInput, NModal, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
+import {
+  NButton,
+  NInput,
+  NModal,
+  NSelect,
+  NSwitch,
+  NTabPane,
+  NTabs,
+  NTag,
+  useMessage,
+} from 'naive-ui'
 import type { Metrics, RegistryDetail } from '@shared/types'
 import { formatKbPair } from '@shared/format'
 import { useDistrosStore } from '../../stores/distros'
 import { useSettingsStore } from '../../stores/settings'
 import { useTasksStore } from '../../stores/tasks'
+import { useActionsStore } from '../../stores/actions'
 import { errorLine } from '../../composables/useAppError'
 import { stateLabel } from '../../composables/state-label'
 import WslConfPanel from '../config/WslConfPanel.vue'
@@ -186,22 +197,38 @@ async function onUnregister() {
   }
 }
 
-// ── 元数据编辑（meta:set 闭环）──
+// ── 元数据编辑（meta:set 闭环 — 全字段可编辑，不留半套编辑面）──
+const actionsStore = useActionsStore()
 const editing = ref(false)
 const editAlias = ref('')
 const editNote = ref('')
 const editTags = ref('')
+const editIcon = ref('')
+const editColor = ref('')
+const editStartupCwd = ref('')
+const editPinned = ref(false)
+const editQuickActions = ref<string[]>([])
+
+/** 快捷动作可选项（来自 actions.jsonc 白名单） */
+const quickActionOptions = computed(() =>
+  actionsStore.items.map((a) => ({ label: a.label, value: a.id })),
+)
 
 function startEdit() {
   const m = distro.value?.meta
   editAlias.value = m?.alias ?? ''
   editNote.value = m?.note ?? ''
   editTags.value = (m?.tags ?? []).join(', ')
+  editIcon.value = m?.icon ?? ''
+  editColor.value = m?.color ?? ''
+  editStartupCwd.value = m?.startupCwd ?? '~'
+  editPinned.value = !!m?.pinned
+  editQuickActions.value = [...(m?.quickActions ?? [])]
   editing.value = true
+  if (!actionsStore.loaded) void actionsStore.load()
 }
 
 async function saveMeta() {
-  const base = distro.value?.meta
   try {
     await window.wslAPI.meta.set({
       name: props.distroName,
@@ -210,12 +237,12 @@ async function saveMeta() {
         .split(/[,，]/)
         .map((t) => t.trim())
         .filter(Boolean),
-      color: base?.color ?? '',
-      icon: base?.icon ?? '',
+      color: editColor.value.trim(),
+      icon: editIcon.value.trim(),
       note: editNote.value.trim(),
-      startupCwd: base?.startupCwd ?? '~',
-      pinned: base?.pinned ?? false,
-      quickActions: base?.quickActions ?? [],
+      startupCwd: editStartupCwd.value.trim() || '~',
+      pinned: editPinned.value,
+      quickActions: [...editQuickActions.value],
     })
     message.success('元数据已保存')
     editing.value = false
@@ -313,6 +340,39 @@ async function saveMeta() {
               :rows="2"
               placeholder="日常开发使用…"
             />
+          </div>
+          <div class="field">
+            <div class="label">图标名</div>
+            <NInput v-model:value="editIcon" size="small" placeholder="ubuntu / debian / …" />
+          </div>
+          <div class="field">
+            <div class="label">品牌色</div>
+            <NInput v-model:value="editColor" size="small" placeholder="#E95420" />
+          </div>
+          <div class="field">
+            <div class="label">终端启动目录</div>
+            <NInput
+              v-model:value="editStartupCwd"
+              size="small"
+              placeholder="~ 或 /home/me/project"
+            />
+          </div>
+          <div class="field">
+            <div class="label">快捷动作（动作卡片上的直达项）</div>
+            <NSelect
+              v-model:value="editQuickActions"
+              size="small"
+              multiple
+              :options="quickActionOptions"
+              placeholder="选择动作 id"
+            />
+          </div>
+          <div class="field field-row">
+            <div>
+              <div class="label">置顶</div>
+              <div class="hint">置顶后固定排在列表最前</div>
+            </div>
+            <NSwitch v-model:value="editPinned" size="small" />
           </div>
           <div class="edit-actions">
             <n-button size="small" @click="editing = false"> 取消 </n-button>
@@ -521,5 +581,17 @@ async function saveMeta() {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 16px;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
 }
 </style>

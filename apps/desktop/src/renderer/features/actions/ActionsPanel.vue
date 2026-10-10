@@ -167,7 +167,10 @@ async function removeAction(a: WslAction) {
             size: 'tiny',
             onClick: () => {
               n.destroy()
-              void actions.undoRestore().then(() => message.success('已恢复动作'))
+              void actions
+                .undoRestore()
+                .then(() => message.success('已恢复动作'))
+                .catch((e: unknown) => message.error(errorLine(e, '恢复动作失败')))
             },
           },
           { default: () => '撤销' },

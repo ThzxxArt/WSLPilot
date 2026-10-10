@@ -104,6 +104,9 @@ function makeDeps() {
       terminate: vi.fn(async () => {}),
       shutdown: vi.fn(async () => {}),
       setDefault: vi.fn(async () => {}),
+      install: vi.fn(async () => {}),
+      setVersion: vi.fn(async () => {}),
+      unregister: vi.fn(async () => {}),
       getVersion: vi.fn(async () => ({ raw: '', wslVersion: '2', kernelVersion: '5' })),
       sampleMetrics: vi.fn(async () => ({
         memUsedKB: 10,
@@ -336,5 +339,47 @@ describe('distros + meta IPC handlers', () => {
     await expect(
       wrapped.get(CH.configResolveConflict)({}, { fileKey: 'settings', action: 'hack' }),
     ).rejects.toThrow()
+  })
+
+  it('distros:install / setVersion / unregister 任务派发与执行（review 假信心 M3）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    const ctl = {
+      taskId: 't',
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: vi.fn(),
+      onCancel: vi.fn(),
+    }
+
+    // 带名安装：type/lockKey/run 全链路
+    await wrapped.get(CH.distrosInstall)({}, { name: 'Ubuntu' })
+    expect(deps.tasks.start).toHaveBeenCalledTimes(1)
+    const installOpts = deps.tasks.start.mock.calls[0]![0]
+    expect(installOpts.type).toBe('install')
+    expect(installOpts.distro).toBe('Ubuntu')
+    expect(installOpts.lockKey).toBe('install:ubuntu')
+    installOpts.run(ctl)
+    expect(deps.wsl.install).toHaveBeenCalledWith('Ubuntu', ctl)
+
+    // 省略名字（安装 WSL 本体）：lockKey 走全局
+    await wrapped.get(CH.distrosInstall)({}, {})
+    const bareOpts = deps.tasks.start.mock.calls[1]![0]
+    expect(bareOpts.lockKey).toBe('install:*')
+    bareOpts.run(ctl)
+    expect(deps.wsl.install).toHaveBeenCalledWith(undefined, ctl)
+
+    // setVersion → convert 任务
+    await wrapped.get(CH.distrosSetVersion)({}, { name: 'Ubuntu', version: 1 })
+    const convertOpts = deps.tasks.start.mock.calls[2]![0]
+    expect(convertOpts.type).toBe('convert')
+    convertOpts.run(ctl)
+    expect(deps.wsl.setVersion).toHaveBeenCalledWith('Ubuntu', 1, ctl)
+
+    // unregister 直达 wsl.unregister
+    await wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')
+    expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
+    await expect(wrapped.get(CH.distrosUnregister)({}, 'a/b')).rejects.toThrow()
   })
 })

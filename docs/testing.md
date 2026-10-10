@@ -120,12 +120,17 @@ npm run test:watch     # 监听模式
 - `shared/elevation.ts`（op 白名单 / 参数校验 / op→argv 映射 / 提权错误识别）
 - `shared/diagnostics.ts`（脱敏规则：主目录变体、路径边界、URL 凭据、密钥打码）
 - `kit/zip.ts`（CRC32 标准向量、zip 结构往返、路径逃逸拒绝）
-- `main/elevation/`（客户端成功/取消/坏结果路径、Helper 脚本白名单内容断言）
+- `main/elevation/`（客户端成功/取消/坏结果路径、BOM、空格路径引号、超时透传、工作目录清理、
+  Helper 脚本白名单与校验顺序断言）
 - `main/services/diagnostics-service.ts`（日志收集、导出 zip 内容与脱敏、目标路径规范化）
 - `main/services/signature-service.ts`（Authenticode 输出解析、签名/未签名/检测失败）
 - `main/updater/auto-update.ts`（状态机：available / not-available / downloading / downloaded / error、
-  开发模式跳过、install 门控）
-- `renderer/stores/update.ts`（状态镜像、attach 事件、操作失败回滚）
+  开发模式收窄判定、feedUrl 回填、download 早退、install 门控）
+- `main/ipc/handlers/update.ts` + app 域 M7 三通道（委托与兜底、对话框取消/确认、扩展名规范化）
+- **提权委托链**（`m7-delegation.test.ts`）：network 单条/批量合并 UAC/部分失败/UAC 取消/未注入降级、
+  usbipd bind/unbind、wsl install/setVersion——此前 4 条服务链路零测试
+- `renderer/stores/update.ts`（状态镜像、attach 真退订、操作失败传播）
+- `renderer/features/terminal/input-chunk.ts`（256KB 分片、代理对不拆散）
 
 ## CI
 

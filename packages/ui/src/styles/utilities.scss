@@ -1,53 +1,6 @@
 @use './tokens.generated.scss' as tokens;
 
-// ── 工具类 ─────────────────────────────────────────────────
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.text-secondary {
-  color: var(--color-text-secondary);
-}
-
-.text-tertiary {
-  color: var(--color-text-tertiary);
-}
-
-.flex {
-  display: flex;
-}
-
-.flex-col {
-  display: flex;
-  flex-direction: column;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.justify-between {
-  justify-content: space-between;
-}
-
-.gap-1 {
-  gap: var(--space-1);
-}
-
-.gap-2 {
-  gap: var(--space-2);
-}
-
-.gap-3 {
-  gap: var(--space-3);
-}
-
-.gap-4 {
-  gap: var(--space-4);
-}
-
+// ── 工具类（只保留真实被模板消费的类；未使用的一律不留 — review 幽灵 CSS 根治）──
 .card {
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);

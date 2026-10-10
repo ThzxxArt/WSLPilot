@@ -28,14 +28,17 @@
 }
 
 // ── 强调色切换 300ms 平滑过渡（§13.2）──────────────────────────────
-// applyAccentToDom 切换时短暂挂 data-accent-anim，只在切换窗口内给颜色属性插过渡
-:root[data-accent-anim='true'] *,
-:root[data-accent-anim='true'] {
-  transition:
-    background-color 300ms var(--ease-standard),
-    color 300ms var(--ease-standard),
-    border-color 300ms var(--ease-standard),
-    box-shadow 300ms var(--ease-standard) !important;
+// applyAccentToDom 切换时短暂挂 data-accent-anim，只在切换窗口内给颜色属性插过渡。
+// 必须让位 reduced-motion 降级（:not + media 双重限定，禁止顶掉全局 kill 规则）
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion='true'])[data-accent-anim='true'] *,
+  :root:not([data-reduce-motion='true'])[data-accent-anim='true'] {
+    transition:
+      background-color 300ms var(--ease-standard),
+      color 300ms var(--ease-standard),
+      border-color 300ms var(--ease-standard),
+      box-shadow 300ms var(--ease-standard) !important;
+  }
 }
 
 // ── 按钮按压（§13.2：按钮点击轻微缩放）──────────────────────────────
@@ -132,38 +135,7 @@
   transform: translateX(24px) !important;
 }
 
-// ── 进入动效（通用）────────────────────────────────────────────────
-.fade-in {
-  animation: pilot-fade-in var(--dur-base) var(--ease-decelerate) both;
-}
-
-.slide-up-in {
-  animation: pilot-slide-up var(--dur-base) var(--ease-decelerate) both;
-}
-
-@keyframes pilot-fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes pilot-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-// 命令面板下弹（§13.2：背景模糊 + 面板下弹）
+// ── 命令面板下弹（§13.2：背景模糊 + 面板下弹）────────────────────────
 .palette-pop {
   animation: pilot-pop var(--dur-base) var(--ease-decelerate) both;
 }

@@ -72,7 +72,10 @@ function onRemove(rule: PortForwardRule) {
                 size: 'tiny',
                 onClick: () => {
                   n.destroy()
-                  void network.undoRestore().then(() => message.success('已恢复规则'))
+                  void network
+                    .undoRestore()
+                    .then(() => message.success('已恢复规则'))
+                    .catch((e: unknown) => message.error(errorLine(e, '恢复规则失败')))
                 },
               },
               { default: () => '撤销' },

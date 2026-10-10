@@ -17,7 +17,6 @@ const cfg = defaultConfig('settings')
 
 function initialState() {
   return {
-    loaded: false,
     accent: cfg.general.accent as AccentName,
     locale: cfg.general.locale as AppSettings['general']['locale'],
     reduceMotion: cfg.general.reduceMotion as boolean,
@@ -98,7 +97,6 @@ export const useSettingsStore = defineStore('settings', {
       } catch {
         this.version = ''
       }
-      this.loaded = true
     },
 
     /**

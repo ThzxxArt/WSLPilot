@@ -46,14 +46,21 @@ const ILLEGAL_FILE_CHARS = /[\\/:*?"<>|]/g
 // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g
 
+function percentEncode(c: string): string {
+  return `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`
+}
+
 /**
  * 发行版名 → 文件名安全形态（唯一事实源）。
- * 生成文件名与轮转匹配必须都走这里，否则往返断裂（review C3）。
+ * 非法字符用 `%XX` 转义而非统一替换为 `_`：`a*b` 与 `a_b` 才不会落到同一备份文件族，
+ * 否则轮转会错删另一发行版的备份（review 数据安全根治）。
+ * `%` 自身先转义（%25），保证映射无碰撞可往返。
  */
 export function sanitizeNameForFile(name: string): string {
   return String(name ?? '')
-    .replace(CONTROL_CHARS, '_')
-    .replace(ILLEGAL_FILE_CHARS, '_')
+    .replace(/%/g, '%25')
+    .replace(CONTROL_CHARS, percentEncode)
+    .replace(ILLEGAL_FILE_CHARS, percentEncode)
 }
 
 /** 备份文件命名：`<name>_<YYYYMMDD-HHmmss>.<ext>`（与轮转规则配套） */

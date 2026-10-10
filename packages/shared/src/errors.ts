@@ -92,7 +92,7 @@ export const ERROR_CATALOG: Record<
   },
   CONFIG_CONFLICT: {
     message: '配置文件已被外部修改',
-    suggestion: '请选择「重载」「覆盖」或「对比」以解决冲突',
+    suggestion: '请选择「重载」（采用磁盘上的外部修改）、「覆盖」（采用应用内状态）或「暂不处理」',
     recoverable: true,
   },
   IO_ERROR: {

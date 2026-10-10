@@ -12,7 +12,6 @@ export const PRIMITIVE_GRADIENTS = {
   sunset: 'linear-gradient(135deg, #FB7185 0%, #F59E0B 100%)',
   ocean: 'linear-gradient(135deg, #38BDF8 0%, #0EA5E9 50%, #2563EB 100%)',
   forest: 'linear-gradient(135deg, #34D399 0%, #10B981 50%, #059669 100%)',
-  custom: 'linear-gradient(135deg, #22D3EE 0%, #6366F1 50%, #A855F7 100%)',
 } as const
 
 export type AccentName = keyof typeof PRIMITIVE_GRADIENTS
@@ -71,12 +70,6 @@ export const ACCENT_MAPS = {
     accentHover: '#059669',
     accentSoft: 'rgba(16, 185, 129, 0.12)',
     bgActive: 'rgba(16, 185, 129, 0.10)',
-  },
-  custom: {
-    accent: '#6366F1',
-    accentHover: '#4F46E5',
-    accentSoft: 'rgba(99, 102, 241, 0.12)',
-    bgActive: 'rgba(99, 102, 241, 0.10)',
   },
 } as const
 

@@ -128,6 +128,9 @@ describe('io-service helpers', () => {
     expect(resolveTargetFile('backup', 'vhd')).toMatch(/backup\.vhdx$/)
     expect(resolveTargetFile('backup.tar', 'tar')).toMatch(/backup\.tar$/)
     expect(resolveTargetFile('disk.vhdx', 'vhd')).toMatch(/disk\.vhdx$/)
+    // `.vhd` 一并归一为 `.vhdx`：否则备份永远不被列表/轮转识别（幽灵文件 — review 根治）
+    expect(resolveTargetFile('disk.vhd', 'vhd')).toMatch(/disk\.vhdx$/)
+    expect(resolveTargetFile('disk.vhd', 'tar')).toMatch(/disk\.tar$/)
   })
 
   it('uniqueBackupName 生成规范备份名且避让冲突', () => {

@@ -71,7 +71,6 @@ describe('useNetworkStore', () => {
     await s.load()
     expect(s.rules).toHaveLength(1)
     expect(s.proxy.httpProxy).toBe('http://127.0.0.1:7890')
-    expect(s.loaded).toBe(true)
     expect(s.byId('dev-3000')).toBeTruthy()
   })
 

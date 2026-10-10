@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NSpin, NTag, useDialog, useMessage } from 'naive-ui'
 import { CodeEditor } from '@ui/components'
 import type { DirEntry } from '@shared/types'
+import { FS_READ_LIMIT_BYTES } from '@shared/constants'
 import { errorLine } from '../../composables/useAppError'
 
 const props = defineProps<{ distroName: string }>()
@@ -246,7 +247,7 @@ watch(
         <p v-if="file.binary" class="hint">二进制文件不支持在线编辑，请在终端中处理。</p>
         <!-- 超限截断：编辑器只读，禁止保存 —— 否则会把截断后的内容整文件覆盖回去（review C1） -->
         <p v-else-if="file.truncated" class="hint">
-          文件超过 {{ Math.round(file.sizeBytes / 1024) }}KB 的在线编辑上限，仅展示前缀。
+          文件超过在线编辑上限（{{ Math.round(FS_READ_LIMIT_BYTES / 1024) }}KB），仅展示前缀。
           为避免保存时截断原文件，此处禁止编辑；请在终端中用 vim/nano 处理。
         </p>
         <CodeEditor

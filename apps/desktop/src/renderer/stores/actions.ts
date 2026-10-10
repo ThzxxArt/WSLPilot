@@ -73,10 +73,11 @@ export const useActionsStore = defineStore('actions', {
 
     /** 撤销删除 */
     async undoRestore() {
-      if (!this.lastRemoved) return
       const restored = this.lastRemoved
-      this.lastRemoved = null
+      if (!restored) return
+      // 成功后才清撤销缓冲：失败时仍可重试，绝不把被删项弄丢（review 乐观清除无回滚）
       await this.upsert(restored)
+      this.lastRemoved = null
     },
 
     /** 执行动作（confirm 由调用方负责）；返回 TaskHandle（terminal 动作含 ptyId） */

@@ -79,13 +79,15 @@ describe('UsbipdService.status', () => {
     expect(await svc.status()).toEqual({ installed: false, version: '' })
   })
 
-  it('其它失败也降级为未安装并记录日志', async () => {
+  it('其它失败如实报告「已安装但异常」，绝不误导重装（review 根治）', async () => {
     const tool = makeTool({ code: 1, stderr: 'weird' })
-    const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
     const l = logger()
-    const svc2 = createUsbipdService({ logger: l, runTool: tool.fn })
-    expect(await svc.status()).toEqual({ installed: false, version: '' })
-    expect(await svc2.status()).toEqual({ installed: false, version: '' })
+    const svc = createUsbipdService({ logger: l, runTool: tool.fn })
+    const status = await svc.status()
+    expect(status.installed).toBe(true)
+    expect(status.version).toBe('')
+    expect(status.error).toContain('weird')
+    expect(l.warn).toHaveBeenCalled()
   })
 
   it('纯版本号输出也能解析', async () => {

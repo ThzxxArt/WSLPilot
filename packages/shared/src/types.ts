@@ -45,7 +45,6 @@ export interface GeneralSettings {
   autoRefreshOnStart: boolean
   pollIntervalMs: number
   locale: LocaleCode
-  theme: 'light'
   accent: AccentName
   closeBehavior: CloseBehavior
   launchAtLogin: boolean
@@ -191,6 +190,8 @@ export interface UsbDevice {
 export interface UsbipdStatus {
   installed: boolean
   version: string
+  /** 调用失败原因（已安装但服务异常等——区别于「未安装」，避免误导重装） */
+  error?: string
 }
 
 export type UsbipdOp = 'bind' | 'unbind' | 'attach' | 'detach'

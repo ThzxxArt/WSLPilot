@@ -3,32 +3,12 @@
 
 // 强调色由 JS 在 :root 上覆盖 --color-accent 系列变量
 
-// ── 玻璃拟态 ───────────────────────────────────────────────
-.glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur));
-  border: var(--glass-border);
-}
-
-// ── 布局骨架 ───────────────────────────────────────────────
+// ── 布局骨架（只保留真实消费的类 — review 幽灵 CSS 根治）────────────
 .pilot-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--color-bg-canvas);
-}
-
-.pilot-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.pilot-content {
-  flex: 1;
-  min-width: 0;
-  overflow: auto;
-  padding: var(--space-6);
 }
 
 // ── 过渡 ───────────────────────────────────────────────────

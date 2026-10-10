@@ -71,14 +71,18 @@ export function resolveTargetFile(input: string, format: BackupFormat): string {
   let p = resolve(expanded)
   const want = format === 'vhd' ? '.vhdx' : '.tar'
   const lower = p.toLowerCase()
-  if (format === 'vhd' && lower.endsWith('.tar')) {
-    return `${p.slice(0, -4)}${want}`
+  if (format === 'vhd') {
+    // `.vhd` 一并归一为 `.vhdx`：否则该备份永远不被 listBackups / 轮转识别（幽灵文件 — review 根治）
+    if (lower.endsWith('.tar') || lower.endsWith('.vhd')) {
+      return `${p.replace(/\.(tar|vhd)$/i, '')}${want}`
+    }
+    if (!lower.endsWith('.vhdx')) p = `${p}${want}`
+    return p
   }
-  if (format === 'tar' && (lower.endsWith('.vhdx') || lower.endsWith('.vhd'))) {
+  if (lower.endsWith('.vhdx') || lower.endsWith('.vhd')) {
     return p.replace(/\.(vhdx|vhd)$/i, want)
   }
-  const hasExt = lower.endsWith('.tar') || lower.endsWith('.vhdx') || lower.endsWith('.vhd')
-  if (!hasExt) p = `${p}${want}`
+  if (!lower.endsWith('.tar')) p = `${p}${want}`
   return p
 }
 

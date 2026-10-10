@@ -72,8 +72,14 @@ export function createElevationClient(
   const tool: RunToolFn = deps.runTool ?? runTool
   const tempRoot = deps.tempRoot ?? tmpdir()
 
-  /** PowerShell 单引号转义（路径内嵌到启动命令用） */
+  /**
+   * PowerShell 单引号转义（外层启动命令的字符串定界）。
+   * Start-Process -ArgumentList 会把元素按空格拼成命令行再交给子进程解析——
+   * 元素值必须**自带双引号**，否则含空格路径（C:\Users\John Doe\…）被拦腰拆开。
+   */
   const psQuote = (s: string) => `'${String(s).replace(/'/g, "''")}'`
+  /** -ArgumentList 元素：值内嵌双引号（子进程命令行解析层的引号），再经 psQuote 传入 */
+  const psArg = (s: string) => psQuote(`"${String(s).replace(/"/g, '\\"')}"`)
 
   async function run(requests: readonly ElevationRequest[]): Promise<ElevationRunResult> {
     // 先全部校验：任一非法请求都不进 UAC（白名单在提权前就拦住）
@@ -88,12 +94,14 @@ export function createElevationClient(
     const scriptPath = join(dir, 'helper.ps1')
 
     try {
-      await fsLike.writeFile(scriptPath, buildElevationHelperScript())
+      // UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的 .ps1 按系统 ANSI 码页解码，
+      // 脚本内的非 ASCII 内容会静默变乱码（错误文案一旦中文化就会写坏执行逻辑）
+      await fsLike.writeFile(scriptPath, `\ufeff${buildElevationHelperScript()}`)
       await fsLike.writeFile(requestPath, JSON.stringify(payload))
       await fsLike.writeFile(resultPath, '')
 
       // 外层启动器：拉起提权的 helper 进程并等待完成。
-      // 参数经 -ArgumentList 数组传入（不经 cmd 拼接）；路径单引号转义。
+      // 参数经 -ArgumentList 数组传入（不经 cmd 拼接）；元素自带双引号（psArg）。
       const argList = [
         '-NoProfile',
         '-NonInteractive',
@@ -106,9 +114,9 @@ export function createElevationClient(
         '-ResultFile',
         resultPath,
       ]
-        .map(psQuote)
+        .map(psArg)
         .join(',')
-      const command = `try { Start-Process -FilePath ${psQuote('powershell.exe')} -ArgumentList @(${argList}) -Verb RunAs -Wait -ErrorAction Stop } catch { Write-Output $_.Exception.Message; exit 1 }`
+      const command = `try { Start-Process -FilePath ${psArg('powershell.exe')} -ArgumentList @(${argList}) -Verb RunAs -Wait -ErrorAction Stop } catch { Write-Output $_.Exception.Message; exit 1 }`
 
       const r = await tool(
         'powershell.exe',
@@ -145,8 +153,13 @@ export function createElevationClient(
       }
       return parsed
     } finally {
-      // 提权残留物含命令参数，用完即焚（失败也不留垃圾 — 与 atomic-write 同一铁律）
-      rmSync(dir, { recursive: true, force: true })
+      // 提权残留物含命令参数，用完即焚（失败也不留垃圾 — 与 atomic-write 同一铁律）。
+      // 清理失败不得顶掉 try 里的返回值（被杀软/提权子进程占用时 rmSync 会抛）
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch (e) {
+        logger.warn('elevation cleanup failed', { dir, error: String(e) })
+      }
     }
   }
 

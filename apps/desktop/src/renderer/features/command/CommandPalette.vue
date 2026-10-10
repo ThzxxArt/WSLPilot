@@ -296,6 +296,27 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault()
     closePalette()
+  } else if (e.key === 'Tab') {
+    // 焦点陷阱（aria-modal 的语义义务）：Tab/Shift+Tab 循环限制在面板内
+    e.preventDefault()
+    const root = e.currentTarget as HTMLElement | null
+    if (!root) return
+    const focusables = [
+      ...root.querySelectorAll<HTMLElement>(
+        'input, button, [href], [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((el) => !el.hasAttribute('disabled'))
+    if (focusables.length === 0) return
+    const current = document.activeElement as HTMLElement | null
+    const idx = current ? focusables.indexOf(current) : -1
+    const next = e.shiftKey
+      ? idx <= 0
+        ? focusables.length - 1
+        : idx - 1
+      : idx >= focusables.length - 1
+        ? 0
+        : idx + 1
+    focusables[next]?.focus()
   } else if (e.key === 'ArrowDown') {
     e.preventDefault()
     activeIndex.value =

@@ -10,7 +10,6 @@ export const useDistrosStore = defineStore('distros', {
     loading: false,
     lastError: null as AppError | null,
     busy: new Set<string>(),
-    lastRefreshAt: 0,
   }),
 
   getters: {
@@ -18,7 +17,6 @@ export const useDistrosStore = defineStore('distros', {
     stoppedCount: (s) => s.items.filter((d) => d.state === 'Stopped').length,
     defaultDistro: (s) => s.items.find((d) => d.isDefault) ?? null,
     byName: (s) => (name: string) => s.items.find((d) => d.name === name) ?? null,
-    pinned: (s) => s.items.filter((d) => d.meta?.pinned),
   },
 
   actions: {
@@ -26,8 +24,9 @@ export const useDistrosStore = defineStore('distros', {
       this.loading = true
       this.lastError = null
       try {
-        this.items = await window.wslAPI.distros.list()
-        this.lastRefreshAt = Date.now()
+        const list = await window.wslAPI.distros.list()
+        // meta.pinned = 置顶（设计书 §6.4）：固定排在最前（此前该字段能写不能看 — 幽灵字段根治）
+        this.items = [...list].sort((a, b) => Number(!!b.meta?.pinned) - Number(!!a.meta?.pinned))
       } catch (e) {
         this.lastError = toAppError(e)
       } finally {

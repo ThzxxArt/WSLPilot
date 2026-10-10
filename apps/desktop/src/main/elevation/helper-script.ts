@@ -9,7 +9,7 @@
  */
 import { ELEVATION_PROGRAMS } from '@wslpilot/shared'
 
-/** 生成 Helper 脚本全文（UTF-8 BOM 无关，PowerShell 5.1 兼容） */
+/** 生成 Helper 脚本全文（UTF-8；**写盘需带 BOM** —— Windows PowerShell 5.1 对无 BOM 文件按 ANSI 解码） */
 export function buildElevationHelperScript(): string {
   const whitelist = JSON.stringify(ELEVATION_PROGRAMS)
   return `# WSLPilot elevation helper — auto-generated. DO NOT EDIT.

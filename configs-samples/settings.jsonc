@@ -5,7 +5,6 @@
     "autoRefreshOnStart": true,
     "pollIntervalMs": 5000,
     "locale": "system",
-    "theme": "light",
     "accent": "aurora",
     "closeBehavior": "minimizeToTray",
     "launchAtLogin": false,
@@ -36,5 +35,6 @@
     "confirmDestructive": true,
     "logLevel": "info",
     "hardwareAcceleration": true,
+    "autoUpdate": true,
   },
 }

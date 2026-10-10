@@ -6,8 +6,8 @@ export const generalSettingsSchema = z.object({
   autoRefreshOnStart: z.boolean().default(true),
   pollIntervalMs: z.number().int().min(1000).max(60_000).default(5000),
   locale: z.enum(['system', 'zh-CN', 'en-US']).default('system'),
-  theme: z.literal('light').default('light'),
-  accent: z.enum(['aurora', 'sunset', 'ocean', 'forest', 'custom']).default('aurora'),
+  // 浅色是唯一主题（不提供深色）；该策略不做成可写配置（幽灵字段根治）
+  accent: z.enum(['aurora', 'sunset', 'ocean', 'forest']).default('aurora'),
   closeBehavior: z.enum(['minimizeToTray', 'quit']).default('minimizeToTray'),
   launchAtLogin: z.boolean().default(false),
   reduceMotion: z.boolean().default(false),

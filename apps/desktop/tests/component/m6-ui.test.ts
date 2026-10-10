@@ -348,7 +348,7 @@ describe('ProxyPanel', () => {
     expect(w.text()).toContain('已写入')
   })
 
-  it('空代理配置时展示校验提示并禁用保存', async () => {
+  it('空代理配置 = 显式关闭（可保存，不再逼用户留假地址）', async () => {
     const w = mount(ProxyPanel, {
       props: {
         proxy: { useWindowsProxy: false, httpProxy: '', httpsProxy: '', noProxy: '' },
@@ -359,9 +359,9 @@ describe('ProxyPanel', () => {
       attachTo: document.body,
     })
     await flushPromises()
-    expect(w.text()).toContain('请填写 HTTP/HTTPS 代理地址')
+    expect(w.text()).not.toContain('请填写 HTTP/HTTPS 代理地址')
     const save = w.findAll('button').find((b) => b.text().includes('保存配置'))
-    expect(save!.attributes('disabled')).toBeDefined()
+    expect(save!.attributes('disabled')).toBeUndefined()
   })
 })
 

@@ -87,6 +87,9 @@ onUnmounted(() => {
   if (timer) window.clearInterval(timer)
 })
 
+/** 同名发行版开标签请求去重：query 快速切换 / 双入口并发时防双开（review 并发竞态） */
+const opening = new Map<string, Promise<void>>()
+
 /** 已有会话则激活，避免重复开标签（review M1） */
 async function openOrActivate(distro: string) {
   const existing = terminal.sessions.find((s) => s.distro === distro && s.alive)
@@ -94,7 +97,16 @@ async function openOrActivate(distro: string) {
     terminal.setActive(existing.ptyId)
     return
   }
-  await create(distro)
+  const inflight = opening.get(distro)
+  if (inflight) {
+    await inflight
+    const opened = terminal.sessions.find((s) => s.distro === distro && s.alive)
+    if (opened) terminal.setActive(opened.ptyId)
+    return
+  }
+  const p = create(distro).finally(() => opening.delete(distro))
+  opening.set(distro, p)
+  await p
 }
 
 watch(

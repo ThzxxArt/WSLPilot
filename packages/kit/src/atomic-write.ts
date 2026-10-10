@@ -6,15 +6,16 @@ import { randomUUID } from 'node:crypto'
  * 原子写文件：写临时文件 → fsync → rename。
  * 绝不原地截断写，防崩溃导致空文件；
  * 失败时清理 tmp 并重试一次 rename（Windows 目标被占用常见 EPERM — review M7）。
+ * content 支持字符串（utf8）与二进制 Buffer（诊断包 zip 等产物）。
  */
-export async function atomicWrite(filePath: string, content: string): Promise<void> {
+export async function atomicWrite(filePath: string, content: string | Buffer): Promise<void> {
   const dir = dirname(filePath)
   await fs.mkdir(dir, { recursive: true })
   const tmp = join(dir, `.${randomUUID()}.tmp`)
   try {
     const fh = await fs.open(tmp, 'w')
     try {
-      await fh.writeFile(content, 'utf8')
+      await fh.writeFile(content)
       await fh.sync()
     } finally {
       await fh.close()

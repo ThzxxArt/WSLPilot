@@ -248,7 +248,6 @@ describe('useSettingsStore', () => {
     const { useSettingsStore } = await import('../../src/renderer/stores/settings')
     const s = useSettingsStore()
     await s.load()
-    expect(s.loaded).toBe(true)
     expect(s.lastError?.code).toBe('CONFIG_INVALID')
     expect(s.accent).toBe('aurora')
     expect(s.version).toBe('')
@@ -358,30 +357,28 @@ describe('useDistrosStore edges', () => {
     expect(s.lastError?.code).toBe('UNKNOWN')
   })
 
-  it('byName / pinned getters', async () => {
+  it('byName / 置顶排序（meta.pinned 固定排最前）', async () => {
+    const meta = (name: string, pinned: boolean) => ({
+      name,
+      alias: '',
+      tags: [],
+      color: '',
+      icon: '',
+      note: '',
+      startupCwd: '~',
+      pinned,
+      quickActions: [],
+    })
     wslAPI.distros.list.mockResolvedValue([
-      {
-        name: 'A',
-        state: 'Running',
-        version: 2,
-        isDefault: false,
-        meta: {
-          name: 'A',
-          alias: '',
-          tags: [],
-          color: '',
-          icon: '',
-          note: '',
-          startupCwd: '~',
-          pinned: true,
-          quickActions: [],
-        },
-      },
+      { name: 'A', state: 'Running', version: 2, isDefault: false, meta: meta('A', false) },
+      { name: 'B', state: 'Stopped', version: 2, isDefault: false, meta: meta('B', true) },
+      { name: 'C', state: 'Stopped', version: 2, isDefault: true, meta: meta('C', false) },
     ])
     const s = useDistrosStore()
     await s.refresh()
     expect(s.byName('A')?.name).toBe('A')
     expect(s.byName('Z')).toBeNull()
-    expect(s.pinned).toHaveLength(1)
+    // 置顶的 B 排第一，其余保持原序
+    expect(s.items.map((d) => d.name)).toEqual(['B', 'A', 'C'])
   })
 })

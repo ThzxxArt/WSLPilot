@@ -123,7 +123,9 @@ function onDetailTerminal(name: string) {
     <header class="page-header">
       <div>
         <h1>发行版</h1>
-        <p class="sub">来自 <code>wsl --list --verbose</code> · 实时状态 · 点击卡片可启停</p>
+        <p class="sub">
+          来自 <code>wsl --list --verbose</code> · 实时状态 · 卡片上的按钮可直接启停
+        </p>
       </div>
       <div class="toolbar">
         <n-input

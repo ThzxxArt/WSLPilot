@@ -32,7 +32,7 @@ test.describe('WSLPilot 启动冒烟', () => {
     await expect(window.getByText('node-pty', { exact: false })).toBeVisible({ timeout: 15_000 })
 
     // 打开备份迁移页（M4）：向导模式与最近备份面板可见（exact 文本防子串误中）
-    await window.getByRole('button', { name: '备份与迁移', exact: true }).click()
+    await window.getByRole('button', { name: '备份迁移', exact: true }).click()
     await expect(window.getByText('导出备份', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(window.getByText('导入恢复', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(window.getByText('迁移磁盘', { exact: true })).toBeVisible({ timeout: 15_000 })

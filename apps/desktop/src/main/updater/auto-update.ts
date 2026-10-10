@@ -42,9 +42,9 @@ export interface UpdateService {
   install(): void
 }
 
-/** 开发模式错误识别（electron-updater 未打包时的行为） */
+/** 开发模式错误识别（electron-updater 未打包时的行为）；不得过宽——打包后 publish 配置损坏不是开发模式 */
 export function isDevModeSkipError(message: string): boolean {
-  return /not packed|dev-app-update|app-update\.yml|cannot check updates|开发模式/i.test(message)
+  return /not packed|dev-app-update|开发模式/i.test(message)
 }
 
 function errorMessage(e: unknown): string {
@@ -72,6 +72,13 @@ export function createUpdateService(deps: UpdateServiceDeps): UpdateService {
   function setup(u: UpdaterLike): UpdaterLike {
     u.autoDownload = false
     u.autoInstallOnAppQuit = true
+    // 更新源回填（update:status 展示用；开发环境可能无 feed）
+    try {
+      const feed = u.getFeedURL?.()
+      if (feed) emit({ feedUrl: feed })
+    } catch {
+      /* 拿不到 feed 不影响更新功能 */
+    }
     if (!wired) {
       wireEvents(u)
       wired = true

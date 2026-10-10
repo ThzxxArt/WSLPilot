@@ -8,7 +8,6 @@ describe('config schema', () => {
     const s = defaultConfig('settings')
     expect(s.$schemaVersion).toBe(2)
     expect(s.general.accent).toBe('aurora')
-    expect(s.general.theme).toBe('light')
     expect(s.advanced.confirmDestructive).toBe(true)
   })
 

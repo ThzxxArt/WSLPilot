@@ -12,7 +12,6 @@ export const useDevicesStore = defineStore('devices', {
   state: () => ({
     status: { installed: false, version: '' } as UsbipdStatus,
     items: [] as UsbDevice[],
-    loaded: false,
     loading: false,
     lastError: null as AppError | null,
   }),
@@ -36,7 +35,6 @@ export const useDevicesStore = defineStore('devices', {
         } else {
           this.items = []
         }
-        this.loaded = true
       } catch (e) {
         this.lastError = toAppError(e)
         this.items = []

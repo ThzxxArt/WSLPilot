@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -38,7 +38,15 @@ onMounted(() => {
   void window.wslAPI.app
     .signatureStatus()
     .then((s) => (signature.value = s))
-    .catch(() => (signature.value = null))
+    // 检测请求失败 ≠ 未签名：如实记录「无法检测」，绝不渲染成「未检测到有效签名」
+    .catch(
+      () =>
+        (signature.value = {
+          checked: false,
+          signed: false,
+          detail: '签名状态检测请求失败',
+        }),
+    )
     .finally(() => (signatureLoading.value = false))
   void update.load()
 })
@@ -84,15 +92,24 @@ async function browseBackupDir() {
  * 文本类设置的防抖落盘。
  * 失败回滚与提示由 settings store 的 persistField + 布局层统一处理
  * （review M-3 根治后此处不再自管回滚，避免双重回滚把值写反）。
+ * 卸载时清理挂起的防抖定时器（review timer 纪律）。
  */
+const pendingTimers = new Set<number>()
+onUnmounted(() => {
+  for (const t of pendingTimers) window.clearTimeout(t)
+  pendingTimers.clear()
+})
+
 function makeDebouncedSetter<T>(write: (v: T) => Promise<unknown>) {
   let timer: number | undefined
   return (value: T) => {
     if (timer) window.clearTimeout(timer)
     timer = window.setTimeout(() => {
+      pendingTimers.delete(timer!)
       timer = undefined
       void write(value)
     }, 400)
+    pendingTimers.add(timer)
   }
 }
 
@@ -140,7 +157,8 @@ const updateStatusLabel = computed(() => {
     case 'downloaded':
       return `新版本 v${update.version || ''} 已下载，重启后安装`
     case 'error':
-      return `更新检查失败：${update.error}`
+      // error 可能来自检查 / 下载 / 安装任一环节，不谎报成「检查」失败
+      return `更新失败：${update.error}`
     default:
       return update.error || '未检查更新'
   }
@@ -151,6 +169,8 @@ async function onCheckUpdate() {
     const s = await update.check()
     if (s.status === 'not-available') message.success('已是最新版本')
     else if (s.status === 'available') message.info(`发现新版本 v${s.version ?? ''}`)
+    else if (s.status === 'error') message.error(`检查更新失败：${s.error || '未知原因'}`)
+    else if (s.error) message.warning(s.error) // 开发模式等非错误提示
   } catch (e) {
     message.error(errorLine(e, '检查更新失败'))
   }
@@ -158,8 +178,13 @@ async function onCheckUpdate() {
 
 async function onDownloadUpdate() {
   try {
-    await update.download()
-    message.success('更新下载完成，可点击「重启并安装」')
+    // download() 对「没有可下载的更新」与失败都返回 error 状态而不抛——必须读结果
+    const s = await update.download()
+    if (s.status === 'downloaded') {
+      message.success('更新下载完成，可点击「重启并安装」')
+    } else {
+      message.error(`下载更新失败：${s.error || '未知原因'}`)
+    }
   } catch (e) {
     message.error(errorLine(e, '下载更新失败'))
   }
@@ -676,11 +701,20 @@ async function exportDiagnostics() {
             <n-tag size="small" :bordered="false" type="success">已签名</n-tag>
             <span v-if="signature.subject" class="sig-subject">{{ signature.subject }}</span>
           </div>
-          <div v-else-if="signature && !signatureLoading" class="hint">
+          <!-- 确认未签名（检测已成功）：给 SmartScreen 说明 -->
+          <div v-else-if="signature?.checked && !signatureLoading" class="hint">
             <n-tag size="small" :bordered="false" type="warning">未检测到有效签名</n-tag>
             <p class="smartscreen-note">{{ signature.smartscreenNote }}</p>
           </div>
-          <div v-else class="hint">签名状态未知（仅 Windows 平台可检测）</div>
+          <!-- 检测未完成（非 Windows / 检测失败）：如实说「无法检测」，不冒充结论 -->
+          <div v-else-if="signature && !signatureLoading" class="hint">
+            <n-tag size="small" :bordered="false">无法检测签名状态</n-tag>
+            <p v-if="signature.detail" class="smartscreen-note">{{ signature.detail }}</p>
+            <p v-if="signature.smartscreenNote" class="smartscreen-note">
+              {{ signature.smartscreenNote }}
+            </p>
+          </div>
+          <div v-else class="hint">正在检测签名状态…</div>
         </n-spin>
       </div>
     </n-card>

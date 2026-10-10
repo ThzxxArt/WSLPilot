@@ -1,8 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createElevationClient,
   isUacCanceled,
   parseResultJson,
+  ELEVATION_TIMEOUT_MS,
   type ElevationClientDeps,
 } from '../../src/main/elevation/client'
 import { buildElevationHelperScript } from '../../src/main/elevation/helper-script'
@@ -40,7 +44,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
         results: [{ op: 'usbipd.bind', ok: true, code: 0, stdout: 'bound', stderr: '' }],
       }),
     )
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: '',
       code: 0,
@@ -71,7 +75,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
   it('UAC 取消 → canceled（非错误）', async () => {
     const fsLike = makeFs()
     fsLike.readFile.mockResolvedValue('')
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: 'The operation was canceled by the user.',
       code: 1,
@@ -85,7 +89,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
   it('无结果且非取消 → error 结果', async () => {
     const fsLike = makeFs()
     fsLike.readFile.mockResolvedValue('')
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: 'powershell missing',
       code: -1,
@@ -99,7 +103,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
   it('结果 JSON 损坏 → 解析失败错误（不吞错）', async () => {
     const fsLike = makeFs()
     fsLike.readFile.mockResolvedValue('not-json{{')
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: '',
       code: 0,
@@ -112,7 +116,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
   it('runOne：取消 UAC → PERMISSION_DENIED', async () => {
     const fsLike = makeFs()
     fsLike.readFile.mockResolvedValue('')
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: '已取消',
       code: 1,
@@ -129,7 +133,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
         results: [{ op: 'usbipd.bind', ok: false, code: 1, stdout: '', stderr: 'denied' }],
       }),
     )
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: '',
       code: 0,
@@ -142,7 +146,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
 
   it('非法请求在提权前被拒（白名单先于 UAC）', async () => {
     const fsLike = makeFs()
-    const runTool = vi.fn(async (_program: string, _args: string[]) => ({
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
       stdout: '',
       stderr: '',
       code: 0,
@@ -195,5 +199,102 @@ describe('提权 Helper 脚本（纵深防御）', () => {
     expect(script).toContain('ConvertFrom-Json')
     // 结果落盘供主进程读取
     expect(script).toContain('$ResultFile')
+  })
+
+  it('校验（白名单拒绝）必须发生在命令执行之前（纵深防御顺序）', () => {
+    const script = buildElevationHelperScript()
+    const guardAt = script.indexOf('op not allowed')
+    const invokeAt = script.indexOf('& $program @argList')
+    expect(guardAt).toBeGreaterThan(-1)
+    expect(invokeAt).toBeGreaterThan(-1)
+    expect(guardAt).toBeLessThan(invokeAt)
+    // 白名单 JSON 与 shared 同源（禁止脚本内另抄一份）
+    expect(script).toContain(JSON.stringify(ELEVATION_PROGRAMS))
+  })
+})
+
+describe('提权客户端启动器细节（review 根治回归）', () => {
+  const bindReq: ElevationRequest = { op: 'usbipd.bind', params: { busId: '1-2' } }
+  let spaceRoot = ''
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    spaceRoot = mkdtempSync(join(tmpdir(), 'wslpilot elev '))
+  })
+
+  afterEach(() => {
+    rmSync(spaceRoot, { recursive: true, force: true })
+  })
+
+  function makeFs() {
+    return {
+      writeFile: vi.fn(async (_path: string, _content: string) => undefined),
+      readFile: vi.fn(async (_path: string) =>
+        JSON.stringify({
+          canceled: false,
+          results: [{ op: 'usbipd.bind', ok: true, code: 0, stdout: 'ok', stderr: '' }],
+        }),
+      ),
+      rm: vi.fn(async (_path: string) => undefined),
+    }
+  }
+
+  it('helper.ps1 带 UTF-8 BOM（PowerShell 5.1 否则按 ANSI 解码）', async () => {
+    const fsLike = makeFs()
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
+      stdout: '',
+      stderr: '',
+      code: 0,
+    }))
+    const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
+    await client.run([bindReq])
+    const scriptWrite = fsLike.writeFile.mock.calls.find((c) => String(c[0]).endsWith('helper.ps1'))
+    expect(scriptWrite).toBeTruthy()
+    expect(String(scriptWrite![1]).startsWith('\ufeff')).toBe(true)
+  })
+
+  it('含空格的临时目录：ArgumentList 元素自带双引号（空格路径不被拆开）', async () => {
+    const fsLike = makeFs()
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
+      stdout: '',
+      stderr: '',
+      code: 0,
+    }))
+    const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
+    await client.run([bindReq])
+    const command = String(runTool.mock.calls[0]![1].at(-1))
+    // 双引号包住完整路径（含空格部分整体在引号内）— 此前单引号只定界 PS 源码，子进程拆路径
+    expect(command).toMatch(/'"[^"]*wslpilot elev [^"]*helper\.ps1"'/)
+    expect(command).toMatch(/'"[^"]*request\.json"'/)
+    expect(command).toMatch(/'"[^"]*result\.json"'/)
+  })
+
+  it('UAC 超时按 ELEVATION_TIMEOUT_MS 透传', async () => {
+    const fsLike = makeFs()
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
+      stdout: '',
+      stderr: '',
+      code: 0,
+    }))
+    const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
+    await client.run([bindReq])
+    expect(runTool.mock.calls[0]![2]).toEqual({ timeoutMs: ELEVATION_TIMEOUT_MS })
+  })
+
+  it('run 结束后提权工作目录被清空（含失败路径 — 用完即焚）', async () => {
+    const fsLike = makeFs()
+    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
+      stdout: '',
+      stderr: '',
+      code: 0,
+    }))
+    const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
+    await client.run([bindReq])
+    expect(readdirSync(spaceRoot)).toEqual([])
+
+    // 失败路径（结果 JSON 损坏）同样清理
+    fsLike.readFile.mockResolvedValueOnce('not-json{{')
+    await client.run([bindReq])
+    expect(readdirSync(spaceRoot)).toEqual([])
   })
 })

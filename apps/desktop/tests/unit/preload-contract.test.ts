@@ -136,6 +136,33 @@ describe('preload 契约', () => {
         'signatureStatus',
       ].sort(),
     )
+    // 其余域的方法面同样全枚举（此前只锁 6 个域 — 新增方法不会红，假信心）
+    expect(Object.keys(exposed.distros).sort()).toEqual(
+      [
+        'install',
+        'list',
+        'listOnline',
+        'registryDetail',
+        'setDefault',
+        'setVersion',
+        'shutdown',
+        'start',
+        'terminate',
+        'uninstall',
+      ].sort(),
+    )
+    expect(Object.keys(exposed.meta).sort()).toEqual(['get', 'set'])
+    expect(Object.keys(exposed.metrics).sort()).toEqual(['sample', 'sampleOverview'])
+    expect(Object.keys(exposed.terminal).sort()).toEqual(
+      ['create', 'input', 'kill', 'list', 'maxSessions', 'onData', 'onExit', 'resize'].sort(),
+    )
+    expect(Object.keys(exposed.io).sort()).toEqual(
+      ['cleanupBackups', 'export', 'import', 'listBackups', 'move'].sort(),
+    )
+    expect(Object.keys(exposed.wslconf).sort()).toEqual(['read', 'write'])
+    expect(Object.keys(exposed.actions).sort()).toEqual(['list', 'run', 'save'])
+    expect(Object.keys(exposed.fs).sort()).toEqual(['read', 'readDir', 'revealInExplorer', 'write'])
+    expect(Object.keys(exposed.task).sort()).toEqual(['cancel', 'onProgress'])
   })
 
   it('config 域通道与参数形状', () => {
@@ -426,21 +453,56 @@ describe('preload 契约', () => {
     callAndCheck('update.install', () => exposed.update.install(), CH.updateInstall)
   })
 
-  it('事件订阅可退订（config/pty/task/navigate）', () => {
-    for (const [name, subscribe] of [
-      ['config.onChanged', () => exposed.config.onChanged(() => {})],
-      ['config.onConflict', () => exposed.config.onConflict(() => {})],
-      ['terminal.onData', () => exposed.terminal.onData(() => {})],
-      ['terminal.onExit', () => exposed.terminal.onExit(() => {})],
-      ['task.onProgress', () => exposed.task.onProgress(() => {})],
-      ['app.onNavigate', () => exposed.app.onNavigate(() => {})],
-      ['update.onChanged', () => exposed.update.onChanged(() => {})],
-    ] as const) {
+  it('DERIVED 方法的形状降级真实生效（此前注释承诺但零断言 — 假信心）', async () => {
+    // actions.list：非数组/缺省 → []
+    invoke.mockResolvedValueOnce({ actions: 'oops' })
+    await expect(exposed.actions.list()).resolves.toEqual([])
+    invoke.mockResolvedValueOnce(null)
+    await expect(exposed.actions.list()).resolves.toEqual([])
+    invoke.mockResolvedValueOnce({ actions: [{ id: 'a1' }] })
+    await expect(exposed.actions.list()).resolves.toEqual([{ id: 'a1' }])
+
+    // network.listRules：非数组 → []
+    invoke.mockResolvedValueOnce({ portForwarding: 'x' })
+    await expect(exposed.network.listRules()).resolves.toEqual([])
+    invoke.mockResolvedValueOnce({ portForwarding: [{ id: 'r1' }] })
+    await expect(exposed.network.listRules()).resolves.toEqual([{ id: 'r1' }])
+
+    // network.getProxy：缺省 → 默认代理对象
+    invoke.mockResolvedValueOnce({})
+    await expect(exposed.network.getProxy()).resolves.toEqual({
+      useWindowsProxy: false,
+      httpProxy: '',
+      httpsProxy: '',
+      noProxy: 'localhost,127.0.0.1',
+    })
+  })
+
+  it('事件订阅可退订（逐通道校验注册通道名与摘除同 handler）', () => {
+    const cases = [
+      ['config.onChanged', () => exposed.config.onChanged(() => {}), CH.configChanged],
+      ['config.onConflict', () => exposed.config.onConflict(() => {}), CH.configConflict],
+      ['terminal.onData', () => exposed.terminal.onData(() => {}), CH.ptyData],
+      ['terminal.onExit', () => exposed.terminal.onExit(() => {}), CH.ptyExit],
+      ['task.onProgress', () => exposed.task.onProgress(() => {}), CH.taskProgress],
+      ['app.onNavigate', () => exposed.app.onNavigate(() => {}), CH.appNavigate],
+      ['update.onChanged', () => exposed.update.onChanged(() => {}), CH.updateChanged],
+    ] as const
+    for (const [name, subscribe, channel] of cases) {
+      const onBefore = on.mock.calls.length
+      const rmBefore = removeListener.mock.calls.length
       const off = subscribe()
-      expect(on, `${name} 应注册监听`).toHaveBeenCalled()
+      // 每轮独立增量断言（此前循环内只有 toHaveBeenCalled — 第 2 轮起恒绿）
+      expect(on.mock.calls.length, `${name} 应注册一次`).toBe(onBefore + 1)
+      expect(on.mock.calls[onBefore]![0], `${name} 应注册到 ${channel}`).toBe(channel)
       expect(typeof off, `${name} 应返回退订函数`).toBe('function')
+      const handler = on.mock.calls[onBefore]![1]
       off()
-      expect(removeListener, `${name} 退订应摘除监听`).toHaveBeenCalled()
+      expect(removeListener.mock.calls.length, `${name} 退订应摘除`).toBe(rmBefore + 1)
+      expect(removeListener.mock.calls[rmBefore], `${name} 退订须同通道同 handler`).toEqual([
+        channel,
+        handler,
+      ])
     }
   })
 })

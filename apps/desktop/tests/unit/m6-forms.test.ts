@@ -129,7 +129,9 @@ describe('规则系统状态', () => {
   it('udp 规则 → 仅记录', () => {
     expect(ruleSystemState({ ...RULE, protocol: 'udp' }, STATUS)).toBe('udp-only')
     expect(ruleSystemStateLabel('udp-only')).toBe('仅记录')
-    expect(ruleSystemStateLabel('listening')).toBe('监听中')
+    expect(ruleSystemStateLabel('applied')).toBe('已生效')
+    expect(ruleSystemStateLabel('mismatch')).toBe('指向不同')
+    expect(ruleSystemStateLabel('none')).toBe('未生效')
   })
 
   it('status 为空视为未生效', () => {
@@ -166,9 +168,10 @@ describe('代理表单', () => {
   })
 
   it('validateProxyForm', () => {
+    // 全空 = 显式「不配置代理」（关闭态可保存，不再逼用户留假地址 — review 根治）
     expect(
       validateProxyForm({ useWindowsProxy: false, httpProxy: '', httpsProxy: '', noProxy: '' }),
-    ).toMatch(/请填写/)
+    ).toBeNull()
     expect(
       validateProxyForm({
         useWindowsProxy: true,

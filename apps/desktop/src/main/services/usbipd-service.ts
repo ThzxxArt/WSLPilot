@@ -143,8 +143,13 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
         return { installed: false, version: '' }
       }
       if (r.code !== 0) {
+        // 已安装但调用失败（服务异常/超时等）：如实报告，绝不误导用户重装（review 根治）
         logger.warn('usbipd --version failed', { detail: text })
-        return { installed: false, version: '' }
+        return {
+          installed: true,
+          version: '',
+          error: text.slice(0, 300) || `usbipd 退出码 ${r.code}`,
+        }
       }
       // 形如 `usbipd-win 2.4.1` 或 `2.4.1`
       const version = /(\d+\.\d+(?:\.\d+)?)/.exec(text)?.[1] ?? text.split(/\r?\n/)[0]!.trim()

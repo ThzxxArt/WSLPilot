@@ -9,7 +9,9 @@ const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true })
 
 function tryDecode(label: string, buf: Buffer): string | null {
   try {
-    return new TextDecoder(label).decode(buf)
+    // fatal：非致命解码器（如 GBK）对非法序列只给 U+FFFD 而不抛错，
+    // 会让降级链永远走不到 windows-1252 / latin1，西欧码页输出被硬解成乱码（review 根治）
+    return new TextDecoder(label, { fatal: true }).decode(buf)
   } catch {
     return null
   }

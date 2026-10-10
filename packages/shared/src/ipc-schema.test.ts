@@ -349,3 +349,36 @@ describe('ipc-schema · M6 网络与设备通道', () => {
     }
   })
 })
+
+describe('ipc-schema · 补漏通道（review 假信心根治 M2）', () => {
+  it('distros:install 的 name 可选（省略 = 安装 WSL 本体）', () => {
+    expect(() => parseIpcArgs(CH.distrosInstall, [{}])).not.toThrow()
+    expect(() => parseIpcArgs(CH.distrosInstall, [{ name: 'Ubuntu' }])).not.toThrow()
+    expect(() => parseIpcArgs(CH.distrosInstall, [{ name: '' }])).toThrow()
+    expect(() => parseIpcArgs(CH.distrosInstall, [{ name: 'a/b' }])).toThrow()
+    expect(() => parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).not.toThrow() // 非 strict，多余键忽略
+  })
+
+  it('io:cleanupBackups 的 keep 越界拒绝、缺省 5', () => {
+    const parsed = IPC_SCHEMAS[CH.ioCleanupBackups]!.parse({})
+    expect((parsed as { keep: number }).keep).toBe(5)
+    expect(() => parseIpcArgs(CH.ioCleanupBackups, [{ keep: 0 }])).toThrow()
+    expect(() => parseIpcArgs(CH.ioCleanupBackups, [{ keep: 51 }])).toThrow()
+    expect(() => parseIpcArgs(CH.ioCleanupBackups, [{ keep: 7, dir: 'D:\\b' }])).not.toThrow()
+    expect(() => parseIpcArgs(CH.ioCleanupBackups, [{ keep: 7, dir: 'a\u0000b' }])).toThrow()
+  })
+
+  it('app:exportDiagnostics 接受空参与可选目录，拒绝非法路径', () => {
+    expect(() => parseIpcArgs(CH.appExportDiagnostics, [{}])).not.toThrow()
+    expect(() => parseIpcArgs(CH.appExportDiagnostics, [])).not.toThrow()
+    expect(() => parseIpcArgs(CH.appExportDiagnostics, [{ defaultPath: 'C:\\logs' }])).not.toThrow()
+    expect(() => parseIpcArgs(CH.appExportDiagnostics, [{ defaultPath: 'a\u0000b' }])).toThrow()
+  })
+
+  it('metrics:sample 接受发行版名与全局键 `*`，拒绝其它', () => {
+    expect(parseIpcArgs(CH.metricsSample, ['*'])).toBe('*')
+    expect(parseIpcArgs(CH.metricsSample, ['Ubuntu'])).toBe('Ubuntu')
+    expect(() => parseIpcArgs(CH.metricsSample, ['x/y'])).toThrow()
+    expect(() => parseIpcArgs(CH.metricsSample, [''])).toThrow()
+  })
+})

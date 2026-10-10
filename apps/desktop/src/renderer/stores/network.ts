@@ -21,7 +21,6 @@ export const useNetworkStore = defineStore('network', {
     rules: [] as PortForwardRule[],
     proxy: { ...defaultConfig('network').proxy } as ProxyConfig,
     status: null as NetworkStatus | null,
-    loaded: false,
     loading: false,
     saving: false,
     statusLoading: false,
@@ -52,7 +51,6 @@ export const useNetworkStore = defineStore('network', {
         const rules = await window.wslAPI.network.listRules()
         this.rules = Array.isArray(rules) ? rules : []
         this.proxy = await window.wslAPI.network.getProxy()
-        this.loaded = true
       } catch (e) {
         this.lastError = toAppError(e)
       } finally {
@@ -102,10 +100,11 @@ export const useNetworkStore = defineStore('network', {
     },
 
     async undoRestore() {
-      if (!this.lastRemoved) return
       const restored = this.lastRemoved
-      this.lastRemoved = null
+      if (!restored) return
+      // 成功后才清撤销缓冲：失败时仍可重试，绝不把被删项弄丢（review 乐观清除无回滚）
       await this.upsert(restored)
+      this.lastRemoved = null
     },
 
     /** 启用/停用开关（写回 network.jsonc） */
