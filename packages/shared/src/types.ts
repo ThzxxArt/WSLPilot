@@ -80,6 +80,8 @@ export interface AdvancedSettings {
   confirmDestructive: boolean
   logLevel: LogLevel
   hardwareAcceleration: boolean
+  /** 启动时自动检查更新（M7 自动更新） */
+  autoUpdate: boolean
 }
 
 export interface AppSettings {
@@ -351,3 +353,36 @@ export interface ConfigMap {
 }
 
 export type ConfigKey = keyof ConfigMap
+
+/** 自动更新状态（M7） */
+export type UpdateStatus =
+  'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+
+/** `update:status` 返回 / `update:changed` 事件载荷 */
+export interface UpdateState {
+  status: UpdateStatus
+  /** 可用/已下载的版本号 */
+  version?: string
+  /** 发布说明摘要 */
+  releaseNotes?: string
+  /** 下载进度 0-100（downloading 期间） */
+  percent?: number
+  error?: string
+  /** 当前版本 */
+  currentVersion: string
+  /** 更新源（feed URL）；未配置发布源时为空 */
+  feedUrl?: string
+}
+
+/** 代码签名状态（M7 签名 + SmartScreen 说明） */
+export interface SignatureStatus {
+  /** 是否完成检测（非 Windows / 检测失败为 false） */
+  checked: boolean
+  signed: boolean
+  /** 证书主题（签名时） */
+  subject?: string
+  /** 检测细节（PowerShell 原始状态等） */
+  detail?: string
+  /** 未签名时的 SmartScreen 提示（界面直接展示） */
+  smartscreenNote?: string
+}

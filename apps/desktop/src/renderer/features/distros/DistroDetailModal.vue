@@ -333,7 +333,8 @@ async function saveMeta() {
           <n-button secondary :disabled="!distro" @click="onConvert">
             转换为 WSL{{ distro && distro.version === 1 ? '2' : '1' }}
           </n-button>
-          <n-button quaternary type="error" @click="onUnregister"> 注销发行版 </n-button>
+          <!-- 危险操作：图标 + 文字双编码（§11.4 不仅靠颜色区分） -->
+          <n-button quaternary type="error" @click="onUnregister"> ⚠ 注销发行版 </n-button>
         </div>
       </n-tab-pane>
 

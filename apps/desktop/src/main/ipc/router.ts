@@ -18,8 +18,12 @@ import type { ActionRunner } from '../services/action-runner'
 import type { FsBridge } from '../services/fs-bridge'
 import type { NetworkService } from '../services/network-service'
 import type { UsbipdService } from '../services/usbipd-service'
+import type { DiagnosticsService } from '../services/diagnostics-service'
+import type { SignatureService } from '../services/signature-service'
+import type { UpdateService } from '../updater/auto-update'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
+import { registerUpdateHandlers } from './handlers/update'
 import { registerDistroHandlers } from './handlers/distros'
 import { registerMetaHandlers } from './handlers/meta'
 import { registerPtyHandlers } from './handlers/pty'
@@ -39,6 +43,10 @@ export interface IpcContext {
   pty?: PtyManager
   io?: IoService
   tasks?: TaskRunner
+  /** M7：诊断包 / 签名状态 / 自动更新 */
+  diagnostics?: DiagnosticsService
+  signature?: SignatureService
+  updater?: UpdateService
 }
 
 export { serializeIpcError, deserializeIpcError, toAppError } from '@wslpilot/shared'
@@ -67,6 +75,7 @@ export function registerIpcHandlers(
 
   registerConfigHandlers(add, ctx)
   registerAppHandlers(add, ctx)
+  registerUpdateHandlers(add, ctx)
   registerDistroHandlers(add, ctx, deps)
   registerMetaHandlers(add)
   registerPtyHandlers(add, deps)

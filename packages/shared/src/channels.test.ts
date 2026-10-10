@@ -20,6 +20,13 @@ const VOID_INVOKE_CHANNELS = new Set<string>([
   CH.networkApplyAll,
   CH.devicesStatus,
   CH.devicesList,
+  // M7 诊断 / 签名 / 更新
+  CH.appOpenLogsDir,
+  CH.appSignatureStatus,
+  CH.updateStatus,
+  CH.updateCheck,
+  CH.updateDownload,
+  CH.updateInstall,
 ])
 
 describe('IPC 契约一致性（review M1）', () => {

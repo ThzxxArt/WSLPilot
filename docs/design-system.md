@@ -57,10 +57,14 @@ Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变
 
 `prefers-reduced-motion` 或设置 `reduceMotion` 开启时，时长降为 `0.01ms`。
 
+M7 动效基座（`packages/ui/src/styles/motion.scss`）：涟漪（`v-ripple` 指令）、按压缩放（`.press-scale`）、
+骨架流光（`.skeleton`）、列表 FLIP（`.list-*`）、命令面板下弹（`.palette-pop`）、Toast 右侧滑入、
+浮层背景模糊、强调色切换 300ms 过渡（`applyAccentToDom` 挂 `data-accent-anim`）。
+
 ## 组件策略
 
 - **直接用 Naive UI**：Button / Card / Form / Modal / DataTable …
-- **自研业务组件**（基于 Naive 封装）：DistroCard、MetricCard、StatusDot、CommandPalette、TerminalPane、EmptyState …
+- **自研业务组件**（基于 Naive 封装）：DistroCard、MetricCard、StatusDot、CommandPalette、TerminalPane、EmptyState、Skeleton …
 
 ## 修改令牌
 

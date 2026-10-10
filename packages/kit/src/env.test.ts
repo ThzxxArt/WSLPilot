@@ -18,7 +18,7 @@ describe('getEnvInfo', () => {
   it('isDev true when VITE_DEV_SERVER_URL set', () => {
     vi.stubEnv('VITE_DEV_SERVER_URL', 'http://localhost:5173')
     // NODE_ENV may already be test; both conditions OR together
-    const info = getEnvInfo('1.0.0')
+    const info = getEnvInfo('0.1.0')
     expect(info.isDev).toBe(true)
   })
 })

@@ -7,7 +7,8 @@ import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
-import { MetricCard, DistroCard, EmptyState, StatusDot } from '@ui/components'
+import { MetricCard, DistroCard, EmptyState, StatusDot, Skeleton } from '@ui/components'
+import { vRipple } from '@wslpilot/ui'
 import { ACCENT_GRADIENTS, DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
 import InstallDistroModal from '../features/distros/InstallDistroModal.vue'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
@@ -191,9 +192,13 @@ function onDetailTerminal(name: string) {
         <n-button text type="primary" @click="router.push('/distros')"> 全部 → </n-button>
       </div>
 
-      <div v-if="distros.items.length === 0" class="empty-wrap">
-        <EmptyState description="还没有发行版数据" illustration="🛫">
-          <n-button size="small" secondary @click="refreshAll"> 重新加载 </n-button>
+      <div v-if="distros.loading && distros.items.length === 0" class="skeleton-cards">
+        <Skeleton v-for="i in 3" :key="i" height="132px" radius="16px" />
+      </div>
+
+      <div v-else-if="distros.items.length === 0" class="empty-wrap">
+        <EmptyState description="还没有发行版，去安装一个" illustration="🛫" size="large">
+          <n-button type="primary" size="small" @click="installOpen = true">安装发行版</n-button>
         </EmptyState>
       </div>
 
@@ -217,18 +222,24 @@ function onDetailTerminal(name: string) {
       <div class="quick">
         <n-popconfirm @positive-click="onShutdown">
           <template #trigger>
-            <n-button secondary> 🔌 全部关机 </n-button>
+            <n-button v-ripple secondary class="press-scale"> 🔌 全部关机 </n-button>
           </template>
           将执行 <code>wsl --shutdown</code>，关闭所有运行中的发行版，确定吗？
         </n-popconfirm>
-        <n-button secondary @click="router.push('/backup')"> 📦 备份 </n-button>
+        <n-button v-ripple secondary class="press-scale" @click="router.push('/backup')">
+          📦 备份
+        </n-button>
         <n-popconfirm @positive-click="onCleanupBackups">
           <template #trigger>
-            <n-button secondary :loading="cleaning"> 🧹 清理旧备份 </n-button>
+            <n-button v-ripple secondary class="press-scale" :loading="cleaning">
+              🧹 清理旧备份
+            </n-button>
           </template>
           将按「保留份数 {{ settings.backupKeepRecent }}」清理备份目录中的旧备份文件，确定吗？
         </n-popconfirm>
-        <n-button secondary @click="onOpenNetwork"> 🧭 网络配置 </n-button>
+        <n-button v-ripple secondary class="press-scale" @click="onOpenNetwork">
+          🧭 网络配置
+        </n-button>
       </div>
     </section>
 
@@ -342,6 +353,24 @@ function onDetailTerminal(name: string) {
 
 .empty-wrap {
   padding: 24px 0;
+}
+
+.skeleton-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+@media (width <= 960px) {
+  .skeleton-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (width <= 640px) {
+  .skeleton-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .quick {

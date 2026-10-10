@@ -29,6 +29,7 @@ function initialState() {
     confirmDestructive: cfg.advanced.confirmDestructive as boolean,
     logLevel: cfg.advanced.logLevel as LogLevel,
     hardwareAcceleration: cfg.advanced.hardwareAcceleration as boolean,
+    autoUpdate: cfg.advanced.autoUpdate as boolean,
     wslDefaultShell: cfg.wsl.defaultShell as string,
     wslAutoShutdownAfterConfigChange: cfg.wsl.autoShutdownAfterConfigChange as boolean,
     terminalFontFamily: cfg.terminal.fontFamily as string,
@@ -74,6 +75,7 @@ export const useSettingsStore = defineStore('settings', {
         this.confirmDestructive = s.advanced.confirmDestructive
         this.logLevel = s.advanced.logLevel
         this.hardwareAcceleration = s.advanced.hardwareAcceleration
+        this.autoUpdate = s.advanced.autoUpdate
         this.wslDefaultShell = s.wsl.defaultShell
         this.wslAutoShutdownAfterConfigChange = s.wsl.autoShutdownAfterConfigChange
         this.terminalFontFamily = s.terminal.fontFamily
@@ -177,6 +179,11 @@ export const useSettingsStore = defineStore('settings', {
       return this.persistField('hardwareAcceleration', hardwareAcceleration, {
         advanced: { hardwareAcceleration },
       })
+    },
+
+    /** 启动时自动检查更新（M7）：主进程启动时读取，下次启动生效 */
+    async setAutoUpdate(autoUpdate: boolean) {
+      return this.persistField('autoUpdate', autoUpdate, { advanced: { autoUpdate } })
     },
 
     async setWslDefaultShell(defaultShell: string) {

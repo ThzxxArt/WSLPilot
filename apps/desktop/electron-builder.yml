@@ -27,6 +27,22 @@ win:
   icon: ../../build/icon.ico
   artifactName: WSLPilot-${version}-${arch}-setup.${ext}
   requestedExecutionLevel: asInvoker
+  # ── 代码签名（M7）────────────────────────────────────────────
+  # 证书经 CSC_LINK（pfx 路径或 base64）与 CSC_KEY_PASSWORD 注入
+  # （release.yml 已接线 GitHub Secrets；本地打包可临时 export 同名变量）。
+  # 未配置证书时跳过签名：未签名产物首次运行会触发 SmartScreen 警告
+  # （「Windows 已保护你的电脑」→ 更多信息 → 仍要运行），应用内「设置 → 关于」有说明。
+  signtoolOptions:
+    signingHashAlgorithms: ['sha256']
+  # 自动更新（M7）：electron-updater 校验安装包签名
+  verifyUpdateCodeSignature: true
+
+# ── 自动更新（M7）──────────────────────────────────────────────
+# electron-updater 由此生成 app-update.yml（更新源 = GitHub Releases）
+publish:
+  provider: github
+  owner: ThzxxArt
+  repo: WSLPilot
 
 nsis:
   # 单步安装包（非 oneClick），允许用户自定义安装路径

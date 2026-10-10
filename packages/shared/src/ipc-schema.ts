@@ -259,6 +259,13 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     .default({}),
   [CH.appOpenPath]: ioPathSchema,
 
+  // 诊断包（M7）：可选默认保存目录，其余由主进程弹保存对话框
+  [CH.appExportDiagnostics]: z
+    .object({
+      defaultPath: ioPathSchema.optional(),
+    })
+    .default({}),
+
   // wsl.conf（M5）
   [CH.wslconfRead]: nameSchema,
   [CH.wslconfWrite]: z.object({

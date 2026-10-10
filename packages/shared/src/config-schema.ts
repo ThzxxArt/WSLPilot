@@ -41,6 +41,8 @@ export const advancedSettingsSchema = z.object({
   confirmDestructive: z.boolean().default(true),
   logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   hardwareAcceleration: z.boolean().default(true),
+  // M7 自动更新：启动时后台检查新版本（electron-updater，见 updater/auto-update.ts）
+  autoUpdate: z.boolean().default(true),
 })
 
 export const appSettingsSchema = z.object({

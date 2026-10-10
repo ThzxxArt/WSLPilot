@@ -20,16 +20,22 @@ import {
   canApplyRule,
   createAppError,
   entryListened,
+  isElevationError,
+  ELEVATION_OP_LABEL,
+  ELEVATION_SUGGESTION,
   parsePortProxyShow,
   parseWslConfigMode,
   previewNetshCommand,
   PROXY_SCRIPT_PATH,
   resolveEffectiveProxy,
   ruleSummary,
+  type ElevationOpResult,
+  type ElevationRequest,
   type NetworkConfig,
   type NetworkStatus,
   type PortForwardRule,
   type PortProxyEntry,
+  type PortProxyTarget,
   type ProxyScriptState,
   type WindowsProxyInfo,
 } from '@wslpilot/shared'
@@ -65,6 +71,8 @@ export interface NetworkServiceDeps {
   runWslWithStdin?: RunWslStdinFn
   /** Windows 系统代理读取（默认走注册表） */
   readWindowsProxy?: () => Promise<WindowsProxyInfo | null>
+  /** 提权助手（M7）：直接执行权限不足时改由独立提权进程执行（§14.3） */
+  elevation?: { runOne(req: ElevationRequest): Promise<ElevationOpResult> }
 }
 
 export interface NetworkService {
@@ -84,12 +92,8 @@ export interface NetworkService {
   proxyClear(distro: string): Promise<void>
 }
 
-/** 提权类失败识别（中英文 Windows 报错） */
-export function isElevationError(text: string): boolean {
-  return /requires?\s+elevation|elevat|run as administrator|administrator\s+privileges|请求的操作需要提升|需要提升|以管理员|拒绝访问|access is denied|permission denied/i.test(
-    text,
-  )
-}
+/** 提权类失败识别（中英文 Windows 报错）— 唯一事实源在 shared/elevation（M7 提权助手共用） */
+export { isElevationError } from '@wslpilot/shared'
 
 const NOT_FOUND_RE = /no such file|not found|cannot open|没有那个文件|找不到/i
 
@@ -160,9 +164,58 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     })
   }
 
-  async function netsh(args: string[], rawCommand: string, message: string): Promise<void> {
+  /**
+   * netsh portproxy 执行入口（M7 提权接线）：
+   * 直接执行失败且属权限问题时，改由提权助手执行（一次 UAC；§14.3）；
+   * 用户取消授权 → PERMISSION_DENIED + 等价命令行（可复制到管理员终端）。
+   */
+  async function netshRule(
+    target: PortProxyTarget,
+    op: 'add' | 'delete',
+    message: string,
+    log?: (line: string) => void,
+  ): Promise<void> {
+    const args = op === 'add' ? buildPortProxyAddArgs(target) : buildPortProxyDeleteArgs(target)
+    const rawCommand = previewNetshCommand(target, op)
     const r = await tool('netsh.exe', args, { timeoutMs: 20_000 })
-    if (r.code !== 0) mapNetshFailure(r, rawCommand, message)
+    if (r.code === 0) return
+    const text = `${r.stderr}\n${r.stdout}`
+    if (isElevationError(text)) {
+      const req: ElevationRequest = {
+        op: op === 'add' ? 'netsh.portproxy.add' : 'netsh.portproxy.delete',
+        params:
+          op === 'add'
+            ? {
+                listenAddress: target.listenAddress,
+                listenPort: target.listenPort,
+                connectAddress: target.connectAddress,
+                connectPort: target.connectPort,
+              }
+            : { listenAddress: target.listenAddress, listenPort: target.listenPort },
+      }
+      if (deps.elevation) {
+        log?.(`权限不足，改由提权助手执行：${ELEVATION_OP_LABEL[req.op]}…`)
+        logger.info('netsh requires elevation, delegating', { op: req.op })
+        const res = await deps.elevation.runOne(req)
+        if (res.ok) {
+          log?.('提权执行成功')
+          return
+        }
+        throw createAppError('PERMISSION_DENIED', {
+          message: `${message}：提权执行失败`,
+          detail: `${res.stderr}\n${res.stdout}`.trim(),
+          rawCommand,
+          suggestion: ELEVATION_SUGGESTION,
+        })
+      }
+      throw createAppError('PERMISSION_DENIED', {
+        message: `${message}：需要管理员权限`,
+        detail: text.trim(),
+        rawCommand,
+        suggestion: '请以管理员身份运行 WSLPilot，或在管理员终端中执行上述命令',
+      })
+    }
+    mapNetshFailure(r, rawCommand, message)
   }
 
   async function listPortProxy(): Promise<PortProxyEntry[]> {
@@ -191,9 +244,9 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     if (existing) {
       const del = previewNetshCommand(rule, 'delete')
       ctl.log(`$ ${del}`)
-      await netsh(buildPortProxyDeleteArgs(rule), del, `清理旧转发「${rule.id}」失败`)
+      await netshRule(rule, 'delete', `清理旧转发「${rule.id}」失败`, (l) => ctl.log(l))
     }
-    await netsh(buildPortProxyAddArgs(rule), rawCommand, `应用转发规则「${rule.id}」失败`)
+    await netshRule(rule, 'add', `应用转发规则「${rule.id}」失败`, (l) => ctl.log(l))
     ctl.log(`已应用 ${ruleSummary(rule)}`)
   }
 
@@ -294,7 +347,7 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
       const rawCommand = previewNetshCommand(rule, 'delete')
       ctl.log(`$ ${rawCommand}`)
       ctl.report(null, `从系统移除转发：${rule.id}`)
-      await netsh(buildPortProxyDeleteArgs(rule), rawCommand, `移除转发规则「${rule.id}」失败`)
+      await netshRule(rule, 'delete', `移除转发规则「${rule.id}」失败`, (l) => ctl.log(l))
       ctl.log(`已从系统移除 ${ruleSummary(rule)}`)
       ctl.report(100, `已从系统移除：${rule.id}`)
     },

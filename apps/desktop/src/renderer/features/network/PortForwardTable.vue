@@ -94,7 +94,8 @@ const stateType = (s: RuleSystemState): 'success' | 'warning' | 'error' | 'defau
           <th class="ops">操作</th>
         </tr>
       </thead>
-      <tbody>
+      <!-- 列表增删 FLIP（§13.2）：transition-group 提供 move 位移插值与增删淡入淡出 -->
+      <transition-group name="list" tag="tbody">
         <tr v-for="row in rows" :key="row.rule.id">
           <td class="mono">{{ row.rule.id }}</td>
           <td>{{ row.rule.distro }}</td>
@@ -141,12 +142,12 @@ const stateType = (s: RuleSystemState): 'success' | 'warning' | 'error' | 'defau
               </n-button>
               <n-button size="tiny" quaternary @click="emit('edit', row.rule)">编辑</n-button>
               <n-button size="tiny" quaternary type="error" @click="emit('remove', row.rule)">
-                删除
+                ⚠ 删除
               </n-button>
             </div>
           </td>
         </tr>
-      </tbody>
+      </transition-group>
     </table>
   </section>
 </template>

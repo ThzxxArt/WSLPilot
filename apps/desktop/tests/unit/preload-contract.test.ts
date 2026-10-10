@@ -82,6 +82,7 @@ describe('preload 契约', () => {
         'app',
         'config',
         'devices',
+        'diagnostics',
         'distros',
         'fs',
         'io',
@@ -90,6 +91,7 @@ describe('preload 契约', () => {
         'network',
         'task',
         'terminal',
+        'update',
         'wslconf',
       ].sort(),
     )
@@ -113,6 +115,26 @@ describe('preload 契约', () => {
     )
     expect(Object.keys(exposed.devices).sort()).toEqual(
       ['attach', 'bind', 'detach', 'list', 'status', 'unbind'].sort(),
+    )
+    expect(Object.keys(exposed.diagnostics).sort()).toEqual(['exportPackage', 'openLogsDir'])
+    expect(Object.keys(exposed.update).sort()).toEqual(
+      ['check', 'download', 'install', 'onChanged', 'status'].sort(),
+    )
+    expect(Object.keys(exposed.app).sort()).toEqual(
+      [
+        'close',
+        'getVersion',
+        'getWslVersion',
+        'maximize',
+        'minimize',
+        'onNavigate',
+        'openConfigDir',
+        'openPath',
+        'pickDirectory',
+        'pickOpenFile',
+        'pickSaveFile',
+        'signatureStatus',
+      ].sort(),
     )
   })
 
@@ -385,6 +407,25 @@ describe('preload 契约', () => {
     callAndCheck('task.cancel', () => exposed.task.cancel('t1'), CH.taskCancel, 't1')
   })
 
+  it('diagnostics / update / 签名域（M7）', () => {
+    callAndCheck(
+      'diagnostics.openLogsDir',
+      () => exposed.diagnostics.openLogsDir(),
+      CH.appOpenLogsDir,
+    )
+    callAndCheck(
+      'diagnostics.exportPackage',
+      () => exposed.diagnostics.exportPackage(),
+      CH.appExportDiagnostics,
+      {},
+    )
+    callAndCheck('app.signatureStatus', () => exposed.app.signatureStatus(), CH.appSignatureStatus)
+    callAndCheck('update.status', () => exposed.update.status(), CH.updateStatus)
+    callAndCheck('update.check', () => exposed.update.check(), CH.updateCheck)
+    callAndCheck('update.download', () => exposed.update.download(), CH.updateDownload)
+    callAndCheck('update.install', () => exposed.update.install(), CH.updateInstall)
+  })
+
   it('事件订阅可退订（config/pty/task/navigate）', () => {
     for (const [name, subscribe] of [
       ['config.onChanged', () => exposed.config.onChanged(() => {})],
@@ -393,6 +434,7 @@ describe('preload 契约', () => {
       ['terminal.onExit', () => exposed.terminal.onExit(() => {})],
       ['task.onProgress', () => exposed.task.onProgress(() => {})],
       ['app.onNavigate', () => exposed.app.onNavigate(() => {})],
+      ['update.onChanged', () => exposed.update.onChanged(() => {})],
     ] as const) {
       const off = subscribe()
       expect(on, `${name} 应注册监听`).toHaveBeenCalled()

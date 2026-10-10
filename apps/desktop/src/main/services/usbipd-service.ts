@@ -11,16 +11,19 @@ import {
   assertSafeDistroName,
   buildUsbipdArgs,
   createAppError,
+  isElevationError,
+  ELEVATION_SUGGESTION,
   parseUsbipdList,
   previewUsbipdCommand,
   USBIPD_INSTALL_COMMAND,
+  type ElevationOpResult,
+  type ElevationRequest,
   type UsbDevice,
   type UsbipdOp,
   type UsbipdStatus,
 } from '@wslpilot/shared'
 import { runTool, type Logger, type RunToolFn } from '@wslpilot/kit'
 import type { TaskControl } from './task-runner'
-import { isElevationError } from './network-service'
 
 /** 安装引导（与 shared/usbipd 同一命令，禁止另抄一份） */
 export const USBIPD_INSTALL_HINT = USBIPD_INSTALL_COMMAND
@@ -28,6 +31,8 @@ export const USBIPD_INSTALL_HINT = USBIPD_INSTALL_COMMAND
 export interface UsbipdServiceDeps {
   logger: Logger
   runTool?: RunToolFn
+  /** 提权助手（M7）：bind/unbind 直接执行权限不足时改由独立提权进程执行（§14.3） */
+  elevation?: { runOne(req: ElevationRequest): Promise<ElevationOpResult> }
 }
 
 export interface UsbipdService {
@@ -110,7 +115,24 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
     const rawCommand = previewUsbipdCommand(op, id, target)
     logger.info('usbipd op', { op, busId: id, distro: target })
     const r = await tool('usbipd.exe', args, { timeoutMs: 30_000 })
-    if (r.code !== 0) mapUsbipdFailure(r, rawCommand, `usbipd ${op} 失败（${id}）`, op)
+    if (r.code === 0) return
+    const text = `${r.stderr}\n${r.stdout}`
+    // bind / unbind 需要管理员权限：直接执行被拒 → 提权助手（一次 UAC；§14.3）
+    if (isElevationError(text) && deps.elevation && (op === 'bind' || op === 'unbind')) {
+      logger.info('usbipd requires elevation, delegating', { op, busId: id })
+      const res = await deps.elevation.runOne({
+        op: op === 'bind' ? 'usbipd.bind' : 'usbipd.unbind',
+        params: { busId: id },
+      })
+      if (res.ok) return
+      throw createAppError('PERMISSION_DENIED', {
+        message: `usbipd ${op} 失败（${id}）：提权执行失败`,
+        detail: `${res.stderr}\n${res.stdout}`.trim(),
+        rawCommand,
+        suggestion: ELEVATION_SUGGESTION,
+      })
+    }
+    mapUsbipdFailure(r, rawCommand, `usbipd ${op} 失败（${id}）`, op)
   }
 
   return {

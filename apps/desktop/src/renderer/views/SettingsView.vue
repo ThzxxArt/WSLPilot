@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -12,17 +12,36 @@ import {
   NInput,
   NInputNumber,
   NSelect,
+  NSpin,
   useMessage,
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
+import { useUpdateStore } from '../stores/update'
 import { errorLine } from '../composables/useAppError'
 import { HOTKEY_TABLE } from '../composables/useHotkeys'
 import { ACCENT_GRADIENTS, ACCENT_PRIMARY } from '@shared/constants'
-import type { AccentName } from '@shared/types'
+import type { AccentName, SignatureStatus } from '@shared/types'
 import { applyAccentToDom, Kbd } from '@wslpilot/ui'
 
 const settings = useSettingsStore()
+const update = useUpdateStore()
 const message = useMessage()
+
+// ── M7：签名状态（未签名时给 SmartScreen 说明）──
+const signature = ref<SignatureStatus | null>(null)
+const signatureLoading = ref(false)
+const diagnosticsBusy = ref(false)
+const diagnosticsResult = ref('')
+
+onMounted(() => {
+  signatureLoading.value = true
+  void window.wslAPI.app
+    .signatureStatus()
+    .then((s) => (signature.value = s))
+    .catch(() => (signature.value = null))
+    .finally(() => (signatureLoading.value = false))
+  void update.load()
+})
 
 const accents: { name: AccentName; label: string }[] = [
   { name: 'aurora', label: '极光 Aurora' },
@@ -105,6 +124,76 @@ function setScrollback(v: number | null) {
 
 function setKeepRecent(v: number | null) {
   if (v) void settings.setBackupKeepRecent(v)
+}
+
+// ── M7：自动更新 ──
+const updateStatusLabel = computed(() => {
+  switch (update.status) {
+    case 'checking':
+      return '正在检查更新…'
+    case 'available':
+      return update.version ? `发现新版本 v${update.version}` : '发现新版本'
+    case 'not-available':
+      return '已是最新版本'
+    case 'downloading':
+      return `正在下载更新… ${Math.round(update.percent)}%`
+    case 'downloaded':
+      return `新版本 v${update.version || ''} 已下载，重启后安装`
+    case 'error':
+      return `更新检查失败：${update.error}`
+    default:
+      return update.error || '未检查更新'
+  }
+})
+
+async function onCheckUpdate() {
+  try {
+    const s = await update.check()
+    if (s.status === 'not-available') message.success('已是最新版本')
+    else if (s.status === 'available') message.info(`发现新版本 v${s.version ?? ''}`)
+  } catch (e) {
+    message.error(errorLine(e, '检查更新失败'))
+  }
+}
+
+async function onDownloadUpdate() {
+  try {
+    await update.download()
+    message.success('更新下载完成，可点击「重启并安装」')
+  } catch (e) {
+    message.error(errorLine(e, '下载更新失败'))
+  }
+}
+
+function onInstallUpdate() {
+  try {
+    update.install()
+  } catch (e) {
+    message.error(errorLine(e, '安装更新失败'))
+  }
+}
+
+// ── M7：诊断包 ──
+function openLogsDir() {
+  void window.wslAPI.diagnostics.openLogsDir().catch((e: unknown) => {
+    message.error(errorLine(e, '打开日志目录失败'))
+  })
+}
+
+async function exportDiagnostics() {
+  diagnosticsBusy.value = true
+  diagnosticsResult.value = ''
+  try {
+    const result = await window.wslAPI.diagnostics.exportPackage()
+    if (result) {
+      diagnosticsResult.value = `已导出 ${result.path}（${result.entries.length} 个文件）`
+      message.success('诊断包已导出')
+    }
+  } catch (e) {
+    message.error(errorLine(e, '导出诊断包失败'))
+  } finally {
+    diagnosticsBusy.value = false
+  }
 }
 </script>
 
@@ -473,6 +562,18 @@ function setKeepRecent(v: number | null) {
           @update:value="(v: boolean) => settings.setHardwareAcceleration(v)"
         />
       </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">启动时自动检查更新</div>
+          <div class="hint">
+            启动后后台检查新版本；下次启动生效。检查到新版本不会自动下载，由你决定
+          </div>
+        </div>
+        <n-switch
+          :value="settings.autoUpdate"
+          @update:value="(v: boolean) => settings.setAutoUpdate(v)"
+        />
+      </div>
     </n-card>
 
     <n-card title="快捷键" class="block">
@@ -508,6 +609,80 @@ function setKeepRecent(v: number | null) {
     <n-card title="关于" class="block">
       <p class="hint">WSLPilot v{{ settings.version || '—' }} · MIT License</p>
       <p class="hint">让 WSL 管理像驾驶一样从容。</p>
+
+      <n-divider />
+
+      <!-- M7 自动更新 -->
+      <div class="about-section" aria-labelledby="about-update">
+        <div id="about-update" class="label">软件更新</div>
+        <div class="hint" role="status" aria-live="polite">{{ updateStatusLabel }}</div>
+        <n-space style="margin-top: 10px" align="center">
+          <n-button size="small" :loading="update.busy" @click="onCheckUpdate">检查更新</n-button>
+          <n-button
+            v-if="update.status === 'available'"
+            size="small"
+            type="primary"
+            :loading="update.busy"
+            @click="onDownloadUpdate"
+          >
+            下载更新
+          </n-button>
+          <n-button
+            v-if="update.status === 'downloaded'"
+            size="small"
+            type="primary"
+            @click="onInstallUpdate"
+          >
+            重启并安装
+          </n-button>
+          <n-tag v-if="update.status === 'downloading'" size="small" :bordered="false" type="info">
+            {{ Math.round(update.percent) }}%
+          </n-tag>
+        </n-space>
+      </div>
+
+      <n-divider />
+
+      <!-- M7 诊断包 -->
+      <div class="about-section" aria-labelledby="about-diagnostics">
+        <div id="about-diagnostics" class="label">诊断与反馈</div>
+        <div class="hint">
+          反馈问题时可导出诊断包：包含近期日志与配置脱敏副本（主目录已替换为 %USERPROFILE%，URL
+          凭据与密钥已打码），可安全提交给维护者。
+        </div>
+        <n-space style="margin-top: 10px" align="center">
+          <n-button size="small" secondary @click="openLogsDir">打开日志目录</n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :loading="diagnosticsBusy"
+            @click="exportDiagnostics"
+          >
+            导出诊断包
+          </n-button>
+        </n-space>
+        <div v-if="diagnosticsResult" class="hint diag-result" role="status" aria-live="polite">
+          {{ diagnosticsResult }}
+        </div>
+      </div>
+
+      <n-divider />
+
+      <!-- M7 签名与 SmartScreen 说明 -->
+      <div class="about-section" aria-labelledby="about-signature">
+        <div id="about-signature" class="label">代码签名</div>
+        <n-spin :show="signatureLoading" size="small">
+          <div v-if="signature?.signed" class="hint">
+            <n-tag size="small" :bordered="false" type="success">已签名</n-tag>
+            <span v-if="signature.subject" class="sig-subject">{{ signature.subject }}</span>
+          </div>
+          <div v-else-if="signature && !signatureLoading" class="hint">
+            <n-tag size="small" :bordered="false" type="warning">未检测到有效签名</n-tag>
+            <p class="smartscreen-note">{{ signature.smartscreenNote }}</p>
+          </div>
+          <div v-else class="hint">签名状态未知（仅 Windows 平台可检测）</div>
+        </n-spin>
+      </div>
     </n-card>
   </div>
 </template>
@@ -645,5 +820,28 @@ function setKeepRecent(v: number | null) {
 .hotkey-label {
   font-size: 13px;
   color: var(--color-text-primary);
+}
+
+.about-section {
+  padding: 4px 0;
+}
+
+.smartscreen-note {
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.sig-subject {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.diag-result {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
 }
 </style>

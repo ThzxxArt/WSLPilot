@@ -77,7 +77,7 @@ Renderer ── network:apply/applyAll/remove ─▶ NetworkService（netsh port
 
 - **端口转发**：声明式规则只来自 `network.jsonc`（执行白名单），渲染层只传 `id`；
   `netsh interface portproxy add|delete v4tov4 …` 一律参数数组，绝不拼接 shell。
-  netsh 提权失败映射 `PERMISSION_DENIED` 并附等价命令行（ElevationHelper 属 M7）。
+  netsh 提权失败时改由提权助手执行（M7 ElevationHelper）；仍失败则映射 `PERMISSION_DENIED` 并附等价命令行。
   `udp` 规则只记录意图（netsh portproxy 仅支持 TCP），应用时显式跳过。
 - **镜像引导**：解析 `%UserProfile%\.wslconfig` 的 `[wsl2] networkingMode`；非 `mirrored` 时给
   「推荐」提示卡 + 可复制配置片段 + 打开所在目录（`app:openPath` 仅允许目录）。
@@ -89,6 +89,29 @@ Renderer ── network:apply/applyAll/remove ─▶ NetworkService（netsh port
 - **输出解码**：`kit/tool-output.ts` 先探测 UTF-16LE（NUL 结构）→ 严格 UTF-8 → GBK 回退，
   否则中文报错变乱码、错误映射全部失效。
 
+## 打磨发布（M7）
+
+```
+Renderer ── app:exportDiagnostics/openLogsDir ─▶ DiagnosticsService（zip：日志+配置脱敏副本）
+         ── app:signatureStatus ──────────────▶ SignatureService（Get-AuthenticodeSignature）
+         ── update:check/download/install ────▶ UpdateService（electron-updater）
+         （服务层内部）netsh/usbipd/wsl 权限不足 ─▶ ElevationClient ─▶ 提权 Helper（UAC）
+```
+
+- **诊断包**（§15.3）：近期日志（限量限体积）+ 配置脱敏副本 + 环境信息 manifest → 一个 zip。
+  脱敏唯一事实源在 `shared/diagnostics`（主目录 → `%USERPROFILE%`、URL 凭据 / 密钥赋值打码、
+  路径边界防前缀碰撞）；打包用 `kit/zip` 自研极简 ZIP 写入器（DEFLATE + CRC32，零新依赖）。
+- **ElevationHelper**（§14.3）：主进程保持非提权；`netsh` / `usbipd bind|unbind` / `wsl --move|install|set-version`
+  在直接执行被拒时改由独立提权进程执行。请求是**结构化载荷**（op 白名单 + 参数数组，`shared/elevation`
+  唯一映射 op→program/argv）；PowerShell Helper 脚本二次校验 op/program（纵深防御），参数数组 splat 调用。
+  批量操作合并为一次 UAC 会话；用户取消 → `PERMISSION_DENIED` + 等价命令行。
+- **自动更新**（§17）：electron-updater（`publish: github` 生成 app-update.yml）。`autoDownload=false`
+  （由用户在「设置 → 关于」决定下载）、`autoInstallOnAppQuit=true`；状态经 `update:changed` 推送。
+  `advanced.autoUpdate` 控制启动后台检查。
+- **代码签名**（§17）：`electron-builder` 的 `signtoolOptions`（sha256）+ `verifyUpdateCodeSignature`；
+  证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入。`app:signatureStatus` 检测当前可执行文件签名，
+  未签名时界面展示 SmartScreen 说明。
+
 ## 安全
 
 | 层       | 措施                                                                                                                                                                      |
@@ -97,4 +120,4 @@ Renderer ── network:apply/applyAll/remove ─▶ NetworkService（netsh port
 | IPC      | 通道白名单 + zod 入参校验（全部带参通道强制登记 schema，契约测试守护）                                                                                                    |
 | 命令执行 | 参数数组化 + `-e` 分界 + 动作白名单                                                                                                                                       |
 | 路径     | 控制字符 / `..` / Windows 非法字符（`parseLinuxPath`）拒绝，结果必须在发行版根内；备份路径拒绝控制字符并展开 `%USERPROFILE%`；`app:openPath` 仅允许目录（防文件关联执行） |
-| 提权     | 独立 ElevationHelper 进程 + 结构化请求（**M7 规划，尚未实现**；当前 `--manage --move` 等以当前权限执行，失败给 `PERMISSION_DENIED` 提示）                                 |
+| 提权     | 独立 ElevationHelper 进程 + 结构化请求（**M7 已实现**：op 白名单 + 参数数组、Helper 二次校验 op/program、批量合并一次 UAC、取消给等价命令行）                             |

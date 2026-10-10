@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import Sparkline from './Sparkline.vue'
+import { useReducedMotion } from '../composables/useReducedMotion'
 
 const props = withDefaults(
   defineProps<{
@@ -14,6 +15,7 @@ const props = withDefaults(
 )
 
 const display = ref<string>(String(props.value))
+const { reduced } = useReducedMotion()
 let rafId: number | null = null
 
 watch(
@@ -36,17 +38,10 @@ function cancelAnimation() {
   }
 }
 
-function prefersReducedMotion(): boolean {
-  // 应用内「减弱动效」与系统偏好都必须生效（review M5）
-  return (
-    document.documentElement.dataset.reduceMotion === 'true' ||
-    matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-}
-
 function animateTo(target: number) {
   cancelAnimation()
-  if (prefersReducedMotion()) {
+  // 应用内「减弱动效」与系统偏好都必须生效（review M5；M7 统一走 useReducedMotion）
+  if (reduced.value) {
     display.value = String(target)
     return
   }

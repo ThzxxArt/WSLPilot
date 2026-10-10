@@ -1,6 +1,15 @@
 import { app, dialog, shell } from 'electron'
-import { CH, createAppError, type FileFilter } from '@wslpilot/shared'
+import { join } from 'node:path'
+import {
+  CH,
+  createAppError,
+  type DiagnosticsExportResult,
+  type FileFilter,
+  type SignatureStatus,
+} from '@wslpilot/shared'
 import type { IpcContext } from '../router'
+import { normalizeDiagnosticsTarget } from '../../services/diagnostics-service'
+import { SMARTSCREEN_NOTE } from '../../services/signature-service'
 
 type AddFn = (
   channel: string, // 参数经 parseIpcArgs 校验后按通道约定类型传入
@@ -108,5 +117,36 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
     if (err) {
       throw createAppError('IO_ERROR', { message: '无法打开目录', detail: err })
     }
+  })
+
+  // ── M7 诊断包 / 日志目录 / 签名状态 ──
+  add(CH.appOpenLogsDir, async (c): Promise<void> => {
+    if (!c.diagnostics) {
+      throw createAppError('IO_ERROR', { message: '诊断服务未初始化' })
+    }
+    await c.diagnostics.openLogsDir()
+  })
+
+  add(CH.appExportDiagnostics, async (c, arg: never): Promise<DiagnosticsExportResult | null> => {
+    if (!c.diagnostics) {
+      throw createAppError('IO_ERROR', { message: '诊断服务未初始化' })
+    }
+    const o = (arg ?? {}) as { defaultPath?: string }
+    const suggested = c.diagnostics.defaultFileName()
+    const opts: Electron.SaveDialogOptions = {
+      title: '导出诊断包（近期日志 + 配置脱敏副本）',
+      defaultPath: o.defaultPath ? join(o.defaultPath, suggested) : suggested,
+      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+    }
+    const win = c.getMainWindow()
+    const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    if (result.canceled || !result.filePath) return null
+    const target = normalizeDiagnosticsTarget(result.filePath)
+    return c.diagnostics.exportTo(target)
+  })
+
+  add(CH.appSignatureStatus, async (c): Promise<SignatureStatus> => {
+    if (c.signature) return c.signature.status()
+    return { checked: false, signed: false, smartscreenNote: SMARTSCREEN_NOTE }
   })
 }

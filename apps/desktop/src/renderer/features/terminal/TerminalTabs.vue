@@ -108,7 +108,8 @@ function submitNew() {
 
 <template>
   <div class="terminal-tabs">
-    <div class="tabs-scroll" role="tablist" aria-label="终端标签">
+    <!-- 标签增删：缩放淡出（§12.5）+ 拖拽排序 FLIP（§13.2） -->
+    <transition-group name="tab" tag="div" class="tabs-scroll" role="tablist" aria-label="终端标签">
       <!-- 外层不是 button：内部含关闭按钮，嵌套交互元素非法 HTML（review M4） -->
       <div
         v-for="(s, i) in sessions"
@@ -141,7 +142,7 @@ function submitNew() {
           ×
         </button>
       </div>
-    </div>
+    </transition-group>
 
     <div class="tabs-actions">
       <n-popover trigger="click" placement="bottom-end">
@@ -258,5 +259,23 @@ function submitNew() {
 .hint {
   font-size: 12px;
   color: var(--color-text-secondary);
+}
+
+/* 标签增删：缩放淡出（§12.5）+ 排序 FLIP（§13.2） */
+.tab-enter-active,
+.tab-leave-active {
+  transition:
+    opacity var(--dur-base) var(--ease-standard),
+    transform var(--dur-base) var(--ease-standard);
+}
+
+.tab-enter-from,
+.tab-leave-to {
+  opacity: 0;
+  transform: scale(0.92);
+}
+
+.tab-move {
+  transition: transform var(--dur-base) var(--ease-standard);
 }
 </style>

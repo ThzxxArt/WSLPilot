@@ -170,6 +170,8 @@ describe('PortForwardTable', () => {
 
   it('渲染规则行并派发动作', async () => {
     const w = mount(PortForwardTable, {
+      // FLIP 列表（M7）用 transition-group 渲染 tbody：关闭 stub 才能看到真实行
+      global: { stubs: { TransitionGroup: false } },
       props: {
         rules: [RULE, { ...RULE, id: 'udp-rule', protocol: 'udp', listenPort: 5353 }],
         status: statusOf({

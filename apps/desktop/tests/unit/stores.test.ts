@@ -131,6 +131,7 @@ describe('useSettingsStore', () => {
         confirmDestructive: false,
         logLevel: 'debug',
         hardwareAcceleration: false,
+        autoUpdate: false,
       },
       wsl: {
         ...base.wsl,
@@ -170,6 +171,7 @@ describe('useSettingsStore', () => {
     expect(s.confirmDestructive).toBe(false)
     expect(s.logLevel).toBe('debug')
     expect(s.hardwareAcceleration).toBe(false)
+    expect(s.autoUpdate).toBe(false)
     expect(s.wslDefaultShell).toBe('/bin/zsh')
     expect(s.wslAutoShutdownAfterConfigChange).toBe(true)
     expect(s.terminalFontFamily).toBe('MyMono')
@@ -221,10 +223,15 @@ describe('useSettingsStore', () => {
     await s.setBackupFormat('vhd')
     await s.setBackupKeepRecent(7)
     await s.setBackupAutoBeforeDestructive(false)
+    await s.setAutoUpdate(false)
     expect(s.backupDefaultDir).toBe('D:\\Bk')
     expect(s.backupFormat).toBe('vhd')
     expect(s.backupKeepRecent).toBe(7)
     expect(s.backupAutoBeforeDestructive).toBe(false)
+    expect(s.autoUpdate).toBe(false)
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      advanced: { autoUpdate: false },
+    })
     expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
       backup: { keepRecent: 7 },
     })

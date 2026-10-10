@@ -7,9 +7,14 @@ import {
   exportFileName,
   backupFileRegex,
   isBackupFileName,
+  isElevationError,
+  ELEVATION_OP_LABEL,
+  ELEVATION_SUGGESTION,
   formatBytes,
   type BackupFileInfo,
   type BackupFormat,
+  type ElevationOpResult,
+  type ElevationRequest,
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
@@ -41,6 +46,8 @@ export interface IoServiceDeps {
   spawnFn?: SpawnWslFn
   /** 递归目录统计的条目上限（防超大目录拖死） */
   dirWalkLimit?: number
+  /** 提权助手（M7）：`wsl --manage --move` 权限不足时改由独立提权进程执行（§14.3） */
+  elevation?: { runOne(req: ElevationRequest): Promise<ElevationOpResult> }
 }
 
 export interface IoService {
@@ -584,6 +591,28 @@ export function createIoService(deps: IoServiceDeps): IoService {
           detail: detailText,
           rawCommand: getRawCommand('wsl.exe', args),
           suggestion: '请将 WSL 更新到 2.0 及以上（wsl --update）后重试',
+        })
+      }
+      // M7 提权接线：直接执行被拒 → 提权助手（一次 UAC；§14.3）
+      if (isElevationError(detailText) && deps.elevation) {
+        ctl.log(`权限不足，改由提权助手执行：${ELEVATION_OP_LABEL['wsl.move']}…`)
+        deps.logger.info('wsl --move requires elevation, delegating', { name })
+        const res = await deps.elevation.runOne({
+          op: 'wsl.move',
+          params: { name, path: newPath },
+        })
+        if (res.ok) {
+          ctl.log('提权执行成功')
+          ctl.report(100, '迁移完成')
+          ctl.log(`迁移完成：${name} → ${newPath}`)
+          ctl.log('提示：如需回退，可再次使用「迁移磁盘」把发行版移回原位置')
+          return
+        }
+        throw createAppError('PERMISSION_DENIED', {
+          message: `迁移 ${name} 失败：提权执行失败`,
+          detail: `${res.stderr}\n${res.stdout}`.trim(),
+          rawCommand: getRawCommand('wsl.exe', args),
+          suggestion: ELEVATION_SUGGESTION,
         })
       }
       throw e

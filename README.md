@@ -4,7 +4,9 @@
 
 Windows Subsystem for Linux 的现代化图形控制中枢。技术栈：**TypeScript + Vue 3 + Electron**，持久化使用 **JSONC 配置文件**（无数据库）。
 
-> **当前阶段：M6 完成 + 全量质量根治。** 发行版管理、内置终端、备份迁移、安装向导、wsl.conf 编辑、自定义动作、命令面板、端口转发与镜像网络、代理配置、usbipd 设备管理均已可用；M7（动效打磨、无障碍、诊断包、签名、自动更新）待启动。
+> **当前阶段：M1–M7 全部交付，版本 0.1.0。** 发行版管理、内置终端、备份迁移、安装向导、wsl.conf 编辑、自定义动作、命令面板、端口转发与镜像网络、代理配置、usbipd 设备管理、动效与空状态打磨、无障碍、诊断包、代码签名与自动更新均已可用。
+>
+> **版本号策略**：版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
 
 ## 特性
 
@@ -27,9 +29,21 @@ Windows Subsystem for Linux 的现代化图形控制中枢。技术栈：**TypeS
 - 人类可读的 JSONC 配置，可纳入 Git；外部修改冲突安全处理
 - 浅色「极光」设计系统，精致动效
 
-**规划中（M7，UI 不提前承诺）**
+**M7 打磨发布**
 
-- 动效完善与骨架屏、无障碍、诊断包导出、代码签名、自动更新
+- 动效完善：按钮涟漪与按压反馈、列表增删 FLIP、标签缩放淡出、强调色 300ms 平滑过渡、
+  抽屉/模态背景模糊、Toast 右侧滑入、骨架屏流光；全部动效响应 `prefers-reduced-motion` 与「减弱动效」设置
+- 空状态与骨架屏：插画 + 一句话 + 主 CTA；加载态用流光骨架而非转圈；搜索无结果带建议操作
+- 无障碍：跳到主内容、焦点环与模态焦点归还、`aria-live` 任务播报、命令面板 combobox/listbox 语义、
+  图标按钮 aria-label、危险操作图标 + 文字双编码
+- 诊断包导出：近期日志 + 配置脱敏副本（主目录 → `%USERPROFILE%`、URL 凭据/密钥打码）+ 环境信息打包为 zip；
+  一键打开日志目录（设置 → 关于）
+- 提权助手（ElevationHelper）：主进程保持非提权，`netsh` / `usbipd bind` / `wsl --move` / `--install` 等白名单
+  操作权限不足时经结构化请求拉起独立提权进程（一次 UAC 合并执行；取消则给出等价命令行）
+- 代码签名：electron-builder 签名配置就绪（`CSC_LINK` / `CSC_KEY_PASSWORD`），未签名构建在
+  「设置 → 关于」给出 SmartScreen 提示说明
+- 自动更新：electron-updater（GitHub Releases 更新源），启动后台检查（可在高级设置关闭），
+  「设置 → 关于」手动检查 / 下载 / 重启安装
 
 ## 开发
 
@@ -44,6 +58,12 @@ npm run dev
 npm run build              # 构建 + 打包（当前平台架构）
 npm run package --workspace @wslpilot/desktop -- --x64    # 指定架构
 ```
+
+**代码签名（可选）**：导出 `CSC_LINK`（pfx 路径或 base64）与 `CSC_KEY_PASSWORD` 后打包即自动签名；
+未签名的安装包首次运行可能出现 Windows SmartScreen 提示（「更多信息 → 仍要运行」）。
+
+**自动更新**：打包产物通过 GitHub Releases 分发，`electron-updater` 读取
+`app-update.yml`（由 electron-builder `publish` 配置生成）检查与安装更新。
 
 ## 工程结构
 

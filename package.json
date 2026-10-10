@@ -21,6 +21,7 @@
     "test:component": "vitest run -c vitest.component.config.ts --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:visual": "playwright test --grep @visual",
     "smoke:product": "node scripts/smoke-product.mjs",
     "tokens": "tsx scripts/gen-tokens.ts",
     "postinstall": "npm run tokens",

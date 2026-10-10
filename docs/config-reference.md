@@ -4,34 +4,35 @@
 
 ## settings.jsonc — 应用偏好
 
-| 字段                                 | 类型                                    | 默认                        | 说明                           |
-| ------------------------------------ | --------------------------------------- | --------------------------- | ------------------------------ |
-| `general.autoRefreshOnStart`         | boolean                                 | `true`                      | 启动时自动刷新                 |
-| `general.pollIntervalMs`             | number                                  | `5000`                      | 轮询间隔（1000–60000）         |
-| `general.locale`                     | `system\|zh-CN\|en-US`                  | `system`                    | 组件语言（界面文案暂仅中文）   |
-| `general.theme`                      | `light`                                 | `light`                     | 固定浅色                       |
-| `general.accent`                     | `aurora\|sunset\|ocean\|forest\|custom` | `aurora`                    | 强调色                         |
-| `general.closeBehavior`              | `minimizeToTray\|quit`                  | `minimizeToTray`            | 关闭行为                       |
-| `general.launchAtLogin`              | boolean                                 | `false`                     | 开机自启（与托盘菜单同步）     |
-| `general.reduceMotion`               | boolean                                 | `false`                     | 减弱动效                       |
-| `wsl.defaultShell`                   | string                                  | `""`                        | 默认 Shell（空 = `/bin/bash`） |
-| `wsl.autoShutdownAfterConfigChange`  | boolean                                 | `false`                     | 配置变更后自动关机使生效       |
-| `terminal.fontFamily`                | string                                  | Cascadia Mono…              | 终端字体                       |
-| `terminal.fontSize`                  | number                                  | `14`                        | 字号（8–32）                   |
-| `terminal.lineHeight`                | number                                  | `1.2`                       | 行高（1–2.5）                  |
-| `terminal.cursorStyle`               | `block\|underline\|bar`                 | `block`                     | 光标样式                       |
-| `terminal.cursorBlink`               | boolean                                 | `true`                      | 光标闪烁                       |
-| `terminal.scrollback`                | number                                  | `5000`                      | 回滚缓冲行数                   |
-| `terminal.copyOnSelect`              | boolean                                 | `false`                     | 选中即复制                     |
-| `terminal.theme`                     | `auto\|follow-app\|custom`              | `auto`                      | 终端配色                       |
-| `backup.defaultDir`                  | string                                  | `%USERPROFILE%\WSL-Backups` | 备份目录（支持环境变量）       |
-| `backup.format`                      | `tar\|vhd`                              | `tar`                       | 备份格式                       |
-| `backup.keepRecent`                  | number                                  | `5`                         | 保留份数（1–50，自动轮转）     |
-| `backup.autoBackupBeforeDestructive` | boolean                                 | `true`                      | 迁移等破坏性操作前自动备份     |
-| `advanced.showRawCommand`            | boolean                                 | `false`                     | 显示等价命令                   |
-| `advanced.confirmDestructive`        | boolean                                 | `true`                      | 破坏性确认                     |
-| `advanced.logLevel`                  | `trace\|debug\|info\|warn\|error`       | `info`                      | 日志级别                       |
-| `advanced.hardwareAcceleration`      | boolean                                 | `true`                      | 硬件加速（重启应用生效）       |
+| 字段                                 | 类型                                    | 默认                        | 说明                                   |
+| ------------------------------------ | --------------------------------------- | --------------------------- | -------------------------------------- |
+| `general.autoRefreshOnStart`         | boolean                                 | `true`                      | 启动时自动刷新                         |
+| `general.pollIntervalMs`             | number                                  | `5000`                      | 轮询间隔（1000–60000）                 |
+| `general.locale`                     | `system\|zh-CN\|en-US`                  | `system`                    | 组件语言（界面文案暂仅中文）           |
+| `general.theme`                      | `light`                                 | `light`                     | 固定浅色                               |
+| `general.accent`                     | `aurora\|sunset\|ocean\|forest\|custom` | `aurora`                    | 强调色                                 |
+| `general.closeBehavior`              | `minimizeToTray\|quit`                  | `minimizeToTray`            | 关闭行为                               |
+| `general.launchAtLogin`              | boolean                                 | `false`                     | 开机自启（与托盘菜单同步）             |
+| `general.reduceMotion`               | boolean                                 | `false`                     | 减弱动效                               |
+| `wsl.defaultShell`                   | string                                  | `""`                        | 默认 Shell（空 = `/bin/bash`）         |
+| `wsl.autoShutdownAfterConfigChange`  | boolean                                 | `false`                     | 配置变更后自动关机使生效               |
+| `terminal.fontFamily`                | string                                  | Cascadia Mono…              | 终端字体                               |
+| `terminal.fontSize`                  | number                                  | `14`                        | 字号（8–32）                           |
+| `terminal.lineHeight`                | number                                  | `1.2`                       | 行高（1–2.5）                          |
+| `terminal.cursorStyle`               | `block\|underline\|bar`                 | `block`                     | 光标样式                               |
+| `terminal.cursorBlink`               | boolean                                 | `true`                      | 光标闪烁                               |
+| `terminal.scrollback`                | number                                  | `5000`                      | 回滚缓冲行数                           |
+| `terminal.copyOnSelect`              | boolean                                 | `false`                     | 选中即复制                             |
+| `terminal.theme`                     | `auto\|follow-app\|custom`              | `auto`                      | 终端配色                               |
+| `backup.defaultDir`                  | string                                  | `%USERPROFILE%\WSL-Backups` | 备份目录（支持环境变量）               |
+| `backup.format`                      | `tar\|vhd`                              | `tar`                       | 备份格式                               |
+| `backup.keepRecent`                  | number                                  | `5`                         | 保留份数（1–50，自动轮转）             |
+| `backup.autoBackupBeforeDestructive` | boolean                                 | `true`                      | 迁移等破坏性操作前自动备份             |
+| `advanced.showRawCommand`            | boolean                                 | `false`                     | 显示等价命令                           |
+| `advanced.confirmDestructive`        | boolean                                 | `true`                      | 破坏性确认                             |
+| `advanced.logLevel`                  | `trace\|debug\|info\|warn\|error`       | `info`                      | 日志级别                               |
+| `advanced.hardwareAcceleration`      | boolean                                 | `true`                      | 硬件加速（重启应用生效）               |
+| `advanced.autoUpdate`                | boolean                                 | `true`                      | 启动时后台检查更新（M7，下次启动生效） |
 
 ## distros.jsonc — 发行版元数据
 

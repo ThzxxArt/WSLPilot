@@ -30,6 +30,8 @@ const query = ref('')
 const activeIndex = ref(0)
 const inputEl = ref<HTMLInputElement | null>(null)
 const recentIds = ref<string[]>([])
+/** 打开前的焦点元素：关闭后归还焦点（无障碍 §11.4） */
+const lastFocused = ref<HTMLElement | null>(null)
 
 /** 当前动作目标发行版：上次选中 → 默认 → 第一个 */
 function targetDistro(): string | null {
@@ -240,10 +242,18 @@ const recents = computed(() =>
   query.value.trim() === '' ? recentPaletteItems(allItems.value, recentIds.value) : [],
 )
 
+/** 当前高亮项的 DOM id（aria-activedescendant，供屏幕阅读器跟随） */
+const activeDescendant = computed(() => {
+  const item = flat.value[activeIndex.value]
+  return item ? `palette-item-${item.id}` : undefined
+})
+
 watch(
   () => open.value,
   async (isOpen) => {
     if (isOpen) {
+      lastFocused.value =
+        (document.activeElement as HTMLElement | null) ?? (document.body as HTMLElement)
       query.value = ''
       activeIndex.value = 0
       if (distros.items.length === 0) void distros.refresh()
@@ -251,6 +261,11 @@ watch(
       await loadRecent()
       await nextTick()
       inputEl.value?.focus()
+    } else {
+      // 归还焦点到打开前的元素（无障碍：模态关闭后焦点不得丢失）
+      await nextTick()
+      lastFocused.value?.focus?.()
+      lastFocused.value = null
     }
   },
 )
@@ -314,22 +329,35 @@ onMounted(() => {
 <template>
   <Teleport to="body">
     <div v-if="open" class="palette-mask" @click.self="closePalette">
-      <div class="palette" role="dialog" aria-label="命令面板" @keydown="onKeydown">
+      <div
+        class="palette palette-pop"
+        role="dialog"
+        aria-modal="true"
+        aria-label="命令面板"
+        @keydown="onKeydown"
+      >
         <input
           ref="inputEl"
           v-model="query"
           class="palette-input"
           type="text"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="palette-results"
+          :aria-activedescendant="activeDescendant"
           placeholder="搜索命令、发行版、动作、设置…（> 命令 · @ 发行版 · # 设置）"
           aria-label="命令面板搜索"
         />
-        <div class="palette-list">
+        <div id="palette-results" class="palette-list" role="listbox" aria-label="命令结果">
           <template v-if="recents.length">
-            <div class="palette-group">最近使用</div>
+            <div class="palette-group" role="presentation">最近使用</div>
             <button
               v-for="cmd in recents"
+              :id="`palette-item-recent-${cmd.id}`"
               :key="`recent-${cmd.id}`"
               class="palette-item"
+              role="option"
+              :aria-selected="false"
               @click="execute(cmd)"
             >
               <span class="palette-label">
@@ -338,15 +366,18 @@ onMounted(() => {
               </span>
               <span v-if="cmd.hint" class="palette-hint">{{ cmd.hint }}</span>
             </button>
-            <div class="palette-divider" />
+            <div class="palette-divider" role="presentation" />
           </template>
 
           <template v-for="g in grouped" :key="g.group">
-            <div class="palette-group">{{ g.group }}</div>
+            <div class="palette-group" role="presentation">{{ g.group }}</div>
             <button
               v-for="cmd in g.items"
+              :id="`palette-item-${cmd.id}`"
               :key="cmd.id"
               class="palette-item"
+              role="option"
+              :aria-selected="flat[activeIndex]?.id === cmd.id"
               :class="{ active: flat[activeIndex]?.id === cmd.id }"
               @mousemove="activeIndex = flat.findIndex((c) => c.id === cmd.id)"
               @click="execute(cmd)"
@@ -362,7 +393,7 @@ onMounted(() => {
             </button>
           </template>
 
-          <div v-if="flat.length === 0" class="palette-empty">
+          <div v-if="flat.length === 0" class="palette-empty" role="status" aria-live="polite">
             没有匹配的命令 · 试试 <code>&gt; </code> 动作 / <code>@ </code> 发行版 /
             <code># </code> 设置
           </div>

@@ -90,6 +90,16 @@ export const CH = {
   appPickSaveFile: 'app:pickSaveFile',
   appPickOpenFile: 'app:pickOpenFile',
   appOpenPath: 'app:openPath',
+  appOpenLogsDir: 'app:openLogsDir',
+  appExportDiagnostics: 'app:exportDiagnostics',
+  appSignatureStatus: 'app:signatureStatus',
+
+  // 更新（M7 自动更新）
+  updateStatus: 'update:status',
+  updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateInstall: 'update:install',
+  updateChanged: 'update:changed',
 } as const
 
 export type ChannelName = (typeof CH)[keyof typeof CH]
@@ -152,6 +162,13 @@ export const INVOKE_CHANNELS = [
   CH.appPickSaveFile,
   CH.appPickOpenFile,
   CH.appOpenPath,
+  CH.appOpenLogsDir,
+  CH.appExportDiagnostics,
+  CH.appSignatureStatus,
+  CH.updateStatus,
+  CH.updateCheck,
+  CH.updateDownload,
+  CH.updateInstall,
   CH.appWindowMinimize,
   CH.appWindowMaximize,
   CH.appWindowClose,
@@ -165,4 +182,5 @@ export const EVENT_CHANNELS = [
   CH.configChanged,
   CH.configConflict,
   CH.appNavigate,
+  CH.updateChanged,
 ] as const

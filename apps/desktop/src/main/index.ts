@@ -18,6 +18,10 @@ import { createActionRunner } from './services/action-runner'
 import { createFsBridge } from './services/fs-bridge'
 import { createNetworkService } from './services/network-service'
 import { createUsbipdService } from './services/usbipd-service'
+import { createDiagnosticsService } from './services/diagnostics-service'
+import { createSignatureService } from './services/signature-service'
+import { createElevationClient } from './elevation/client'
+import { createUpdateService } from './updater/auto-update'
 import { readBootSettings } from './settings-boot'
 import { isQuitting, markQuitting } from './app-state'
 
@@ -130,7 +134,10 @@ async function bootstrap() {
   applySettingsSideEffects()
   configService.onChange('settings', applySettingsSideEffects)
 
-  const wsl = createWslService(logger)
+  // M7：提权助手（§14.3）— 主进程保持非提权，权限不足的白名单操作按需 UAC 执行
+  const elevation = createElevationClient({ logger })
+
+  const wsl = createWslService(logger, { elevation })
   const registry = createRegistryService(logger)
   const pty = createPtyManager(
     logger,
@@ -173,16 +180,36 @@ async function bootstrap() {
     },
   })
 
-  const io = createIoService({ logger, wsl, registry, configService })
+  const io = createIoService({ logger, wsl, registry, configService, elevation })
 
   // M5：wsl.conf 编辑 / 自定义动作 / 发行版内文件桥
   const wslconf = createWslConfService({ logger })
   const runner = createActionRunner({ logger, configService, wsl, pty })
   const fsBridge = createFsBridge({ logger })
 
-  // M6：端口转发 / 镜像模式 / 代理 + usbipd 设备
-  const network = createNetworkService({ logger, configService })
-  const devices = createUsbipdService({ logger })
+  // M6：端口转发 / 镜像模式 / 代理 + usbipd 设备（M7 提权接线）
+  const network = createNetworkService({ logger, configService, elevation })
+  const devices = createUsbipdService({ logger, elevation })
+
+  // M7：诊断包 / 签名状态 / 自动更新
+  const diagnostics = createDiagnosticsService({
+    logger,
+    userDataDir,
+    appVersion: app.getVersion(),
+    wslVersion: () => wsl.getVersion(),
+    openDirectory: (p) => shell.openPath(p),
+  })
+  const signature = createSignatureService({ logger })
+  const updater = createUpdateService({
+    logger,
+    currentVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    onChange: (state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CH.updateChanged, state)
+      }
+    },
+  })
 
   registerIpcHandlers(
     ipcMain,
@@ -195,6 +222,9 @@ async function bootstrap() {
       pty,
       io,
       tasks,
+      diagnostics,
+      signature,
+      updater,
     },
     { wsl, registry, pty, io, tasks, wslconf, runner, fsBridge, network, devices },
   )
@@ -271,4 +301,16 @@ async function bootstrap() {
   )
 
   logger.info('window ready')
+
+  // M7 自动更新：启动后后台检查（settings.advanced.autoUpdate；开发模式不打扰）
+  try {
+    const s = configService.loadSync('settings')
+    if (s.advanced.autoUpdate && app.isPackaged) {
+      void updater.check().catch((e: unknown) => {
+        logger.warn('startup update check failed', { error: String(e) })
+      })
+    }
+  } catch (e) {
+    logger.warn('startup update check skipped', { error: String(e) })
+  }
 }

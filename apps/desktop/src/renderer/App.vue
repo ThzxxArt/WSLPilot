@@ -16,6 +16,7 @@ import ConflictResolver from './features/config/ConflictResolver.vue'
 import CommandPalette from './features/command/CommandPalette.vue'
 import { useSettingsStore } from './stores/settings'
 import { useTerminalStore } from './stores/terminal'
+import { useUpdateStore } from './stores/update'
 import { attachTaskProgress } from './composables/useTaskProgress'
 import { useNaiveTheme, applyAccentToDom } from '@wslpilot/ui'
 import type { AccentName } from '@wslpilot/ui'
@@ -54,6 +55,7 @@ let unsubNavigate: (() => void) | undefined
 let unsubPtyData: (() => void) | undefined
 let unsubPtyExit: (() => void) | undefined
 let unsubTaskProgress: (() => void) | undefined
+let unsubUpdate: (() => void) | undefined
 
 onMounted(async () => {
   // load 内部已降级兜底；此处 finally 保证界面一定走出 loading（review C11）
@@ -87,6 +89,9 @@ onMounted(async () => {
   // ★ 长任务进度应用级常驻：离开备份页也不丢进度（M4）
   unsubTaskProgress = attachTaskProgress()
 
+  // ★ 自动更新状态应用级常驻（M7）：设置页/托盘以外也能收到 update:changed
+  unsubUpdate = useUpdateStore().attach()
+
   // ★ 全局快捷键已下沉到 DefaultLayout（message provider 内，失败可 toast）
   // 外部配置冲突由 ConflictResolver（NDialog）处理，语义见该组件（review C3）
 })
@@ -97,6 +102,7 @@ onUnmounted(() => {
   unsubPtyData?.()
   unsubPtyExit?.()
   unsubTaskProgress?.()
+  unsubUpdate?.()
 })
 </script>
 

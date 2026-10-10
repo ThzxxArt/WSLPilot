@@ -1,6 +1,21 @@
-import type { DistroMeta, DistroRuntime, DistroView, Metrics, WslState } from '@wslpilot/shared'
-import { createAppError, assertSafeDistroName, DISTRO_BRAND_COLORS } from '@wslpilot/shared'
-import { runWsl, parseDistroList, type Logger } from '@wslpilot/kit'
+import type {
+  DistroMeta,
+  DistroRuntime,
+  DistroView,
+  ElevationOpResult,
+  ElevationRequest,
+  Metrics,
+  WslState,
+} from '@wslpilot/shared'
+import {
+  createAppError,
+  assertSafeDistroName,
+  isElevationError,
+  ELEVATION_OP_LABEL,
+  ELEVATION_SUGGESTION,
+  DISTRO_BRAND_COLORS,
+} from '@wslpilot/shared'
+import { runWsl, parseDistroList, getRawCommand, type Logger } from '@wslpilot/kit'
 import type { TaskControl } from './task-runner'
 import { spawnWslTask } from './spawn-task'
 
@@ -61,7 +76,47 @@ async function runOk(
   }
 }
 
-export function createWslService(logger: Logger): WslService {
+export interface WslServiceOptions {
+  /** 提权助手（M7）：install / setVersion 权限不足时改由独立提权进程执行（§14.3） */
+  elevation?: { runOne(req: ElevationRequest): Promise<ElevationOpResult> }
+}
+
+export function createWslService(logger: Logger, opts: WslServiceOptions = {}): WslService {
+  /**
+   * 流式执行 + 权限不足时提权降级（M7）。
+   * `wsl --install` / `--set-version` 需要管理员权限：直接执行被拒时改由提权助手执行。
+   */
+  async function spawnOrElevate(
+    args: string[],
+    op: 'wsl.install' | 'wsl.setVersion',
+    params: Record<string, string | number>,
+    ctl: TaskControl,
+  ): Promise<void> {
+    try {
+      await spawnWslTask(args, ctl, logger)
+    } catch (e) {
+      const detail =
+        e && typeof e === 'object' && 'detail' in e
+          ? String((e as { detail?: string }).detail ?? '')
+          : ''
+      if (isElevationError(detail) && opts.elevation) {
+        ctl.log(`权限不足，改由提权助手执行：${ELEVATION_OP_LABEL[op]}…`)
+        logger.info('wsl requires elevation, delegating', { op })
+        const res = await opts.elevation.runOne({ op, params })
+        if (res.ok) {
+          ctl.log('提权执行成功')
+          return
+        }
+        throw createAppError('PERMISSION_DENIED', {
+          message: `${ELEVATION_OP_LABEL[op]}失败：提权执行失败`,
+          detail: `${res.stderr}\n${res.stdout}`.trim(),
+          rawCommand: getRawCommand('wsl.exe', args),
+          suggestion: ELEVATION_SUGGESTION,
+        })
+      }
+      throw e
+    }
+  }
   async function list(): Promise<DistroRuntime[]> {
     const r = await runWsl(['--list', '--verbose'])
     if (r.code !== 0) {
@@ -263,7 +318,7 @@ export function createWslService(logger: Logger): WslService {
     async install(name: string | undefined, ctl: TaskControl): Promise<void> {
       const args = ['--install', ...(name ? ['-d', assertName(name)] : [])]
       ctl.report(0, name ? `正在安装 ${name}` : '正在安装 WSL')
-      await spawnWslTask(args, ctl, logger)
+      await spawnOrElevate(args, 'wsl.install', name ? { name: assertName(name) } : {}, ctl)
       ctl.report(100, '安装完成')
     },
 
@@ -272,9 +327,10 @@ export function createWslService(logger: Logger): WslService {
     },
 
     async setVersion(name: string, version: 1 | 2, ctl: TaskControl): Promise<void> {
-      const args = ['--set-version', assertName(name), version === 1 ? '1' : '2']
+      const safeName = assertName(name)
+      const args = ['--set-version', safeName, version === 1 ? '1' : '2']
       ctl.report(0, `正在转换为 WSL${version}`)
-      await spawnWslTask(args, ctl, logger)
+      await spawnOrElevate(args, 'wsl.setVersion', { name: safeName, version }, ctl)
       ctl.report(100, `已转换为 WSL${version}`)
     },
   }

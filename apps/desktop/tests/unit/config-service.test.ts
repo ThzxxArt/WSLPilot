@@ -108,6 +108,7 @@ describe('ConfigService', () => {
         confirmDestructive: false,
         logLevel: 'debug',
         hardwareAcceleration: false,
+        autoUpdate: true,
       },
     })
     const s = await svc.load('settings')

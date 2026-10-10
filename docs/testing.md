@@ -56,13 +56,21 @@ expect(() => ipcSchema.configSet.parse({ fileKey: 'evil', patch: {} })).toThrow(
 
 环境：`happy-dom` + `@vue/test-utils`
 
-覆盖：StatusDot、Sparkline、MetricCard、DistroCard（启停事件、状态中文、默认禁用菜单）。
+覆盖：StatusDot、Sparkline、MetricCard、DistroCard（启停事件、状态中文、默认禁用菜单）；
+M7 补齐 Skeleton（骨架屏 / rows 形态 / aria-busy）、EmptyState（插画 + CTA 槽语义）、
+vRipple（涟漪生成 / reduced-motion 降级 / 卸载清理）。
 
 组件覆盖率门禁：lines/statements/branches/functions ≥70%（`vitest.component.config.ts`，由 `npm run test:component --coverage` 强制执行）。
 
-### 4. 视觉回归（规划中）
+### 4. 视觉回归（M7 已落地）
 
-Playwright 截图对比，保证浅色主题渲染一致性（关键页面）。当前尚未落地，属 M7 打磨项。
+Playwright 截图对比（`npm run test:visual`，`@visual` 标签）：驾驶舱 / 设置 / 网络 / 命令面板
+关键页面浅色主题渲染一致性。
+
+- 动画禁用 + 动态区（指标数字 / 迷你图 / 时钟 / 发行版列表）mask，基线只锁视觉系统（布局、令牌、间距、字号）
+- 基线位于 `apps/desktop/tests/e2e/__screenshots__/`；`updateSnapshots: 'missing'`
+  —— 首次运行生成基线，其后比对（容差 `maxDiffPixelRatio: 0.02`）
+- 需 Windows + 显示环境（CI `e2e` job）
 
 ### 5. 端到端（`npm run test:e2e`）
 
@@ -77,7 +85,8 @@ Playwright + Electron（`electron.launch`，Windows）：
 npm test               # 单元 + 集成
 npm run test:coverage  # 单元 + 覆盖率（硬门禁 ≥85%）
 npm run test:component # 组件 + 覆盖率（硬门禁 ≥70%）
-npm run test:e2e       # E2E（需 Windows）
+npm run test:e2e       # E2E + 视觉回归（需 Windows）
+npm run test:visual    # 仅视觉回归（@visual，首跑生成基线）
 npm run test:watch     # 监听模式
 ```
 
@@ -105,7 +114,18 @@ npm run test:watch     # 监听模式
 
 - `types.ts`（纯类型，无运行时逻辑）
 - `config-migrations.ts`（迁移链，随 schema 版本演进单独测）
-- `updater/` `elevation/`（M7 提权/更新，尚未实现）
+
+**M7 新增覆盖**：
+
+- `shared/elevation.ts`（op 白名单 / 参数校验 / op→argv 映射 / 提权错误识别）
+- `shared/diagnostics.ts`（脱敏规则：主目录变体、路径边界、URL 凭据、密钥打码）
+- `kit/zip.ts`（CRC32 标准向量、zip 结构往返、路径逃逸拒绝）
+- `main/elevation/`（客户端成功/取消/坏结果路径、Helper 脚本白名单内容断言）
+- `main/services/diagnostics-service.ts`（日志收集、导出 zip 内容与脱敏、目标路径规范化）
+- `main/services/signature-service.ts`（Authenticode 输出解析、签名/未签名/检测失败）
+- `main/updater/auto-update.ts`（状态机：available / not-available / downloading / downloaded / error、
+  开发模式跳过、install 门控）
+- `renderer/stores/update.ts`（状态镜像、attach 事件、操作失败回滚）
 
 ## CI
 

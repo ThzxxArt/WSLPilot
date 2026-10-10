@@ -88,10 +88,12 @@ onUnmounted(unbindHotkeys)
 
 <template>
   <div class="layout">
+    <!-- 无障碍：跳到主内容（键盘用户首个 Tab 目标） -->
+    <a class="skip-link" href="#main-content">跳到主内容</a>
     <TitleBar />
     <div class="layout-body">
       <SidebarNav v-model:collapsed="sidebarCollapsed" />
-      <main class="layout-content">
+      <main id="main-content" class="layout-content" tabindex="-1">
         <router-view v-slot="{ Component }">
           <transition name="fade-slide" mode="out-in">
             <component :is="Component" />
@@ -111,6 +113,27 @@ onUnmounted(unbindHotkeys)
   overflow: hidden;
 }
 
+/* 跳转主内容：默认移出视口，聚焦时现身（无障碍通用模式） */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: var(--z-toast);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  font-size: 13px;
+  font-weight: 600;
+  transition: top var(--dur-fast) var(--ease-standard);
+}
+
+.skip-link:focus {
+  top: 8px;
+  outline: 2px solid var(--color-accent-hover);
+  outline-offset: 2px;
+}
+
 .layout-body {
   display: flex;
   flex: 1;
@@ -122,5 +145,10 @@ onUnmounted(unbindHotkeys)
   min-width: 0;
   overflow: auto;
   background: var(--color-bg-canvas);
+}
+
+/* 主内容容器被脚本聚焦时不要画外框（跳转锚点，非交互控件） */
+.layout-content:focus {
+  outline: none;
 }
 </style>

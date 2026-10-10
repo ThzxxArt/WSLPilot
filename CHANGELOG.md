@@ -3,7 +3,13 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+> **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
+
 ## [Unreleased]
+
+（暂无）
+
+## [0.1.0] - 2026-10-10
 
 ### Notes
 
@@ -47,6 +53,36 @@
 
 ### Added
 
+- **M7 打磨发布**：动效完善、空状态与骨架屏、无障碍、诊断包、提权助手、代码签名、自动更新
+  - **动效完善**（§13.2 关键交互动效清单）
+    - 按钮涟漪（`v-ripple` 指令）+ 按压缩放；卡片悬浮上浮/光晕；状态点呼吸脉冲；指标数字滚动递增
+    - 路由切换淡入上移；抽屉/模态背景模糊；命令面板玻璃拟态下弹（`palette-pop`）
+    - 列表增删 FLIP（端口转发表 `transition-group`）；终端标签缩放淡出 + 排序位移插值
+    - 强调色切换 300ms 全局平滑过渡；Toast 右侧滑入；进度环渐变描边
+    - 全部动效响应 `prefers-reduced-motion` 与设置「减弱动效」（全局降级为即时切换）
+  - **空状态与骨架屏**（§12.8）：Skeleton 流光组件（不再用转圈表示加载）；空态统一「插画 + 一句话 + 主 CTA」
+    （无发行版→安装、无转发规则→新建、无搜索结果→清除筛选）；文本行骨架用于列表加载
+  - **无障碍**（§11.4）：「跳到主内容」跳转链接；模态焦点管理与关闭后焦点归还（命令面板 combobox /
+    `aria-activedescendant` / listbox 语义）；状态栏 `role=status` + `aria-live` 任务播报；骨架屏 `aria-busy`；
+    图标按钮 `aria-label` 全覆盖；危险操作图标 + 文字双编码；焦点环全局可见
+  - **诊断包**（§15.3）：「打开日志目录」+「导出诊断包」（设置 → 关于）
+    - 打包近期日志（限量限体积）+ 配置**脱敏副本** + 环境信息（manifest.json）为 zip
+    - 脱敏规则唯一事实源：主目录（含 JSON 转义形态、大小写/分隔符变体，带路径边界防前缀碰撞）→
+      `%USERPROFILE%`；URL 凭据与密钥类赋值打码；内置极简 ZIP 写入器（DEFLATE + CRC32，零新依赖）
+  - **提权助手 ElevationHelper**（§14.3）：主进程保持非提权，独立提权进程按需 UAC 执行
+    - 结构化请求白名单（`netsh.portproxy.add/delete` · `usbipd.bind/unbind` · `wsl.move/install/setVersion`），
+      op → program/argv 唯一映射（参数数组，无 shell 拼接）；Helper 脚本对 op/program 二次校验（纵深防御）
+    - 批量请求合并为一次 UAC 会话；取消 UAC → `PERMISSION_DENIED` + 等价命令行（可复制到管理员终端）
+    - 服务层接线：netsh 转发 / usbipd 绑定 / 迁移磁盘 / 安装 / 版本转换在直接执行被拒时自动改走提权助手
+  - **代码签名**（§17）：electron-builder `signtoolOptions`（sha256）+ `verifyUpdateCodeSignature`；
+    证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入（release.yml 已接线 Secrets）
+    - `app:signatureStatus`：检测当前可执行文件 Authenticode 状态；「设置 → 关于」展示签名/证书主题，
+      未签名时给出 SmartScreen 警告说明（不吓用户、可执行）
+  - **自动更新**（§17）：electron-updater 完整接入（GitHub Releases 更新源，`publish` 生成 app-update.yml）
+    - 启动后台检查（`advanced.autoUpdate`，可关闭）；「设置 → 关于」检查 / 下载 / 重启安装
+    - `autoDownload=false`（不偷偷下大文件）+ `autoInstallOnAppQuit=true`；`update:changed` 事件推送状态
+  - **视觉回归**（§16）：Playwright 截图对比（驾驶舱 / 设置 / 网络 / 命令面板），动态区 mask、
+    `updateSnapshots: 'missing'` 首跑生成基线；`npm run test:visual`
 - **M6 网络与设备**：端口转发、镜像网络模式引导、代理配置、usbipd 设备面板（网络与设备面板）
   - **端口转发**（声明式规则 + `netsh interface portproxy` 应用）
     - 规则 CRUD 落 `network.jsonc`（id 白名单执行：渲染层只传 id，参数永不进命令行）；启用/停用开关、删除可撤销
@@ -142,4 +178,4 @@
 - NSIS 安装包（支持自定义安装路径）与 portable 免安装版
 - 单元测试（解析 / schema / 迁移 / 错误码）与 CI 工作流
 
-> M1–M6 已全部交付，M7（动效 / 无障碍 / 诊断包 / 签名 / 自动更新）待启动；首个正式版本待 M7 完成后打标签。
+> M1–M7 已全部交付；版本序列自 `0.1.0` 起步并保持 `0.x`（**永不发布 `1.0.0`**）。

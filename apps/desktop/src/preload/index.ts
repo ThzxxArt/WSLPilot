@@ -5,6 +5,7 @@ import {
   type BackupFileInfo,
   type ConfigKey,
   type ConfigMap,
+  type DiagnosticsExportResult,
   type DirEntry,
   type DistroMeta,
   type DistroView,
@@ -20,8 +21,10 @@ import {
   type ProxyConfig,
   type ProxyScriptState,
   type RegistryDetail,
+  type SignatureStatus,
   type TaskHandle,
   type TaskProgress,
+  type UpdateState,
   type UsbDevice,
   type UsbipdStatus,
   type WslAction,
@@ -216,6 +219,26 @@ const api = {
     },
   },
 
+  diagnostics: {
+    /** 打开日志目录（logs/） */
+    openLogsDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenLogsDir),
+    /** 导出诊断包（主进程弹保存对话框；取消返回 null） */
+    exportPackage: (): Promise<DiagnosticsExportResult | null> =>
+      ipcRenderer.invoke(CH.appExportDiagnostics, {}),
+  },
+
+  update: {
+    status: (): Promise<UpdateState> => ipcRenderer.invoke(CH.updateStatus),
+    check: (): Promise<UpdateState> => ipcRenderer.invoke(CH.updateCheck),
+    download: (): Promise<UpdateState> => ipcRenderer.invoke(CH.updateDownload),
+    install: (): Promise<void> => ipcRenderer.invoke(CH.updateInstall),
+    onChanged: (cb: (state: UpdateState) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, state: UpdateState) => cb(state)
+      ipcRenderer.on(CH.updateChanged, h)
+      return () => ipcRenderer.removeListener(CH.updateChanged, h)
+    },
+  },
+
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(CH.appGetVersion),
     openConfigDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenConfigDir),
@@ -233,6 +256,8 @@ const api = {
     }): Promise<string | null> => ipcRenderer.invoke(CH.appPickOpenFile, opts ?? {}),
     getWslVersion: (): Promise<{ wslVersion: string; kernelVersion: string; raw: string }> =>
       ipcRenderer.invoke(CH.appGetWslVersion),
+    /** 代码签名状态（M7：未签名时附 SmartScreen 说明） */
+    signatureStatus: (): Promise<SignatureStatus> => ipcRenderer.invoke(CH.appSignatureStatus),
     minimize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMinimize),
     maximize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMaximize),
     close: (): Promise<void> => ipcRenderer.invoke(CH.appWindowClose),
@@ -251,6 +276,7 @@ export type {
   AppSettings,
   ConfigKey,
   ConfigMap,
+  DiagnosticsExportResult,
   DistroView,
   DistroMeta,
   Metrics,
@@ -259,8 +285,10 @@ export type {
   PortForwardRule,
   ProxyConfig,
   ProxyScriptState,
+  SignatureStatus,
   TaskHandle,
   TaskProgress,
+  UpdateState,
   BackupFileInfo,
   RegistryDetail,
   UsbDevice,

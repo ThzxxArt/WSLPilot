@@ -40,19 +40,32 @@ function openTasks() {
 <template>
   <footer class="statusbar">
     <div class="left">
-      <span class="dot" />
+      <span class="dot" aria-hidden="true" />
       <span class="muted">就绪</span>
-      <template v-if="runningTask">
-        <span class="sep">·</span>
-        <button class="task-chip" :title="runningTask.message" @click="openTasks">
-          <span class="task-pulse" />
-          {{ taskLabel }}
+      <!-- 无障碍：任务状态实时播报（role=status / aria-live） -->
+      <span class="task-slot" role="status" aria-live="polite">
+        <template v-if="runningTask">
+          <span class="sep" aria-hidden="true">·</span>
+          <button
+            class="task-chip"
+            :title="runningTask.message"
+            :aria-label="`任务进行中：${taskLabel}，点击查看任务详情`"
+            @click="openTasks"
+          >
+            <span class="task-pulse" aria-hidden="true" />
+            {{ taskLabel }}
+          </button>
+        </template>
+        <button
+          v-else-if="hasEntries"
+          class="task-link"
+          aria-label="查看任务记录"
+          @click="openTasks"
+        >
+          任务
         </button>
-      </template>
-      <button v-else-if="hasEntries" class="task-link" aria-label="查看任务记录" @click="openTasks">
-        任务
-      </button>
-      <span class="sep">·</span>
+      </span>
+      <span class="sep" aria-hidden="true">·</span>
       <span class="muted">WSLPilot v{{ versionLabel }}</span>
     </div>
     <div class="right">

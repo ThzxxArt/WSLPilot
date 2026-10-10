@@ -1,15 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import {
-  NButton,
-  NInput,
-  NRadioGroup,
-  NRadioButton,
-  NSelect,
-  NTag,
-  NSpin,
-  useMessage,
-} from 'naive-ui'
+import { NButton, NInput, NRadioGroup, NRadioButton, NSelect, NTag, useMessage } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useDistrosStore } from '../stores/distros'
 import { useMetricsStore } from '../stores/metrics'
@@ -17,7 +8,7 @@ import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
 import { DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
-import { DistroCard, EmptyState, StatusDot } from '@ui/components'
+import { DistroCard, EmptyState, StatusDot, Skeleton } from '@ui/components'
 import { stateLabel } from '../composables/state-label'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
@@ -161,10 +152,15 @@ function onDetailTerminal(name: string) {
       <span v-if="distros.lastError.suggestion"> — {{ distros.lastError.suggestion }}</span>
     </p>
 
-    <n-spin :show="distros.loading && distros.items.length === 0">
+    <!-- 首次加载：骨架屏（§12.8 流光扫过，而非转圈） -->
+    <div v-if="distros.loading && distros.items.length === 0" class="grid" aria-busy="true">
+      <Skeleton v-for="i in 6" :key="i" height="132px" radius="16px" />
+    </div>
+
+    <template v-else>
       <EmptyState
         v-if="filtered.length === 0 && !distros.loading"
-        :description="search || tagFilter ? '没有匹配的发行版' : '尚未检测到发行版'"
+        :description="search || tagFilter ? '没有匹配的发行版，换个关键词试试' : '尚未检测到发行版'"
         :illustration="search || tagFilter ? '🔍' : '🐧'"
       >
         <n-button v-if="search || tagFilter" size="small" secondary @click="clearFilters">
@@ -262,7 +258,7 @@ function onDetailTerminal(name: string) {
           </tr>
         </tbody>
       </table>
-    </n-spin>
+    </template>
 
     <DistroDetailModal
       v-model:show="detailOpen"

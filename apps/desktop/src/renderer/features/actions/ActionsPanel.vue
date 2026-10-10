@@ -227,7 +227,7 @@ function openActionsFile() {
                 <n-button size="tiny" type="primary" secondary @click="runAction(a)">运行</n-button>
                 <n-button size="tiny" quaternary @click="openEdit(a)">编辑</n-button>
                 <n-button size="tiny" quaternary type="error" @click="removeAction(a)">
-                  删除
+                  ⚠ 删除
                 </n-button>
               </div>
             </div>
