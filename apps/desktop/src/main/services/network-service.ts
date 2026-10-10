@@ -356,6 +356,8 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
       // 批量提权收集器：直接执行权限不足的 op 登记于此，循环后**合并一次 UAC**（§14.3）
       const pending: Array<{ req: ElevationRequest; ruleId: string }> = []
       const deferredRuleIds = new Set<string>()
+      // 任一环节（直接执行/提权）失败的规则都进此集：成败按规则去重计数（review 回验修复）
+      const failedRuleIds = new Set<string>()
 
       for (let i = 0; i < list.length; i++) {
         const rule = list[i]!
@@ -372,6 +374,7 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
           })
           if (!deferredRuleIds.has(rule.id)) applied++
         } catch (e) {
+          failedRuleIds.add(rule.id)
           const msg = e instanceof Error ? e.message : String(e)
           errors.push(`${rule.id}: ${msg}`)
           ctl.log(`应用失败 ${rule.id}：${msg}`)
@@ -384,7 +387,6 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
 
       // 合并提权（一次 UAC 完成全部待执行项）；无提权助手则全部记为权限失败
       if (pending.length > 0) {
-        const failedRuleIds = new Set<string>()
         try {
           const results = await runElevationBatch(
             pending.map((p) => p.req),

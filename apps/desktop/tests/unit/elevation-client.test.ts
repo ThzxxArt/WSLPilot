@@ -267,6 +267,10 @@ describe('提权客户端启动器细节（review 根治回归）', () => {
     expect(command).toMatch(/'"[^"]*wslpilot elev [^"]*helper\.ps1"'/)
     expect(command).toMatch(/'"[^"]*request\.json"'/)
     expect(command).toMatch(/'"[^"]*result\.json"'/)
+    // -FilePath 是参数值，只做 PS 单引号定界，**不得**内嵌双引号
+    // （否则 FileName 为字面 `"powershell.exe"`，Start-Process 找不到文件 — 回验修复）
+    expect(command).toContain("-FilePath 'powershell.exe'")
+    expect(command).not.toContain('-FilePath \'"')
   })
 
   it('UAC 超时按 ELEVATION_TIMEOUT_MS 透传', async () => {

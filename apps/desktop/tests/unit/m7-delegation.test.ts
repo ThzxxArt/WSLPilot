@@ -203,6 +203,32 @@ describe('network-service 提权委托', () => {
     })
   })
 
+  it('applyAll 成败按规则去重：直败 + 延迟成功的规则不重复计数（review 回验）', async () => {
+    // call1: show all → 空；call2: RULE add → 权限不足（延迟提权）
+    // call3: show all → 空；call4: RULE2 add → 非权限失败（直接失败）
+    const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 1, stderr: ELEVATION_DENIED },
+      { code: 0, stdout: '' },
+      { code: 1, stderr: 'The IP Helper service is not running' },
+    ])
+    const elevation = elevationMock()
+    elevation.run.mockResolvedValueOnce({
+      canceled: false,
+      results: [okResult('netsh.portproxy.add', true)],
+    })
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: netConfig([RULE, RULE2]),
+      runTool: tool.fn,
+      elevation,
+    })
+    const err: any = await svc.applyAll(makeCtl()).catch((e) => e)
+    expect(err.message).toMatch(/成功 1 条/)
+    expect(err.message).toMatch(/失败 1 条/)
+    expect(err.message).not.toMatch(/成功 2 条/)
+  })
+
   it('未注入提权助手：保持 PERMISSION_DENIED + 等价命令行（降级路径）', async () => {
     const tool = makeTool([
       { code: 0, stdout: '' },

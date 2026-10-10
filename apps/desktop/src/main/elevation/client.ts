@@ -101,7 +101,11 @@ export function createElevationClient(
       await fsLike.writeFile(resultPath, '')
 
       // 外层启动器：拉起提权的 helper 进程并等待完成。
-      // 参数经 -ArgumentList 数组传入（不经 cmd 拼接）；元素自带双引号（psArg）。
+      // 两类引号语义不同（review 回验修复）：
+      // - -FilePath 是参数值（不做命令行解析）：只用 PS 单引号定界，**不得**内嵌双引号
+      //   （否则 FileName 变成字面 `"powershell.exe"`，Start-Process 找不到文件）
+      // - -ArgumentList 元素会被拼成命令行再由子进程解析：值必须自带双引号（psArg），
+      //   否则含空格路径（C:\Users\John Doe\…）被拦腰拆开
       const argList = [
         '-NoProfile',
         '-NonInteractive',
@@ -116,7 +120,7 @@ export function createElevationClient(
       ]
         .map(psArg)
         .join(',')
-      const command = `try { Start-Process -FilePath ${psArg('powershell.exe')} -ArgumentList @(${argList}) -Verb RunAs -Wait -ErrorAction Stop } catch { Write-Output $_.Exception.Message; exit 1 }`
+      const command = `try { Start-Process -FilePath ${psQuote('powershell.exe')} -ArgumentList @(${argList}) -Verb RunAs -Wait -ErrorAction Stop } catch { Write-Output $_.Exception.Message; exit 1 }`
 
       const r = await tool(
         'powershell.exe',
