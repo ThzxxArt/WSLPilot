@@ -112,6 +112,8 @@ function close() {
     preset="card"
     title="安装发行版"
     class="install-modal"
+    :style="{ width: '480px', maxWidth: '94vw', maxHeight: '90vh' }"
+    :content-style="{ overflow: 'auto' }"
     :mask-closable="!isRunning"
     @update:show="(v: boolean) => (v ? emit('update:show', true) : close())"
   >
@@ -166,10 +168,7 @@ function close() {
 </template>
 
 <style scoped>
-.install-modal {
-  width: 480px;
-  max-width: 92vw;
-}
+/* 宽度走 n-modal 的 :style（preset="card" 不给 fallthrough class 挂 scoped 属性） */
 
 .form,
 .progress {

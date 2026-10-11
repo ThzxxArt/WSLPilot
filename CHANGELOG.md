@@ -17,6 +17,17 @@
 
 ### Fixed
 
+- **fix: 三症根治 — 终端乱码/弹框占满窗/指标全零**（用户实测反馈）
+  - **终端**：全仓从未引入 `xterm.css`——xterm 内部辅助元素（测量层 / 隐藏 textarea）以正常流渲染，
+    表现为终端顶部 tofu 图标行 + 重复字符行（`$$$…rrrr`）、并拦截鼠标导致拖选失效、复制误报「请先选中」；
+    补引官方样式后乱码消失、拖选与复制恢复（实测「已复制」）
+  - **弹框**：naive-ui `preset="card"` 不给 fallthrough class 挂 scoped 属性——`.detail-modal`/`.action-editor`/
+    `.diff-modal`/`.install-modal` 的宽度规则全是死规则，弹框宽度放飞到全窗、内容高超窗；
+    宽高迁移到 n-modal 的 `:style`（与 `rule-modal` 同款修法）+ `content-style` 内滚，实测 760×684 收进窗口
+  - **指标**：`wsl.exe` 输出编码双形态（内建命令 UTF-16LE、`-e` 透传 Linux 程序 UTF-8），
+    固定 utf16le 解码把 UTF-8 字节两两并成汉字乱码（`MEM:`→`䕍㩍…`）导致采样解析全灭、驾驶舱显示「—」；
+    `decodeWslOutput` 自适应识别（BOM / NUL 图样），实测内存/磁盘/CPU 出真值
+  - 新增 decodeWslOutput 编码自适应单测 4 例；安装包已重打（setup + portable）
 - **fix: Windows 打包链路根治**（此前 `npm run build` 打包从未成功过）
   - Electron 精确钉版 `33.4.11`（此前 `^33.2.1` 范围版本 + workspaces 提升布局下 electron-builder 推断不出版本，直接报错）
   - `@wslpilot/{kit,shared,ui}` 移入 devDependencies（已被 electron-vite 打进 `out/`，属编译期依赖；

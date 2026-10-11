@@ -290,6 +290,8 @@ async function confirmSave() {
       preset="card"
       title="变更预览 · /etc/wsl.conf"
       class="diff-modal"
+      :style="{ width: '640px', maxWidth: '94vw', maxHeight: '90vh' }"
+      :content-style="{ overflow: 'auto' }"
     >
       <div v-if="!hasChanges" class="diff-empty">没有需要写入的变更</div>
       <div v-else class="diff">
@@ -441,10 +443,7 @@ async function confirmSave() {
   color: var(--color-text-tertiary);
 }
 
-.diff-modal {
-  width: 640px;
-  max-width: 92vw;
-}
+/* 宽度走 n-modal 的 :style（preset="card" 不给 fallthrough class 挂 scoped 属性） */
 
 .diff {
   max-height: 380px;

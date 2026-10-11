@@ -94,7 +94,8 @@ function save() {
     preset="card"
     :title="rule ? '编辑转发规则' : '新建转发规则'"
     class="rule-modal"
-    :style="{ width: '560px' }"
+    :style="{ width: '560px', maxWidth: '94vw', maxHeight: '90vh' }"
+    :content-style="{ overflow: 'auto' }"
     :bordered="false"
     @update:show="(v: boolean) => emit('update:show', v)"
   >

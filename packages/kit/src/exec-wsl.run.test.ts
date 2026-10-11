@@ -4,6 +4,7 @@ import {
   runWsl,
   runWslWithStdin,
   parseDistroList,
+  decodeWslOutput,
   getRawCommand,
   spawnWsl,
   type WslExecResult,
@@ -107,6 +108,28 @@ describe('runWsl', () => {
     })
     const r = await runWsl(['x'])
     expect(r.code).toBe(-1)
+  })
+})
+
+describe('decodeWslOutput（编码自适应 — review 指标乱码根治）', () => {
+  it('UTF-8 输出（Linux 命令透传）按 UTF-8 解码，不再两两并成汉字', () => {
+    const raw = Buffer.from('MEM:16826488 4842600\nDISK:12288 4000000\n', 'utf8')
+    expect(decodeWslOutput(raw)).toContain('MEM:16826488')
+  })
+
+  it('UTF-16LE 输出（wsl 内建命令）按 utf16le 解码并清 NUL', () => {
+    const raw = Buffer.from('NAME STATE', 'utf16le')
+    expect(decodeWslOutput(raw)).toBe('NAME STATE')
+  })
+
+  it('UTF-16LE 带 BOM 优先识别', () => {
+    const raw = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('VERSION', 'utf16le')])
+    expect(decodeWslOutput(raw)).toBe('VERSION')
+  })
+
+  it('空输入返回空串', () => {
+    expect(decodeWslOutput(Buffer.alloc(0))).toBe('')
+    expect(decodeWslOutput(null)).toBe('')
   })
 })
 

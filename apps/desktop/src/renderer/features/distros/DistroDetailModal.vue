@@ -303,6 +303,8 @@ async function saveMeta() {
     preset="card"
     :title="`发行版详情 · ${distroName}`"
     class="detail-modal"
+    :style="{ width: '760px', maxWidth: '94vw', maxHeight: '90vh' }"
+    :content-style="{ overflow: 'auto' }"
     @update:show="(v: boolean) => (v ? emit('update:show', true) : requestClose())"
   >
     <!-- config pane 的 display-directive=show（naive 按 pane 读取）：
@@ -473,10 +475,7 @@ async function saveMeta() {
 </template>
 
 <style scoped>
-.detail-modal {
-  width: 760px;
-  max-width: 94vw;
-}
+/* 宽度走 n-modal 的 :style（preset="card" 不给 fallthrough class 挂 scoped 属性） */
 
 .loading {
   color: var(--color-text-tertiary);

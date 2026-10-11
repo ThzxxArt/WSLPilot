@@ -272,6 +272,8 @@ function openActionsFile() {
       preset="card"
       :title="editingExisting ? '编辑动作' : '新建动作'"
       class="action-editor"
+      :style="{ width: '560px', maxWidth: '94vw', maxHeight: '90vh' }"
+      :content-style="{ overflow: 'auto' }"
     >
       <div class="form-grid">
         <label>ID</label>
@@ -429,10 +431,8 @@ function openActionsFile() {
   white-space: pre-wrap;
 }
 
-.action-editor {
-  width: 560px;
-  max-width: 92vw;
-}
+/* 宽度走 n-modal 的 :style（preset="card" 不给 fallthrough class 挂 scoped 属性，
+   作用域规则对弹框根节点是死的 — review 根治） */
 
 .form-grid {
   display: grid;

@@ -9,20 +9,46 @@ export type WslExecResult = ToolResult
 
 export interface WslExecOptions {
   timeoutMs?: number
-  encoding?: 'utf16' | 'utf8'
+  encoding?: 'utf16' | 'utf8' | 'auto'
+}
+
+/**
+ * wsl.exe 输出编码自适应（review 指标全零根治）：
+ * - wsl 内建命令（--list/--version 等）输出 UTF-16LE
+ * - `-e <cmd>` 透传 Linux 程序 stdout 时是 UTF-8（现代 Windows 11 / WSL）
+ * 固定按 utf16le 解码会把 UTF-8 字节两两并成汉字乱码（"MEM:" → 䕍㩍…），下游解析全灭。
+ * 识别策略：UTF-16LE 文本的 ASCII 区段奇数位必为 0x00（或带 BOM FF FE）；否则按 UTF-8。
+ */
+export function decodeWslOutput(b?: Buffer | string | null): string {
+  if (!b) return ''
+  const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
+  if (buf.length === 0) return ''
+  const hasBom = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe
+  const sample = buf.subarray(0, Math.min(buf.length, 128))
+  let nulAtOdd = 0
+  for (let i = 1; i < sample.length; i += 2) if (sample[i] === 0x00) nulAtOdd++
+  const utf16Like =
+    hasBom || (sample.length >= 4 && nulAtOdd >= Math.floor(sample.length / 2) * 0.3)
+  if (utf16Like) {
+    const body = hasBom ? buf.subarray(2) : buf
+    return body.toString('utf16le').replace(/\0/g, '')
+  }
+  return buf.toString('utf8')
 }
 
 /**
  * 执行 wsl.exe。
- * 关键：Windows 上 wsl.exe 标准输出为 UTF-16LE，必须 Buffer + utf16le 解码并清 \0。
- * 一律参数数组传入，禁止字符串拼接。
+ * 输出编码按 decodeWslOutput 自适应（UTF-16LE / UTF-8），一律参数数组传入，禁止字符串拼接。
  */
 export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise<WslExecResult> {
   const decode = (b?: Buffer | string | null): string => {
     if (!b) return ''
-    const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
-    if (opts.encoding === 'utf8') return buf.toString('utf8')
-    return buf.toString('utf16le').replace(/\0/g, '')
+    if (opts.encoding === 'utf8') return Buffer.isBuffer(b) ? b.toString('utf8') : String(b)
+    if (opts.encoding === 'utf16') {
+      const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
+      return buf.toString('utf16le').replace(/\0/g, '')
+    }
+    return decodeWslOutput(b)
   }
 
   try {
@@ -66,9 +92,12 @@ export async function runWslWithStdin(
   }
   const decode = (b?: Buffer | string | null): string => {
     if (!b) return ''
-    const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
-    if (opts.encoding === 'utf8') return buf.toString('utf8')
-    return buf.toString('utf16le').replace(/\0/g, '')
+    if (opts.encoding === 'utf8') return Buffer.isBuffer(b) ? b.toString('utf8') : String(b)
+    if (opts.encoding === 'utf16') {
+      const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
+      return buf.toString('utf16le').replace(/\0/g, '')
+    }
+    return decodeWslOutput(b)
   }
 
   return new Promise<WslExecResult>((resolve) => {

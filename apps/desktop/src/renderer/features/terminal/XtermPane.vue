@@ -2,6 +2,9 @@
 import { onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
 import { useMessage } from 'naive-ui'
 import { Terminal } from '@xterm/xterm'
+// xterm 官方样式必须引入：缺了它内部辅助元素（测量层 / 隐藏 textarea）会以正常流渲染——
+// 表现为终端顶部多出 tofu 与重复字符行、并拦截鼠标导致拖选失效、复制误报「请先选中」
+import '@xterm/xterm/css/xterm.css'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
