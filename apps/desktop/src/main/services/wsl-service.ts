@@ -40,6 +40,11 @@ export interface WslStatus {
 export interface WslService {
   list(): Promise<DistroRuntime[]>
   listWithMeta(metaByName: Map<string, DistroMeta>): Promise<DistroView[]>
+  /**
+   * 运行状态硬门禁（review：跑命令绝不隐式启动发行版）。
+   * `wsl -d X -e …` 会把停着的发行版拉起来——一切「进发行版跑命令」的入口必须先过此闸。
+   */
+  assertRunning(name: string): Promise<void>
   start(name: string): Promise<void>
   terminate(name: string): Promise<void>
   shutdown(): Promise<void>
@@ -169,6 +174,24 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
           },
         }
       })
+    },
+
+    async assertRunning(name: string) {
+      const n = assertName(name)
+      const items = await list()
+      const hit = items.find((d) => d.name.toLowerCase() === n.toLowerCase())
+      if (!hit) {
+        throw createAppError('DISTRO_NOT_FOUND', {
+          message: `找不到发行版 ${n}`,
+          suggestion: '请刷新发行版列表后重试',
+        })
+      }
+      if (hit.state !== 'Running') {
+        throw createAppError('DISTRO_NOT_RUNNING', {
+          message: `发行版 ${hit.name} 未运行`,
+          suggestion: '请先在「发行版」列表点「启动」——WSLPilot 不会隐式启动发行版',
+        })
+      }
     },
 
     async start(name) {

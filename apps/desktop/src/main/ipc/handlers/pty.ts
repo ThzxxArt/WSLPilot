@@ -36,8 +36,11 @@ function asId(arg: unknown): string {
 export function registerPtyHandlers(add: AddFn, deps: { pty: PtyManager }): void {
   const { pty } = deps
 
-  add(CH.ptyCreate, (_c, arg: never) => {
-    return pty.create(asCreate(arg))
+  add(CH.ptyCreate, async (c, arg: never) => {
+    const o = asCreate(arg)
+    // 硬门禁（review：开会话即 `wsl -d X -e`，会隐式启动发行版）：未运行不建会话
+    await c.wsl?.assertRunning(o.distro)
+    return pty.create(o)
   })
 
   add(CH.ptyInput, (_c, arg: never) => {

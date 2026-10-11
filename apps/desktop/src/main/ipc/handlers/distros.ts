@@ -81,6 +81,8 @@ export function registerDistroHandlers(
         suggestion: '全局概览请走 metrics:overview 通道',
       })
     }
+    // 硬门禁（review：采样 `wsl -d X -e` 会隐式启动发行版）：未运行不采样
+    await wsl.assertRunning(n)
     return wsl.sampleMetrics(n)
   })
 

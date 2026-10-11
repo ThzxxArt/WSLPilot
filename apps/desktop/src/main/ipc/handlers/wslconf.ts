@@ -16,15 +16,18 @@ type AddFn = (
  */
 export function registerWslConfHandlers(
   add: AddFn,
-  deps: { wslconf: WslConfService; wsl: Pick<WslService, 'terminate'> },
+  deps: { wslconf: WslConfService; wsl: Pick<WslService, 'terminate' | 'assertRunning'> },
 ): void {
   add(CH.wslconfRead, async (_c, name: string) => {
+    // 硬门禁（review：`wsl -d X -e cat` 会隐式启动发行版）：未运行不读
+    await deps.wsl.assertRunning(name)
     return deps.wslconf.read(name)
   })
 
   add(
     CH.wslconfWrite,
     async (c, payload: { name: string; content: string }): Promise<{ terminated: boolean }> => {
+      await deps.wsl.assertRunning(payload.name)
       await deps.wslconf.write(payload.name, payload.content)
       const autoStop = c.configService.loadSync('settings').wsl.autoShutdownAfterConfigChange
       if (autoStop) {

@@ -59,6 +59,15 @@ const FileBrowserPanel = (await import('../../src/renderer/features/fs/FileBrows
   .default
 
 const { createPinia, setActivePinia } = await import('pinia')
+const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+/** 面板读取走运行状态门禁（review：读取绝不隐式启动发行版）——夹具默认 Running */
+const RUNNING = {
+  name: 'Ubuntu',
+  state: 'Running',
+  version: 2,
+  isDefault: true,
+  meta: null,
+} as never
 
 function session(ptyId: string, title: string) {
   return { ptyId, title, distro: 'Ubuntu', shell: '/bin/bash', alive: true, createdAt: 0 }
@@ -68,6 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   dialogResult = true
   setActivePinia(createPinia())
+  useDistrosStore().items = [RUNNING]
   document.body.innerHTML = ''
   fsApi.readDir.mockClear()
   fsApi.readDir.mockResolvedValue([

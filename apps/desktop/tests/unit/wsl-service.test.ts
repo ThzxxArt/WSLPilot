@@ -124,6 +124,19 @@ describe('WslService', () => {
       expect((runWsl as any).mock.calls[0][0]).toEqual(['-d', 'Ubuntu-22.04', '-e', 'true'])
     })
 
+    it('assertRunning：未运行/不存在拒绝，运行中放行（review 隐式启动根治）', async () => {
+      ;(runWsl as any).mockResolvedValue(
+        ok(
+          '  NAME            STATE           VERSION\r\n* Ubuntu-22.04    Running         2\r\n  Debian          Stopped         1',
+        ),
+      )
+      await expect(svc.assertRunning('Ubuntu-22.04')).resolves.toBeUndefined()
+      await expect(svc.assertRunning('Debian')).rejects.toMatchObject({
+        code: 'DISTRO_NOT_RUNNING',
+      })
+      await expect(svc.assertRunning('Nope')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+    })
+
     it('terminate uses --terminate', async () => {
       ;(runWsl as any).mockResolvedValue(ok(''))
       await svc.terminate('Debian')

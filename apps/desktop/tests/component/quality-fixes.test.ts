@@ -234,6 +234,11 @@ beforeEach(() => {
   routeMock.query = {}
   useCommandPalette().closePalette()
   setActivePinia(createPinia())
+  // 面板读取走运行状态门禁（review：读取绝不隐式启动发行版）——默认 Running，用例可覆写
+  useDistrosStore().items = [
+    distro({ name: 'Ubuntu', state: 'Running' }),
+    distro({ name: 'Debian', state: 'Running' }),
+  ]
   wslAPI.config.get.mockResolvedValue({})
   wslAPI.wslconf.read.mockResolvedValue('[automount]\nenabled = true\n')
   wslAPI.distros.list.mockResolvedValue([])

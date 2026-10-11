@@ -3,12 +3,16 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NSpin, NTag, useDialog, useMessage } from 'naive-ui'
 import { CodeEditor } from '@wslpilot/ui'
 import { FS_READ_LIMIT_BYTES, type DirEntry } from '@wslpilot/shared'
+import { useDistrosStore } from '../../stores/distros'
 import { errorLine } from '../../composables/useAppError'
 
 const props = defineProps<{ distroName: string }>()
 
 const message = useMessage()
 const dialog = useDialog()
+const distros = useDistrosStore()
+/** 运行状态门禁（review：进文件页即启动发行版根治）：读取绝不隐式启动发行版 */
+const isRunning = computed(() => distros.byName(props.distroName)?.state === 'Running')
 const path = ref('/')
 const entries = ref<DirEntry[]>([])
 const loading = ref(false)
@@ -57,6 +61,13 @@ const crumbs = computed(() => {
  */
 async function reload() {
   if (!props.distroName) return
+  // 未运行不读（fs 走 wsl -d X -e，会隐式启动发行版）— review 状态门禁
+  if (!isRunning.value) {
+    entries.value = []
+    file.value = null
+    loading.value = false
+    return
+  }
   loading.value = true
   error.value = ''
   file.value = null
@@ -69,6 +80,11 @@ async function reload() {
     loading.value = false
   }
 }
+
+// 发行版启动后自动载入（详情弹框内点「启动」→ 文件页即时可用）
+watch(isRunning, (running) => {
+  if (running && entries.value.length === 0 && !file.value) void reload()
+})
 
 /** 刷新当前目录（保留未保存确认） */
 async function load() {
@@ -180,10 +196,14 @@ watch(
         </template>
       </nav>
       <div class="bar-actions">
-        <n-button size="tiny" quaternary @click="load()">刷新</n-button>
-        <n-button size="tiny" quaternary @click="reveal(path)">资源管理器</n-button>
+        <n-button size="tiny" quaternary :disabled="!isRunning" @click="load()">刷新</n-button>
+        <n-button size="tiny" quaternary :disabled="!isRunning" @click="reveal(path)">
+          资源管理器
+        </n-button>
       </div>
     </div>
+
+    <p v-if="!isRunning" class="hint">发行版未运行——启动后可浏览文件（读取不会隐式启动发行版）。</p>
 
     <p class="hint">
       通过 <code>\\wsl.localhost\{{ distroName }}</code> 访问（9p）· 需发行版处于运行状态 ·

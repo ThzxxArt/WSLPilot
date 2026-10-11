@@ -2,6 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
 import { createWslAPI, findBodyButton, bodyText, type WslAPIMock } from './support'
 
+const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+/** 面板读取走运行状态门禁（review：读取绝不隐式启动发行版）——夹具默认 Running */
+const RUNNING = {
+  name: 'Ubuntu',
+  state: 'Running',
+  version: 2,
+  isDefault: true,
+  meta: null,
+} as never
+
 enableAutoUnmount(afterEach)
 
 /**
@@ -69,6 +79,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   dialogResult = 'positive'
   setActivePinia(createPinia())
+  useDistrosStore().items = [RUNNING]
   document.body.innerHTML = ''
   wslAPI.config.resolveConflict.mockResolvedValue({})
   wslAPI.wslconf.read.mockResolvedValue('[automount]\nenabled = true\n')

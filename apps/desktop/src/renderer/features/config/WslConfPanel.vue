@@ -13,6 +13,7 @@ import {
 import { CodeEditor, Kbd } from '@wslpilot/ui'
 import { WSL_CONF_FIELDS, type DiffLine, type WslConfFieldType } from '@wslpilot/shared'
 import { useWslConf } from '../../composables/useWslConf'
+import { useDistrosStore } from '../../stores/distros'
 import { errorLine } from '../../composables/useAppError'
 
 const props = defineProps<{ distroName: string }>()
@@ -24,6 +25,14 @@ const emit = defineEmits<{
 const message = useMessage()
 const dialog = useDialog()
 const conf = useWslConf(() => props.distroName)
+const distros = useDistrosStore()
+
+/**
+ * 运行状态门禁（review：开详情弹框即启动发行版根治）：
+ * `wsl -d X -e cat` 会把停着的发行版拉起来——读配置绝不隐式启动。
+ * 未运行：不发起读取；启动后自动加载。
+ */
+const isRunning = computed(() => distros.byName(props.distroName)?.state === 'Running')
 
 const preview = ref(false)
 const previewOpen = computed({
@@ -56,7 +65,23 @@ function confirmDiscard(): Promise<boolean> {
   })
 }
 
-onMounted(() => void conf.load())
+/** 本面板是否已完成过一次读取（防重复读/防误覆盖脏编辑） */
+const loadedOnce = ref(false)
+
+onMounted(() => {
+  // 未运行不读（wsl -d X -e 会隐式启动发行版）；运行中才载入
+  if (isRunning.value) {
+    loadedOnce.value = true
+    void conf.load()
+  }
+})
+// 发行版启动后自动载入（从详情弹框点「启动」→ 配置即时可用）
+watch(isRunning, (running) => {
+  if (running && !loadedOnce.value) {
+    loadedOnce.value = true
+    void conf.load()
+  }
+})
 watch(
   () => props.distroName,
   async (name) => {
@@ -67,7 +92,11 @@ watch(
       return
     }
     currentName.value = name
-    await conf.load()
+    loadedOnce.value = false
+    if (isRunning.value) {
+      loadedOnce.value = true
+      await conf.load()
+    }
   },
 )
 
@@ -202,13 +231,19 @@ async function confirmSave() {
         </button>
       </div>
       <div class="toolbar-actions">
-        <n-button size="small" quaternary :loading="conf.loading.value" @click="conf.load()">
+        <n-button
+          size="small"
+          quaternary
+          :disabled="!isRunning"
+          :loading="conf.loading.value"
+          @click="conf.load()"
+        >
           重新载入
         </n-button>
         <n-button
           size="small"
           type="primary"
-          :disabled="!conf.isDirty.value"
+          :disabled="!isRunning || !conf.isDirty.value"
           :loading="conf.saving.value"
           @click="openPreview"
         >
@@ -217,6 +252,11 @@ async function confirmSave() {
       </div>
     </div>
 
+    <!-- 未运行：不发起读取（wsl -d X -e 会隐式启动发行版）— review 状态门禁 -->
+    <p v-if="!isRunning" class="hint">
+      发行版未运行——启动后可查看 / 编辑 <code>/etc/wsl.conf</code>（读取配置不会隐式启动发行版）。
+    </p>
+
     <p v-if="conf.error.value" class="error">{{ conf.error.value }}</p>
     <p class="hint">
       <code>/etc/wsl.conf</code> — 发行版级配置 · 保存需发行版内 root · 变更在发行版完全停止后约 8
@@ -224,7 +264,7 @@ async function confirmSave() {
     </p>
 
     <!-- 可视化表单 -->
-    <div v-if="conf.mode.value === 'form'" class="form">
+    <div v-if="isRunning && conf.mode.value === 'form'" class="form">
       <section v-for="s in sections" :key="s.name" class="group">
         <h3 class="group-title">{{ sectionTitle(s.name) }}</h3>
         <div v-for="f in s.fields" :key="`${f.section}.${f.key}`" class="field">
@@ -275,7 +315,7 @@ async function confirmSave() {
     </div>
 
     <!-- 原始文本 -->
-    <div v-else class="raw">
+    <div v-else-if="isRunning" class="raw">
       <CodeEditor
         :model-value="conf.raw.value"
         placeholder="# /etc/wsl.conf — 支持注释"

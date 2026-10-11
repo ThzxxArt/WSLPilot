@@ -108,6 +108,8 @@ function makeDeps() {
       setVersion: vi.fn(async () => {}),
       unregister: vi.fn(async () => {}),
       getVersion: vi.fn(async () => ({ raw: '', wslVersion: '2', kernelVersion: '5' })),
+      // 运行状态硬门禁（review：采样 `wsl -d X -e` 会隐式启动发行版）
+      assertRunning: vi.fn(async () => {}),
       sampleMetrics: vi.fn(async () => ({
         memUsedKB: 10,
         memTotalKB: 20,
@@ -285,6 +287,16 @@ describe('distros + meta IPC handlers', () => {
     const m = await wrapped.get(CH.metricsSample)({}, 'Ubuntu')
     expect(deps.wsl.sampleMetrics).toHaveBeenCalledWith('Ubuntu')
     expect(m.memTotalKB).toBe(20)
+  })
+
+  it('硬门禁：未运行发行版拒绝采样（wsl -d X -e 会隐式启动 — review 根治）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    ;(deps.wsl.assertRunning as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('发行版未运行'),
+    )
+    await expect(wrapped.get(CH.metricsSample)({}, 'Ubuntu')).rejects.toThrow('未运行')
+    expect(deps.wsl.sampleMetrics).not.toHaveBeenCalled()
   })
 
   it("metrics:sample 拒绝概览保留键 '*'（概览语义已拆到 metrics:overview）", async () => {

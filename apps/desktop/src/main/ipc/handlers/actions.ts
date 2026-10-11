@@ -20,9 +20,11 @@ export function registerActionHandlers(
   add: AddFn,
   deps: { runner: ActionRunner; tasks: TaskRunner },
 ): void {
-  add(CH.actionRun, async (_c, arg: never): Promise<TaskHandle> => {
+  add(CH.actionRun, async (c, arg: never): Promise<TaskHandle> => {
     const o = arg as { actionId: string; distro?: string }
     const prepared = await deps.runner.prepare(o.actionId, o.distro)
+    // 硬门禁（review：动作在发行版内执行 `wsl -d X -e`，会隐式启动发行版）：未运行不执行
+    if (prepared.distro) await c.wsl?.assertRunning(prepared.distro)
     const info = prepared.action.terminal ? deps.runner.spawnTerminal(prepared) : null
     try {
       const handle = deps.tasks.start({

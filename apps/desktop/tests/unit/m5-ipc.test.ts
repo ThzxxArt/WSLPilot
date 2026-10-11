@@ -51,7 +51,10 @@ describe('wslconf handlers（M5）', () => {
 
   it('wslconf:read 透传服务', async () => {
     const wslconf = { read: vi.fn(async () => '[a]\nb = 1\n'), write: vi.fn() }
-    const handlers = collect(registerWslConfHandlers, { wslconf, wsl: { terminate: vi.fn() } })
+    const handlers = collect(registerWslConfHandlers, {
+      wslconf,
+      wsl: { terminate: vi.fn(), assertRunning: vi.fn(async () => {}) },
+    })
     const out = await handlers.get(CH.wslconfRead)!(makeCtx(), 'Ubuntu')
     expect(out).toContain('b = 1')
     expect(wslconf.read).toHaveBeenCalledWith('Ubuntu')
@@ -60,7 +63,10 @@ describe('wslconf handlers（M5）', () => {
   it('wslconf:write 默认不终止发行版', async () => {
     const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
     const terminate = vi.fn(async () => {})
-    const handlers = collect(registerWslConfHandlers, { wslconf, wsl: { terminate } })
+    const handlers = collect(registerWslConfHandlers, {
+      wslconf,
+      wsl: { terminate, assertRunning: vi.fn(async () => {}) },
+    })
     const out = await handlers.get(CH.wslconfWrite)!(makeCtx(), {
       name: 'Ubuntu',
       content: '[a]\nb = 1\n',
@@ -72,7 +78,10 @@ describe('wslconf handlers（M5）', () => {
   it('autoShutdownAfterConfigChange 开启时写入后 terminate（8 秒规则）', async () => {
     const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
     const terminate = vi.fn(async () => {})
-    const handlers = collect(registerWslConfHandlers, { wslconf, wsl: { terminate } })
+    const handlers = collect(registerWslConfHandlers, {
+      wslconf,
+      wsl: { terminate, assertRunning: vi.fn(async () => {}) },
+    })
     const ctx = makeCtx()
     ctx.configService.loadSync = vi.fn(() => ({
       wsl: { autoShutdownAfterConfigChange: true },
@@ -80,6 +89,23 @@ describe('wslconf handlers（M5）', () => {
     const out = await handlers.get(CH.wslconfWrite)!(ctx, { name: 'Ubuntu', content: '' })
     expect(out).toEqual({ terminated: true })
     expect(terminate).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('硬门禁：未运行发行版拒绝读/写（wsl -d X -e 会隐式启动 — review 根治）', async () => {
+    const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
+    const assertRunning = vi.fn(async () => {
+      throw new Error('发行版 Ubuntu 未运行')
+    })
+    const handlers = collect(registerWslConfHandlers, {
+      wslconf,
+      wsl: { terminate: vi.fn(), assertRunning },
+    })
+    await expect(handlers.get(CH.wslconfRead)!(makeCtx(), 'Ubuntu')).rejects.toThrow('未运行')
+    await expect(
+      handlers.get(CH.wslconfWrite)!(makeCtx(), { name: 'Ubuntu', content: '' }),
+    ).rejects.toThrow('未运行')
+    expect(wslconf.read).not.toHaveBeenCalled()
+    expect(wslconf.write).not.toHaveBeenCalled()
   })
 })
 
