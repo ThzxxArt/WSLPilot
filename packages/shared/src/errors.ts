@@ -12,6 +12,7 @@ export type ErrorCode =
   | 'WSL_NOT_INSTALLED'
   | 'WSL_NOT_FOUND'
   | 'DISTRO_RUNNING'
+  | 'DISTRO_NOT_RUNNING'
   | 'DISTRO_NOT_FOUND'
   | 'PERMISSION_DENIED'
   | 'CONFIG_INVALID'
@@ -73,6 +74,11 @@ export const ERROR_CATALOG: Record<
   DISTRO_RUNNING: {
     message: '该发行版正在运行',
     suggestion: '请先终止（terminate）该发行版后再操作',
+    recoverable: true,
+  },
+  DISTRO_NOT_RUNNING: {
+    message: '发行版未运行',
+    suggestion: '请先在「发行版」列表点「启动」，启动后即可继续',
     recoverable: true,
   },
   DISTRO_NOT_FOUND: {

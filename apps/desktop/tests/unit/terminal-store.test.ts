@@ -42,6 +42,36 @@ describe('useTerminalStore', () => {
     expect(wslAPI.terminal.create).toHaveBeenCalled()
   })
 
+  it('open 拒绝未运行发行版：不建会话、给行动指引（review 启动只能走启动按钮）', async () => {
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    const d = useDistrosStore()
+    d.items = [
+      {
+        name: 'Stopped-one',
+        state: 'Stopped',
+        version: 2,
+        isDefault: false,
+        meta: null,
+      } as never,
+    ]
+    const s = useTerminalStore()
+    await s.loadLimits()
+    const id = await s.open('Stopped-one')
+    expect(id).toBeNull()
+    expect(s.sessions).toHaveLength(0)
+    expect(wslAPI.terminal.create).not.toHaveBeenCalled()
+    expect(s.lastError?.code).toBe('DISTRO_NOT_RUNNING')
+    expect(s.lastError?.suggestion).toContain('启动')
+
+    // 运行中放行
+    d.items = [
+      { name: 'Run-one', state: 'Running', version: 2, isDefault: false, meta: null } as never,
+    ]
+    const ok = await s.open('Run-one')
+    expect(ok).toBeTruthy()
+    expect(wslAPI.terminal.create).toHaveBeenCalled()
+  })
+
   it('respects maxSessions', async () => {
     const s = useTerminalStore()
     await s.loadLimits()

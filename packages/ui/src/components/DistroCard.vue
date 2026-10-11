@@ -43,7 +43,8 @@ const moreOptions = computed(() => [
     key: 'setDefault',
     disabled: props.distro.isDefault,
   },
-  { label: '打开终端', key: 'terminal' },
+  // 终端只服务运行中发行版（与按钮同规则 — review 状态门禁）
+  { label: '打开终端', key: 'terminal', disabled: !isRunning.value },
   { type: 'divider' as const, key: 'd1' },
   { label: '查看详情', key: 'more' },
 ])
@@ -96,7 +97,6 @@ function onMore(key: string) {
         size="small"
         type="primary"
         :loading="busy"
-        :style="{ background: brandColor, border: 'none' }"
         @click="emit('start', distro.name)"
       >
         启动
@@ -104,13 +104,22 @@ function onMore(key: string) {
       <n-button
         v-else
         size="small"
-        secondary
+        type="error"
         :loading="busy"
         @click="emit('terminate', distro.name)"
       >
         停止
       </n-button>
-      <n-button size="small" secondary @click="emit('openTerminal', distro.name)"> 终端 </n-button>
+      <!-- 终端只服务运行中的发行版：启动只能走「启动」按钮（review 状态门禁） -->
+      <n-button
+        size="small"
+        secondary
+        :disabled="!isRunning"
+        :title="isRunning ? '' : '发行版未运行，请先启动'"
+        @click="emit('openTerminal', distro.name)"
+      >
+        终端
+      </n-button>
       <n-dropdown trigger="click" :options="moreOptions" @select="onMore">
         <n-button size="small" secondary :aria-label="`${displayName} 更多操作`"> ··· </n-button>
       </n-dropdown>

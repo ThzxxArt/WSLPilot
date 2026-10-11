@@ -169,15 +169,18 @@ function buildItems(): PaletteItem[] {
   // ── 发行版 ──
   for (const d of distros.items) {
     const display = d.meta?.alias ? `${d.meta.alias}（${d.name}）` : d.name
-    items.push({
-      id: `term:${d.name}`,
-      group: '发行版',
-      label: `打开终端：${display}`,
-      hint: `WSL${d.version} · ${stateLabel(d.state)}`,
-      icon: '⌨️',
-      keywords: 'terminal zhongduan',
-      run: () => router.push({ path: '/terminal', query: { distro: d.name } }),
-    })
+    // 终端只服务运行中发行版：启动只能走「启动」命令/按钮（review 状态门禁）
+    if (d.state === 'Running') {
+      items.push({
+        id: `term:${d.name}`,
+        group: '发行版',
+        label: `打开终端：${display}`,
+        hint: `WSL${d.version} · ${stateLabel(d.state)}`,
+        icon: '⌨️',
+        keywords: 'terminal zhongduan',
+        run: () => router.push({ path: '/terminal', query: { distro: d.name } }),
+      })
+    }
     items.push({
       id: `detail:${d.name}`,
       group: '发行版',

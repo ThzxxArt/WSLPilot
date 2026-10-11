@@ -134,6 +134,28 @@ describe('DistroDetailModal 注册表与动作面', () => {
     expect(wslAPI.distros.terminate).toHaveBeenCalledWith('Ubuntu')
   })
 
+  it('打开终端受状态门禁：未运行禁用、运行中可点（review 启动只能走启动按钮）', async () => {
+    useDistrosStore().items = [distro({ state: 'Stopped' })]
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    const termStopped = findBodyButton('打开终端')!
+    expect(termStopped.hasAttribute('disabled')).toBe(true)
+    // 未运行时「停止」不出现、「启动」出现（状态驱动按钮）
+    expect(findBodyButton('停止')).toBeFalsy()
+    expect(findBodyButton('启动')).toBeTruthy()
+
+    useDistrosStore().items = [distro({ state: 'Running' })]
+    await flushPromises()
+    const termRunning = findBodyButton('打开终端')!
+    expect(termRunning.hasAttribute('disabled')).toBe(false)
+    expect(findBodyButton('启动')).toBeFalsy()
+    expect(findBodyButton('停止')).toBeTruthy()
+  })
+
   it('启动失败展示错误提示（错误态）', async () => {
     useDistrosStore().items = [distro()]
     wslAPI.distros.start.mockRejectedValueOnce(appError('wsl.exe 返回 1'))

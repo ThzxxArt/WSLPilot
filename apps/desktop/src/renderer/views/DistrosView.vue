@@ -243,7 +243,6 @@ function onDetailTerminal(name: string) {
                   v-if="d.state !== 'Running'"
                   size="tiny"
                   type="primary"
-                  secondary
                   :loading="distros.isBusy(d.name)"
                   @click="act(() => distros.start(d.name), `已启动 ${d.name}`)"
                 >
@@ -252,7 +251,7 @@ function onDetailTerminal(name: string) {
                 <n-button
                   v-else
                   size="tiny"
-                  secondary
+                  type="error"
                   :loading="distros.isBusy(d.name)"
                   @click="act(() => distros.terminate(d.name), `已停止 ${d.name}`)"
                 >

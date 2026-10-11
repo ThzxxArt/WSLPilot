@@ -151,6 +151,28 @@ describe('DistroCard', () => {
     expect(running.text()).toContain('停止')
   })
 
+  it('按钮语义统一：启动=蓝（primary 无品牌色覆盖）、停止=红（error）；终端仅运行中可点', () => {
+    const stopped = mount(DistroCard, {
+      props: { distro: distro({ state: 'Stopped' }) },
+      global: { stubs: { NButton: false, NDropdown: true, NTag: true } },
+    })
+    const startBtn = stopped.findAll('button').find((b) => b.text().trim() === '启动')!
+    expect(startBtn.classes().some((c) => c.includes('primary'))).toBe(true)
+    // 品牌色不再覆盖按钮底色（review 颜色不一致根治）
+    expect(startBtn.attributes('style') ?? '').not.toContain('background')
+    const termStopped = stopped.findAll('button').find((b) => b.text().trim() === '终端')!
+    expect(termStopped.attributes('disabled')).toBeDefined()
+
+    const running = mount(DistroCard, {
+      props: { distro: distro({ state: 'Running' }) },
+      global: { stubs: { NButton: false, NDropdown: true, NTag: true } },
+    })
+    const stopBtn = running.findAll('button').find((b) => b.text().trim() === '停止')!
+    expect(stopBtn.classes().some((c) => c.includes('error'))).toBe(true)
+    const termRunning = running.findAll('button').find((b) => b.text().trim() === '终端')!
+    expect(termRunning.attributes('disabled')).toBeUndefined()
+  })
+
   it('emits start / terminate with distro name', async () => {
     const w = mount(DistroCard, {
       props: { distro: distro({ state: 'Stopped' }) },

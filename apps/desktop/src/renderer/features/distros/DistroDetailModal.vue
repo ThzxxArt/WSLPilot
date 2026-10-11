@@ -50,6 +50,8 @@ const lastTask = ref<{ type: string; distro: string; status: string; finishedAt:
 const confPanel = ref<InstanceType<typeof WslConfPanel> | null>(null)
 
 const distro = computed(() => distros.byName(props.distroName))
+/** 运行状态单一事实源：按钮组严格状态驱动（review 停/启按钮错位根治） */
+const isRunning = computed(() => distro.value?.state === 'Running')
 
 /** 需确认操作统一走 naive dialog（全仓一致，禁止 window.confirm） */
 function confirmDangerous(opts: { title: string; content: string }): Promise<boolean> {
@@ -432,11 +434,17 @@ async function saveMeta() {
         <p v-if="!distro" class="empty-distro">该发行版信息不可用（可能已被注销），操作已停用</p>
 
         <div class="actions">
-          <n-button secondary @click="emit('openTerminal', distroName)"> 打开终端 </n-button>
-          <n-button v-if="distro && distro.state !== 'Running'" secondary @click="onStart">
-            启动
+          <!-- 终端只服务运行中发行版：启动只能走「启动」按钮（review 状态门禁） -->
+          <n-button
+            secondary
+            :disabled="!isRunning"
+            :title="isRunning ? '' : '发行版未运行，请先启动'"
+            @click="emit('openTerminal', distroName)"
+          >
+            打开终端
           </n-button>
-          <n-button v-else-if="distro" secondary @click="onTerminate"> 停止 </n-button>
+          <n-button v-if="distro && !isRunning" type="primary" @click="onStart"> 启动 </n-button>
+          <n-button v-else-if="distro" type="error" @click="onTerminate"> 停止 </n-button>
           <n-button secondary :disabled="!distro || distro.isDefault" @click="onSetDefault">
             设为默认
           </n-button>

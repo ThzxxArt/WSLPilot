@@ -183,7 +183,8 @@ describe('DefaultLayout', () => {
   })
 
   it('快捷键 ⌘N 建终端成功后跳转终端页；失败走错误提示', async () => {
-    useDistrosStore().items = [distro()]
+    // 终端只服务运行中发行版（review 状态门禁）：夹具 Running 才能建会话
+    useDistrosStore().items = [distro({ state: 'Running' })]
     mount(DefaultLayout, {
       attachTo: document.body,
       global: { stubs: { 'router-view': true } },

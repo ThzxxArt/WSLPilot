@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { toAppError, type AppError } from '@wslpilot/shared'
+import { useDistrosStore } from './distros'
 
 export interface TerminalSession {
   ptyId: string
@@ -90,6 +91,18 @@ export const useTerminalStore = defineStore('terminal', {
       opts: { shell?: string; cwd?: string } = {},
     ): Promise<string | null> {
       this.lastError = null
+      // 状态硬门禁（review「启动只能走启动按钮」根治）：终端会话绝不隐式启动发行版。
+      // 未启动 → 拒绝并给出行动指引；查不到状态（列表未加载）时放行，交由 wsl 自身报错。
+      const known = useDistrosStore().byName(distro)
+      if (known && known.state !== 'Running') {
+        this.lastError = {
+          code: 'DISTRO_NOT_RUNNING',
+          message: `发行版 ${known.name} 未运行，无法打开终端`,
+          recoverable: true,
+          suggestion: '请先在「发行版」列表点「启动」，启动后即可打开终端',
+        }
+        return null
+      }
       if (!this.canCreate) {
         this.lastError = {
           code: 'TASK_FAILED',

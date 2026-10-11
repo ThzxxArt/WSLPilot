@@ -44,8 +44,11 @@ const prefs = computed<TerminalFontPrefs>(() => ({
   scrollback: settings.terminalScrollback,
 }))
 
+/** 终端只服务运行中发行版（review 状态门禁）：下拉与默认目标都只取 Running */
+const runningDistros = computed(() => distros.items.filter((d) => d.state === 'Running'))
+
 const distroOptions = computed(() =>
-  distros.items.map((d) => ({
+  runningDistros.value.map((d) => ({
     label: d.meta?.alias || d.name,
     value: d.name,
   })),
@@ -54,7 +57,9 @@ const distroOptions = computed(() =>
 const defaultDistro = computed(() => {
   const q = route.query.distro
   if (typeof q === 'string' && q) return q
-  return distros.defaultDistro?.name ?? distros.items[0]?.name ?? ''
+  const running = runningDistros.value
+  const def = running.find((d) => d.isDefault) ?? running[0]
+  return def?.name ?? ''
 })
 
 function tickElapsed() {

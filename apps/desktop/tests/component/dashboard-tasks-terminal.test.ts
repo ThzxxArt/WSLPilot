@@ -323,11 +323,27 @@ describe('TerminalView 会话错误面', () => {
   })
 
   it('建会话失败展示错误提示（错误态）', async () => {
-    wslAPI.distros.list.mockResolvedValue([distro()])
+    // 终端只服务运行中发行版（review 状态门禁）：夹具必须 Running 才会进入建会话流程
+    wslAPI.distros.list.mockResolvedValue([distro({ state: 'Running' })])
     wslAPI.terminal.create.mockRejectedValueOnce(appError('pty 创建失败'))
     mount(TerminalView, { attachTo: document.body })
     await flushPromises()
     expect(message.error).toHaveBeenCalledWith(expect.stringContaining('pty 创建失败'))
+  })
+
+  it('未运行发行版不进终端：下拉只列 Running，自动建标签不隐式启动（review 状态门禁）', async () => {
+    wslAPI.distros.list.mockResolvedValue([
+      distro({ name: 'Stopped-one', state: 'Stopped' }),
+      distro({ name: 'Run-one', state: 'Running' }),
+    ])
+    const w = mount(TerminalView, { attachTo: document.body })
+    await flushPromises()
+    // 自动建标签只对 Running 生效（不触发 create → 无调用）以外：默认目标 = Run-one
+    const tabs = w.findComponent({ name: 'TerminalTabs' })
+    const opts = (tabs.props('distroOptions') as Array<{ value: string }>) ?? []
+    expect(opts.map((o) => o.value)).toEqual(['Run-one'])
+    // Stopped-one 不可选
+    expect(opts.some((o) => o.value === 'Stopped-one')).toBe(false)
   })
 
   it('关闭会话失败给错误提示', async () => {
