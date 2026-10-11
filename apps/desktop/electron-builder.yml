@@ -8,6 +8,9 @@ files:
   - out/**/*
   - resources/**/*
   - package.json
+  # @wslpilot/{kit,shared,ui} 是 workspace 符号链接且已被 electron-vite 打进 out/，
+  # 不排除则 electron-builder 跟随链接收集真实路径文件，越出 app 目录直接抛错
+  - '!node_modules/@wslpilot/**'
 asarUnpack:
   - '**/node-pty/**'
   - '**/node_modules/node-pty/**'

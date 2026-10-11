@@ -17,6 +17,12 @@
 
 ### Fixed
 
+- **fix: Windows 打包链路根治**（此前 `npm run build` 打包从未成功过）
+  - Electron 精确钉版 `33.4.11`（此前 `^33.2.1` 范围版本 + workspaces 提升布局下 electron-builder 推断不出版本，直接报错）
+  - `@wslpilot/{kit,shared,ui}` 移入 devDependencies（已被 electron-vite 打进 `out/`，属编译期依赖；
+    留在 dependencies 会被 electron-builder 跟随 workspace 符号链接收集真实路径文件，越出 app 目录报错）
+  - electron-builder `files` 显式排除 `node_modules/@wslpilot/**`（防符号链接收集回归）
+  - 产物验证：`WSLPilot-0.1.0-x64-setup.exe`（NSIS，可自定义路径）+ `WSLPilot-0.1.0-x64-portable.exe`，打包版启动冒烟通过
 - **fix: 高度链断裂 + UNKNOWN 吞错根治**（用户实测反馈）
   - **布局**：恢复被幽灵 CSS 清理误删的 `.h-full` 工具类（App.vue 的 n-config-provider 实际消费）——
     高度链断后 `.pilot-shell` 缩到内容高，页面下方留大片空白（空内容页视觉上像「底部占半屏」）
