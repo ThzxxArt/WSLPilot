@@ -114,7 +114,9 @@ describe('提权操作白名单（M7 §14.3）', () => {
     expect(move.args).toEqual(['--manage', 'Ubuntu', '--move', 'D:\\WSL\\Ubuntu'])
 
     const install = buildElevatedInvocation({ op: 'wsl.install', params: {} })
-    expect(install.args).toEqual(['--install'])
+    expect(install.args).toEqual(['--install', '--no-launch'])
+    const installNamed = buildElevatedInvocation({ op: 'wsl.install', params: { name: 'Ubuntu' } })
+    expect(installNamed.args).toEqual(['--install', '-d', 'Ubuntu', '--no-launch'])
 
     const setVersion = buildElevatedInvocation({
       op: 'wsl.setVersion',

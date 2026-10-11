@@ -352,10 +352,11 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
     },
 
     async install(name: string | undefined, ctl: TaskControl): Promise<void> {
-      const args = ['--install', ...(name ? ['-d', assertName(name)] : [])]
+      const target = name ? assertName(name) : ''
+      const params: Record<string, string | number> = target ? { name: target } : {}
       // 进度诚实（review 假 0% 根治）：起手报 null（不确定态），wsl 输出带百分比时如实上报；
       // 绝不挂一个恒 0% 的假进度
-      ctl.report(null, name ? `正在安装 ${name}` : '正在安装 WSL')
+      ctl.report(null, target ? `正在安装 ${target}` : '正在安装 WSL')
       const reportFromOutput = (line: string) => {
         const m = /(\d{1,3}(?:\.\d+)?)\s*%/.exec(line)
         if (!m) return
@@ -369,7 +370,64 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
           reportFromOutput(l)
         },
       }
-      await spawnOrElevate(args, 'wsl.install', name ? { name: assertName(name) } : {}, hooked)
+
+      /**
+       * 完成判定（review「永远进行中」根治）：
+       * `wsl --install` 装完会拉起发行版**首启会话并挂住不退出** → 任务永远跑着。
+       * 三层收敛：① `--no-launch` 装完即退（常规路径）；② 老 WSL 不识别该开关 → 去掉重试；
+       * ③ 进程仍挂时以「目标发行版已注册」（wsl --list 可观测）为完成信号结算任务。
+       */
+      const isRegistered = async (): Promise<boolean> => {
+        if (!target) return false
+        try {
+          const r = await runWsl(['--list'])
+          return r.code === 0 && r.stdout.toLowerCase().includes(target.toLowerCase())
+        } catch {
+          return false
+        }
+      }
+      const runWithCompletion = async (args: string[]): Promise<void> => {
+        let finished = false
+        let err: unknown = null
+        const p = spawnOrElevate(args, 'wsl.install', params, hooked).then(
+          () => {
+            finished = true
+          },
+          (e) => {
+            finished = true
+            err = e
+          },
+        )
+        if (target) {
+          while (!finished) {
+            // 与进程退出竞速：退出即刻返回（不空等一个轮询周期）
+            await Promise.race([p, new Promise((r) => setTimeout(r, 4000))])
+            if (finished) break
+            if (await isRegistered()) {
+              ctl.log(`检测到 ${target} 已注册，安装完成（尾随的首启会话不再等待）`)
+              void p.catch(() => {})
+              return
+            }
+          }
+        }
+        await p
+        if (err) throw err
+      }
+
+      const argsNoLaunch = ['--install', ...(target ? ['-d', target] : []), '--no-launch']
+      const argsPlain = ['--install', ...(target ? ['-d', target] : [])]
+      try {
+        await runWithCompletion(argsNoLaunch)
+      } catch (e) {
+        const detail = `${e instanceof Error ? e.message : String(e)} ${(e as { detail?: string })?.detail ?? ''}`
+        if (
+          !/no-launch|unknown option|invalid command line|无效.*选项|未识别.*选项/i.test(detail)
+        ) {
+          throw e
+        }
+        ctl.log('当前 WSL 不识别 --no-launch，改用标准安装（完成以注册为准）…')
+        await runWithCompletion(argsPlain)
+      }
       ctl.report(100, '安装完成')
     },
 

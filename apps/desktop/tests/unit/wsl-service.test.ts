@@ -302,16 +302,57 @@ describe('WslService', () => {
       await expect(svc.listOnline()).rejects.toMatchObject({ code: 'TASK_FAILED' })
     })
 
-    it('install 走流式任务并支持省略名称', async () => {
+    it('install 走流式任务并支持省略名称（--no-launch 装完即退 — review 根治）', async () => {
       // 异步 onExit：对齐真实 spawn 的事件序（同步触发会掩盖 kill/exit 交错 — review m1）
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
         queueMicrotask(() => o.onExit(0))
         return { kill: vi.fn() }
       })
       await svc.install('Ubuntu', ctl as never)
-      expect((spawnWsl as any).mock.calls[0][0]).toEqual(['--install', '-d', 'Ubuntu'])
+      expect((spawnWsl as any).mock.calls[0][0]).toEqual([
+        '--install',
+        '-d',
+        'Ubuntu',
+        '--no-launch',
+      ])
       await svc.install(undefined, ctl as never)
-      expect((spawnWsl as any).mock.calls[1][0]).toEqual(['--install'])
+      expect((spawnWsl as any).mock.calls[1][0]).toEqual(['--install', '--no-launch'])
+    })
+
+    it('install 完成判定：进程挂住不退但发行版已注册 → 任务结算成功（review「永远进行中」根治）', async () => {
+      // wsl --install 装完拉起首启会话挂住：onExit 永不触发
+      ;(spawnWsl as any).mockImplementation(() => ({ kill: vi.fn() }))
+      // 第一次 list 查询即返回已注册（runWsl mock）
+      ;(runWsl as any).mockResolvedValue(
+        ok('  NAME      STATE      VERSION\n* Ubuntu    Running     2'),
+      )
+      const started = Date.now()
+      await svc.install('Ubuntu', ctl as never)
+      // 4s 轮询周期内收敛（未无限等待）
+      expect(Date.now() - started).toBeLessThan(15_000)
+      const reports = (ctl.report.mock as { calls: unknown[][] }).calls
+      expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
+    })
+
+    it('install 对老 WSL 的 --no-launch 不识别自动降级（标准参数重试后成功）', async () => {
+      ;(spawnWsl as any).mockImplementation(
+        (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+          const n = (spawnWsl as any).mock.calls.length
+          if (n === 1) {
+            o.onLine('Invalid command line option: --no-launch')
+            queueMicrotask(() => o.onExit(1))
+          } else {
+            queueMicrotask(() => o.onExit(0))
+          }
+          return { kill: vi.fn() }
+        },
+      )
+      await svc.install('Ubuntu', ctl as never)
+      const calls = (spawnWsl as any).mock.calls.map((c: unknown[]) => c[0])
+      expect(calls[0]).toContain('--no-launch')
+      expect(calls[1]).toEqual(['--install', '-d', 'Ubuntu'])
+      const reports = (ctl.report.mock as { calls: unknown[][] }).calls
+      expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
     })
 
     it('install 进度诚实：null 起手（不假 0%）+ 输出百分比如实上报（review 根治）', async () => {

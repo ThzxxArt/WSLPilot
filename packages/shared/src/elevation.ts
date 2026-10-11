@@ -205,9 +205,10 @@ export function buildElevatedInvocation(req: ElevationRequest): ElevatedInvocati
       args = buildMoveArgs(validated.params.name as string, validated.params.path as string)
       break
     case 'wsl.install':
+      // --no-launch：装完不拉起发行版首启会话（否则 wsl.exe 挂住永不退出 — review 根治）
       args = validated.params.name
-        ? ['--install', '-d', validated.params.name as string]
-        : ['--install']
+        ? ['--install', '-d', validated.params.name as string, '--no-launch']
+        : ['--install', '--no-launch']
       break
     case 'wsl.setVersion':
       args = ['--set-version', validated.params.name as string, String(validated.params.version)]
