@@ -71,6 +71,24 @@ describe('PtyManager', () => {
     expect(spawned[0]!.opts.name).toBe('xterm-256color')
   })
 
+  it('spawn 级裸异常映射 TASK_FAILED 且带原因（不漏成 UNKNOWN）', () => {
+    const raw = new Error('Failed to load native module: pty.node')
+    const broken = createPtyManager(logger(), events, (() => {
+      throw raw
+    }) as PtySpawnFn)
+    try {
+      broken.create({ distro: 'Ubuntu-22.04', cols: 80, rows: 24 })
+      expect.unreachable('create 必须抛错')
+    } catch (e) {
+      const err = e as { code?: string; message?: string; detail?: string; suggestion?: string }
+      expect(err.code).toBe('TASK_FAILED')
+      expect(err.message).toBe('无法启动终端会话')
+      // 原因必须保留在 detail，且给可执行建议
+      expect(err.detail).toContain('pty.node')
+      expect(err.suggestion).toBeTruthy()
+    }
+  })
+
   it('passes --cd and custom shell via arrays', () => {
     pty.create({
       distro: 'Debian',

@@ -29,17 +29,21 @@ describe('IPC 错误序列化协议', () => {
     expect(restored!.recoverable).toBe(true)
   })
 
-  it('serialize non-AppError as UNKNOWN', () => {
+  it('serialize non-AppError as UNKNOWN（message 带原因摘要，不吞细节）', () => {
     const err = serializeIpcError(new Error('boom'))
     const restored = deserializeIpcError(err)
     expect(restored!.code).toBe('UNKNOWN')
     expect(restored!.detail).toContain('boom')
+    // message 必须携带原因摘要——只报「发生未知错误」等于线索全无（review 根治）
+    expect(restored!.message).toContain('boom')
+    expect(restored!.message.startsWith('发生未知错误')).toBe(true)
   })
 
-  it('toAppError handles raw Error', () => {
+  it('toAppError handles raw Error（message 带原因摘要）', () => {
     const e = toAppError(new Error('raw'))
     expect(e.code).toBe('UNKNOWN')
     expect(e.recoverable).toBe(true)
+    expect(e.message).toContain('raw')
   })
 
   it('toAppError handles already-deserialized AppError', () => {

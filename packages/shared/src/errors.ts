@@ -113,6 +113,15 @@ export const ERROR_CATALOG: Record<
   },
 }
 
+/**
+ * UNKNOWN 兜底文案：把原因摘要带进 message。
+ * 只写「发生未知错误」等于把唯一线索锁进 detail 字段，用户无从判断发生了什么（review 根治）。
+ */
+function unknownMessage(detail: string): string {
+  const excerpt = detail.trim().replace(/\s+/g, ' ').slice(0, 120)
+  return excerpt ? `发生未知错误：${excerpt}` : ERROR_CATALOG.UNKNOWN.message
+}
+
 export function createAppError(code: ErrorCode, overrides: Partial<AppError> = {}): WslPilotError {
   const base = ERROR_CATALOG[code]
   return new WslPilotError({
@@ -146,7 +155,7 @@ export function serializeIpcError(e: unknown): Error {
                 return String(e)
               }
             })()
-    appErr = createAppError('UNKNOWN', { detail }).toJSON()
+    appErr = createAppError('UNKNOWN', { message: unknownMessage(detail), detail }).toJSON()
   }
   return new Error(`${IPC_ERROR_PREFIX}${JSON.stringify(appErr)}`)
 }
@@ -221,12 +230,10 @@ function validateAppError(value: unknown): AppError | null {
 
 /** 任意 catch 结果 → 用户可读 AppError */
 export function toAppError(e: unknown): AppError {
-  return (
-    deserializeIpcError(e) ??
-    createAppError('UNKNOWN', {
-      detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
-    }).toJSON()
-  )
+  const deserialized = deserializeIpcError(e)
+  if (deserialized) return deserialized
+  const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+  return createAppError('UNKNOWN', { message: unknownMessage(detail), detail }).toJSON()
 }
 
 /**

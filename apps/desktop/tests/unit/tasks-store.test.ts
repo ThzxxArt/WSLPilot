@@ -103,7 +103,8 @@ describe('useTasksStore', () => {
     wslAPI.task.cancel.mockRejectedValueOnce(new Error('boom'))
     await expect(s.cancel('t2')).rejects.toMatchObject({ code: 'UNKNOWN' })
     expect(s.lastError?.code).toBe('UNKNOWN')
-    expect(s.lastError?.message).toBe('发生未知错误')
+    // UNKNOWN 兜底必须把原因带进 message（不许只报「发生未知错误」— review 根治）
+    expect(s.lastError?.message).toContain('boom')
   })
 
   it('failed and canceled statuses record error text', async () => {

@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { createAppError, MAX_PTY_SESSIONS, assertSafeDistroName } from '@wslpilot/shared'
+import {
+  createAppError,
+  isAppError,
+  MAX_PTY_SESSIONS,
+  assertSafeDistroName,
+} from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
 
 const req = createRequire(__filename)
@@ -170,14 +175,27 @@ export function createPtyManager(
     const cols = Math.max(2, Math.min(500, Math.floor(meta.cols) || 80))
     const rows = Math.max(1, Math.min(200, Math.floor(meta.rows) || 24))
 
-    const proc = spawn('wsl.exe', args, {
-      name: 'xterm-256color',
-      cols,
-      rows,
-      cwd: process.env.USERPROFILE ?? process.env.HOME ?? '.',
-      env: process.env,
-      useConpty: true,
-    })
+    // node-pty 原生模块加载失败 / spawn 级失败（ENOENT 等）都是裸 Error，
+    // 直接穿透 IPC 会被 UNKNOWN 兜底吞成「发生未知错误」——在此如实映射（review 根治）
+    let proc: PtyProcessLike
+    try {
+      proc = spawn('wsl.exe', args, {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: process.env.USERPROFILE ?? process.env.HOME ?? '.',
+        env: process.env,
+        useConpty: true,
+      })
+    } catch (e) {
+      if (isAppError(e)) throw e
+      throw createAppError('TASK_FAILED', {
+        message: '无法启动终端会话',
+        detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+        suggestion:
+          '请确认 WSL 已安装且 wsl.exe 可用；若依赖未安装完整，请在项目目录重新执行 npm ci 后重启应用',
+      })
+    }
 
     const id = randomUUID()
     const info: PtySessionInfo = {

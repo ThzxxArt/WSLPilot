@@ -1,6 +1,12 @@
 @use './tokens.generated.scss' as tokens;
 
 // ── 工具类（只保留真实被模板消费的类；未使用的一律不留 — review 幽灵 CSS 根治）──
+// .h-full：App.vue 的 n-config-provider 高度链起点（100% → pilot-shell → layout），
+// 模板 class 消费、样式定义不可缺——缺了整窗高度链断，页面下方出大片空白（review 回归）
+.h-full {
+  height: 100%;
+}
+
 .card {
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-subtle);
