@@ -60,6 +60,45 @@ function applyPrefs(t: Terminal, p: Partial<TerminalFontPrefs>) {
 let lastFitW = 0
 let lastFitH = 0
 let rafFit: number | null = null
+/** 上次确认同步到 PTY 的尺寸（带验证的尺寸同步 — review 终端错位根治） */
+let lastSent = { cols: 0, rows: 0 }
+
+function desiredSize() {
+  return {
+    cols: Math.min(term?.cols ?? 80, 500),
+    rows: Math.min(term?.rows ?? 24, 200),
+  }
+}
+
+/**
+ * 尺寸同步（必达 + 自愈）：PTY 停留在创建默认 80×24 而显示更宽时，
+ * ConPTY 会按 80 列折行/填充重绘 → 行截断、碎片错位（review 用户实测根治）。
+ * 失败重试 3 次；未同步成功不记账，输出流间隙会再次自愈。
+ */
+async function syncPtySize(): Promise<void> {
+  if (!term) return
+  const want = desiredSize()
+  if (want.cols === lastSent.cols && want.rows === lastSent.rows) return
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await window.wslAPI.terminal.resize(props.ptyId, want.cols, want.rows)
+      lastSent = want
+      return
+    } catch (e) {
+      if (attempt === 2) {
+        message.error(errorLine(e, '终端尺寸同步失败'))
+        return
+      }
+      await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+}
+
+/** 尺寸漂移检测（输出到达时的零成本校验） */
+function drifted() {
+  const want = desiredSize()
+  return want.cols !== lastSent.cols || want.rows !== lastSent.rows
+}
 
 function doFit() {
   try {
@@ -73,6 +112,8 @@ function doFit() {
     lastFitW = w
     lastFitH = h
     fit.fit()
+    // fit 后立刻同步 PTY 尺寸（必达）：不同步则 ConPTY 按旧宽度折行 →错位
+    void syncPtySize()
   } catch {
     /* 容器尚未布局 */
   }
@@ -109,6 +150,8 @@ onMounted(async () => {
       return
     }
     termRef.write(p.chunk)
+    // 尺寸自愈：PTY 停留在旧宽度时 ConPTY 折行会错位——输出间隙零成本校验并拉齐
+    if (drifted()) void syncPtySize()
   })
   const offExit = window.wslAPI.terminal.onExit((p) => {
     if (p.ptyId !== props.ptyId) return
@@ -176,13 +219,9 @@ onMounted(async () => {
       })
     }
   })
-  t.onResize(({ cols, rows }) => {
-    // 尺寸夹到 IPC schema 上限内：宁可静默夹紧，也不要被拒后 xterm 与 PTY 永久失步
-    void window.wslAPI.terminal
-      .resize(props.ptyId, Math.min(cols, 500), Math.min(rows, 200))
-      .catch((e: unknown) => {
-        message.error(errorLine(e, '终端尺寸同步失败'))
-      })
+  t.onResize(() => {
+    // 尺寸同步走必达通道（重试 + 记账 + 自愈），夹紧在 syncPtySize 内完成
+    void syncPtySize()
   })
   t.onCursorMove(() => {
     emit('cursorMove', {

@@ -15,6 +15,8 @@ interface FakeTerm {
   unicode: { activeVersion: string }
   written: string[]
   disposed: boolean
+  cols: number
+  rows: number
   handlers: Record<string, (...a: unknown[]) => void>
   buffer: { active: { cursorX: number; cursorY: number } }
 }
@@ -26,6 +28,8 @@ vi.mock('@xterm/xterm', () => ({
     unicode = { activeVersion: '' }
     written: string[] = []
     disposed = false
+    cols = 80
+    rows = 24
     handlers: Record<string, (...a: unknown[]) => void> = {}
     buffer = { active: { cursorX: 3, cursorY: 5 } }
     constructor(opts: Record<string, unknown>) {
@@ -214,9 +218,35 @@ describe('XtermPane', () => {
   it('resize 上送被夹到 IPC schema 上限内（500x200）', async () => {
     mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
     await flushPromises()
-    lastTerm().handlers.resize!({ cols: 999, rows: 400 })
+    const t = lastTerm()
+    t.cols = 999
+    t.rows = 400
+    t.handlers.resize!({ cols: 999, rows: 400 })
     await flushPromises()
     expect(wslAPI.terminal.resize).toHaveBeenCalledWith('p1', 500, 200)
+  })
+
+  it('尺寸同步必达 + 输出间隙自愈（PTY 停旧宽度即错位 — review 根治）', async () => {
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    // 首次同步建立记账（happy-dom 无布局，走 resize 事件路径等价于 fit 后同步）
+    t.handlers.resize!({})
+    await flushPromises()
+    expect(wslAPI.terminal.resize).toHaveBeenCalledWith('p1', 80, 24)
+    ;(wslAPI.terminal.resize as ReturnType<typeof vi.fn>).mockClear()
+    // 尺寸漂移（如 fit 后 PTY 尚未拉齐）→ 输出到达时自愈再同步
+    t.cols = 120
+    t.rows = 30
+    const dataCb = wslAPI.terminal.onData.mock.calls[0]![0]!
+    dataCb({ ptyId: 'p1', chunk: 'x' })
+    await flushPromises()
+    expect(wslAPI.terminal.resize).toHaveBeenCalledWith('p1', 120, 30)
+    // 已同步后不再重复上送（零成本校验）
+    ;(wslAPI.terminal.resize as ReturnType<typeof vi.fn>).mockClear()
+    dataCb({ ptyId: 'p1', chunk: 'y' })
+    await flushPromises()
+    expect(wslAPI.terminal.resize).not.toHaveBeenCalled()
   })
 
   it('onData/onExit 订阅按 ptyId 过滤；退出码写进屏幕', async () => {
