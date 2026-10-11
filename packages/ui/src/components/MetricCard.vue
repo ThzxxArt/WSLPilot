@@ -10,8 +10,10 @@ const props = withDefaults(
     hint?: string
     history?: number[]
     gradient?: string
+    /** 离散计数卡（如「运行中」）：给脉冲点而非趋势线（设计书 §12.3） */
+    pulse?: boolean
   }>(),
-  { hint: '', history: () => [], gradient: '' },
+  { hint: '', history: () => [], gradient: '', pulse: false },
 )
 
 const display = ref<string>(String(props.value))
@@ -75,6 +77,7 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
       <div class="metric-value">
         {{ display }}
       </div>
+      <span v-if="pulse" class="metric-pulse" aria-hidden="true" />
       <Sparkline
         v-if="hasHistory"
         :values="history"
@@ -121,5 +124,37 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
   margin-top: 4px;
   font-size: 12px;
   color: var(--color-text-tertiary);
+}
+
+/* 脉冲点（reduced-motion 由 motion.scss 全局降级接管） */
+.metric-pulse {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--color-success, #16a34a);
+  flex: none;
+}
+
+.metric-pulse::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: inherit;
+  animation: metric-pulse 2s ease-out infinite;
+}
+
+@keyframes metric-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
 }
 </style>

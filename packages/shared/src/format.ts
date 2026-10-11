@@ -1,10 +1,11 @@
 /** KB 格式化 — 独立文件以便纳入覆盖率门禁（types.ts 被 exclude） */
 
-/** KB → 人类可读 */
+/** KB → 人类可读（档位 K/M/G/T 与换算步长严格对齐 — review 单位错位根治） */
 export function formatKb(kb: number): string {
   if (!kb || kb <= 0) return '—'
-  if (kb >= 1024 * 1024) return `${(kb / (1024 * 1024)).toFixed(1)}T`
-  if (kb >= 1024) return `${(kb / 1024).toFixed(1)}G`
+  if (kb >= 1024 * 1024 * 1024) return `${(kb / (1024 * 1024 * 1024)).toFixed(1)}T`
+  if (kb >= 1024 * 1024) return `${(kb / (1024 * 1024)).toFixed(1)}G`
+  if (kb >= 1024) return `${(kb / 1024).toFixed(1)}M`
   return `${Math.round(kb)}K`
 }
 

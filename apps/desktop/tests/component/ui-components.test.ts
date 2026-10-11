@@ -71,6 +71,16 @@ describe('MetricCard', () => {
     expect(w.findComponent(Sparkline).exists()).toBe(true)
   })
 
+  it('pulse 脉冲点（离散计数卡）：有 pulse 有点、无 pulse 无点、不渲染趋势线', () => {
+    const w = mount(MetricCard, {
+      props: { label: '运行中', value: 1, hint: '共 2 个', pulse: true },
+    })
+    expect(w.find('.metric-pulse').exists()).toBe(true)
+    expect(w.findComponent(Sparkline).exists()).toBe(false)
+    const plain = mount(MetricCard, { props: { label: 'x', value: 1 } })
+    expect(plain.find('.metric-pulse').exists()).toBe(false)
+  })
+
   it('passes gradient stroke to sparkline', () => {
     const w = mount(MetricCard, {
       props: {

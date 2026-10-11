@@ -8,10 +8,15 @@ describe('formatKb', () => {
     expect(formatKb(-1)).toBe('—')
   })
 
-  it('formats KB / MB / GB / TB', () => {
+  it('formats KB / MB / GB / TB（档位与换算步长对齐 — review 单位错位根治）', () => {
     expect(formatKb(512)).toBe('512K')
-    expect(formatKb(2048)).toBe('2.0G')
-    expect(formatKb(2 * 1024 * 1024)).toBe('2.0T')
+    expect(formatKb(2048)).toBe('2.0M')
+    expect(formatKb(2 * 1024 * 1024)).toBe('2.0G')
+    expect(formatKb(2 * 1024 * 1024 * 1024)).toBe('2.0T')
+    // 用户实测回归锚点：16G 内存不得再显示成 15.5T、1T 磁盘不得显示成 1006.9T
+    expect(formatKb(16286884)).toBe('15.5G')
+    expect(formatKb(1055762868)).toBe('1006.9G')
+    expect(formatKb(1073741824)).toBe('1.0T')
   })
 })
 
@@ -20,7 +25,7 @@ describe('formatKbPair', () => {
     expect(formatKbPair(100, 0)).toBe('—')
   })
   it('formats used/total', () => {
-    expect(formatKbPair(1024, 2048)).toBe('1.0G / 2.0G')
+    expect(formatKbPair(1024, 2048)).toBe('1.0M / 2.0M')
   })
 })
 

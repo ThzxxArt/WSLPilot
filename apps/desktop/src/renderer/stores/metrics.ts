@@ -16,10 +16,9 @@ export const useMetricsStore = defineStore('metrics', {
     overview: { ...EMPTY_OVERVIEW, perDistro: {} } as OverviewMetrics,
     lastError: null as AppError | null,
     history: {
+      // 只有 CPU 是速率型指标，趋势线有信息量；运行中/内存/磁盘是存量或离散计数，
+      // 画趋势是平线噪声（review 迷你图滥用根治）——需要趋势的字段才进 history
       cpu: [] as number[],
-      mem: [] as number[],
-      disk: [] as number[],
-      running: [] as number[],
     },
     /** 代际守卫：并发 sample 时只认最新一次发起的响应 */
     sampleGen: 0,
@@ -57,16 +56,11 @@ export const useMetricsStore = defineStore('metrics', {
     },
 
     pushHistory(o: OverviewMetrics) {
-      const memRatio = o.memTotalKB > 0 ? (o.memUsedKB / o.memTotalKB) * 100 : 0
-      const diskRatio = o.diskTotalKB > 0 ? (o.diskUsedKB / o.diskTotalKB) * 100 : 0
       const push = (arr: number[], v: number) => {
         arr.push(v)
         if (arr.length > MAX_POINTS) arr.shift()
       }
       push(this.history.cpu, o.cpuPercent)
-      push(this.history.mem, Math.round(memRatio))
-      push(this.history.disk, Math.round(diskRatio))
-      push(this.history.running, o.runningCount)
     },
   },
 })

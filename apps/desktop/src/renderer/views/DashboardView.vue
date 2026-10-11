@@ -168,20 +168,10 @@ function onDetailTerminal(name: string) {
         label="运行中"
         :value="metrics.overview.runningCount"
         :hint="`共 ${metrics.overview.totalCount} 个发行版`"
-        :history="metrics.history.running"
+        pulse
       />
-      <MetricCard
-        label="内存占用"
-        :value="memLabel"
-        hint="已采样 Running 发行版合计"
-        :history="metrics.history.mem"
-      />
-      <MetricCard
-        label="磁盘占用"
-        :value="metrics.diskLabel"
-        hint="根分区合计（KB 真值累加）"
-        :history="metrics.history.disk"
-      />
+      <MetricCard label="内存占用" :value="memLabel" hint="已采样 Running 发行版合计" />
+      <MetricCard label="磁盘占用" :value="metrics.diskLabel" hint="根分区合计（KB 真值累加）" />
       <MetricCard
         label="CPU 负载"
         :value="metrics.cpuLabel"
