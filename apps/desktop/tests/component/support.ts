@@ -90,6 +90,10 @@ export function createWslAPI() {
         async (): Promise<Array<{ ptyId: string; distro: string; createdAt: number }>> => [],
       ),
       maxSessions: vi.fn(async () => 10),
+      host: vi.fn(async (): Promise<{ platform: string; conptyBuild: number | null }> => ({
+        platform: 'win32',
+        conptyBuild: 22621,
+      })),
       onData: vi.fn((_cb: (p: { ptyId: string; chunk: string }) => void) => vi.fn()),
       onExit: vi.fn((_cb: (p: { ptyId: string; code: number }) => void) => vi.fn()),
     },

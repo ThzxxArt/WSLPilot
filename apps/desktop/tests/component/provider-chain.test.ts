@@ -52,5 +52,5 @@ describe('生产壳 provider 链（真 naive-ui）', () => {
     await flushPromises()
     // NetworkView setup 走完（useNotification 不抛）且渲染出镜像卡标题
     expect(wrapper.text()).toContain('网络模式')
-  }, 30_000)
+  }, 60_000) // 真 naive 全家桶 + 真 App/NetworkView 挂载是重量级用例（单跑 ~22s）；60s 防合跑负载下假超时
 })

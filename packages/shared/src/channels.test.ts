@@ -9,6 +9,7 @@ const VOID_INVOKE_CHANNELS = new Set<string>([
   CH.distrosListOnline,
   CH.ptyList,
   CH.ptyMaxSessions,
+  CH.ptyHostInfo,
   CH.appGetVersion,
   CH.appOpenConfigDir,
   CH.appGetWslVersion,

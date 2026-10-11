@@ -140,6 +140,57 @@ describe('XtermPane', () => {
     expect(t.written).toContain('历史输出\n')
   })
 
+  it('ConPTY 伪影对策：windowsPty 按宿主构建号启用（review 终端错位根治）', async () => {
+    // 默认 mock：win32 / 22621 → 启用 conpty 对策
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    expect(lastTerm().options.windowsPty).toEqual({ backend: 'conpty', buildNumber: 22621 })
+
+    // 非 Windows / 无构建号 → 不启用（等价旧行为）
+    wslAPI.terminal.host.mockResolvedValueOnce({ platform: 'linux', conptyBuild: null })
+    mount(XtermPane, { props: { ptyId: 'p2' }, attachTo: document.body })
+    await flushPromises()
+    expect(lastTerm().options.windowsPty).toBeUndefined()
+
+    // host() 拒绝也不炸（降级）
+    wslAPI.terminal.host.mockRejectedValueOnce(new Error('ipc down'))
+    mount(XtermPane, { props: { ptyId: 'p3' }, attachTo: document.body })
+    await flushPromises()
+    expect(lastTerm().options.windowsPty).toBeUndefined()
+  })
+
+  it('挂载竞态封死：host() 未决期间到达的 chunk 入队，按 序回放（初始缓冲→队列→直写）', async () => {
+    let releaseHost: (v: { platform: string; conptyBuild: number | null }) => void = () => {}
+    wslAPI.terminal.host.mockReturnValueOnce(
+      new Promise<{ platform: string; conptyBuild: number | null }>((r) => {
+        releaseHost = r
+      }),
+    )
+    mount(XtermPane, {
+      props: { ptyId: 'p1', initialBuffer: '缓冲\n' },
+      attachTo: document.body,
+    })
+    // host() 挂起中：订阅已建立（同步段），chunk 进队不丢
+    const dataCb = wslAPI.terminal.onData.mock.calls[0]![0]!
+    dataCb({ ptyId: 'p1', chunk: '挂起中到达' })
+    dataCb({ ptyId: 'p1', chunk: ' 的续块' })
+    await flushPromises()
+    // 放行 host → 构造 Terminal → 回放
+    releaseHost({ platform: 'win32', conptyBuild: 22621 })
+    await flushPromises()
+    const t = lastTerm()
+    const joined = t.written.join('')
+    expect(joined.indexOf('缓冲\n')).toBe(0)
+    expect(joined).toContain('挂起中到达')
+    expect(joined).toContain(' 的续块')
+    // 保序：队列块在初始缓冲之后、且互相有序
+    expect(joined.indexOf('挂起中到达')).toBeGreaterThan(joined.indexOf('缓冲\n'))
+    expect(joined.indexOf(' 的续块')).toBeGreaterThan(joined.indexOf('挂起中到达'))
+    // 放行后直写
+    dataCb({ ptyId: 'p1', chunk: '直写' })
+    expect(lastTerm().written.join('')).toContain('直写')
+  })
+
   it('终端输入经 IPC 上送；发送失败给错误提示（错误态）', async () => {
     mount(XtermPane, { props: { ptyId: 'p9' }, attachTo: document.body })
     await flushPromises()

@@ -212,7 +212,17 @@ describe('preload 契约', () => {
     expect(Object.keys(exposed.meta).sort()).toEqual(['get', 'set'])
     expect(Object.keys(exposed.metrics).sort()).toEqual(['sample', 'sampleOverview'])
     expect(Object.keys(exposed.terminal).sort()).toEqual(
-      ['create', 'input', 'kill', 'list', 'maxSessions', 'onData', 'onExit', 'resize'].sort(),
+      [
+        'create',
+        'host',
+        'input',
+        'kill',
+        'list',
+        'maxSessions',
+        'onData',
+        'onExit',
+        'resize',
+      ].sort(),
     )
     expect(Object.keys(exposed.io).sort()).toEqual(
       ['cleanupBackups', 'export', 'import', 'listBackups', 'move'].sort(),
@@ -324,6 +334,7 @@ describe('preload 契约', () => {
     callAndCheck('terminal.kill', () => exposed.terminal.kill('p1'), CH.ptyKill, 'p1')
     callAndCheck('terminal.list', () => exposed.terminal.list(), CH.ptyList)
     callAndCheck('terminal.maxSessions', () => exposed.terminal.maxSessions(), CH.ptyMaxSessions)
+    callAndCheck('terminal.host', () => exposed.terminal.host(), CH.ptyHostInfo)
   })
 
   it('io 域', () => {

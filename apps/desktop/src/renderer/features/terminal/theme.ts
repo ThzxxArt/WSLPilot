@@ -70,6 +70,24 @@ export const DEFAULT_TERMINAL_PREFS: TerminalFontPrefs = {
   scrollback: _defaults.scrollback,
 }
 
+/**
+ * CSS font-family 值规整（review 终端字形度量错位根治）：
+ * 含空格的裸字体名（Cascadia Mono）在部分解析路径失配 → 回退到错误字体 → 行内错位；
+ * 统一给含空格的名字补引号，已引号/无空格名字原样保留，空段剔除。
+ */
+export function normalizeFontFamily(value: string): string {
+  return String(value ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((name) => {
+      const bare = name.replace(/^["']|["']$/g, '')
+      if (/^[\w.+-]+$/.test(bare)) return bare
+      return `"${bare.replace(/"/g, '')}"`
+    })
+    .join(', ')
+}
+
 /** #rrggbb → rgba()（xterm 主题选区着色） */
 function hexToRgba(hex: string, alpha: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())

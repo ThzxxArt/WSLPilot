@@ -167,6 +167,20 @@ describe('pty IPC handlers', () => {
     await expect(wrapped.get(CH.ptyMaxSessions)({})).resolves.toBe(MAX_PTY_SESSIONS)
   })
 
+  it('pty:host 上报宿主平台；win32 才给 ConPTY 构建号（review 终端错位对策）', async () => {
+    const { wrapped } = register(makeCtx())
+    const info = (await wrapped.get(CH.ptyHostInfo)({})) as {
+      platform: string
+      conptyBuild: number | null
+    }
+    expect(info.platform).toBe(process.platform)
+    if (process.platform === 'win32') {
+      expect(typeof info.conptyBuild).toBe('number')
+    } else {
+      expect(info.conptyBuild).toBeNull()
+    }
+  })
+
   it('rejects missing ptyId / distro', async () => {
     const { wrapped } = register(makeCtx())
     await expect(wrapped.get(CH.ptyInput)({}, { ptyId: '', data: 'x' })).rejects.toThrow()

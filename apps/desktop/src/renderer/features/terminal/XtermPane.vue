@@ -9,7 +9,12 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { DEFAULT_TERMINAL_PREFS, resolveTerminalTheme, type TerminalFontPrefs } from './theme'
+import {
+  DEFAULT_TERMINAL_PREFS,
+  normalizeFontFamily,
+  resolveTerminalTheme,
+  type TerminalFontPrefs,
+} from './theme'
 import { chunkTerminalInput } from './input-chunk'
 import { errorLine } from '../../composables/useAppError'
 import { useSettingsStore } from '../../stores/settings'
@@ -43,7 +48,8 @@ let unsubs: Array<() => void> = []
 
 function applyPrefs(t: Terminal, p: Partial<TerminalFontPrefs>) {
   const full = { ...DEFAULT_TERMINAL_PREFS, ...p }
-  t.options.fontFamily = full.fontFamily
+  // 含空格的字体名必须补引号，否则 CSS 失配回退到错误字体 → 字形度量错位（review 根治）
+  t.options.fontFamily = normalizeFontFamily(full.fontFamily)
   t.options.fontSize = full.fontSize
   t.options.lineHeight = full.lineHeight
   t.options.cursorStyle = full.cursorStyle
@@ -51,25 +57,96 @@ function applyPrefs(t: Terminal, p: Partial<TerminalFontPrefs>) {
   t.options.scrollback = full.scrollback
 }
 
+let lastFitW = 0
+let lastFitH = 0
+let rafFit: number | null = null
+
 function doFit() {
   try {
-    fit?.fit()
+    const el = host.value
+    if (!el || !term || !fit) return
+    const w = el.clientWidth
+    const h = el.clientHeight
+    if (w < 20 || h < 20) return
+    // 尺寸未变不重复 fit：反复 resize(同尺寸) 会触发 ConPTY 多次重绘 → 行错位（review 根治）
+    if (w === lastFitW && h === lastFitH) return
+    lastFitW = w
+    lastFitH = h
+    fit.fit()
   } catch {
     /* 容器尚未布局 */
   }
 }
 
-onMounted(() => {
+/** rAF 合并的防抖 fit：ResizeObserver 连发只算一次 */
+function scheduleFit() {
+  if (rafFit !== null) cancelAnimationFrame(rafFit)
+  rafFit = requestAnimationFrame(() => {
+    rafFit = null
+    doFit()
+  })
+}
+
+/** 强制下次 fit 生效（字体/偏好变化后度量会变） */
+function invalidateFit() {
+  lastFitW = 0
+  lastFitH = 0
+}
+
+onMounted(async () => {
   if (!host.value) return
+
+  // ── 输出流竞态封死（review 终端丢行根治）──────────────────────
+  // initialBuffer 是「渲染期」快照；订阅必须在本函数**同步段**建立（任何 await 之前），
+  // 否则 await 间隙到达的 chunk 会丢失 → 屏幕缺行。chunk 先入队，回放完再放行，保序不重。
+  const pending: string[] = []
+  let streaming = false
+  let termRef: Terminal | null = null
+  const offData = window.wslAPI.terminal.onData((p) => {
+    if (p.ptyId !== props.ptyId) return
+    if (!streaming || !termRef) {
+      pending.push(p.chunk)
+      return
+    }
+    termRef.write(p.chunk)
+  })
+  const offExit = window.wslAPI.terminal.onExit((p) => {
+    if (p.ptyId !== props.ptyId) return
+    const line = `\r\n\x1b[90m[进程已退出，代码 ${p.code}]\x1b[0m\r\n`
+    if (!streaming || !termRef) {
+      pending.push(line)
+      return
+    }
+    termRef.write(line)
+  })
+  unsubs.push(offData, offExit)
+
+  // ── ConPTY 伪影对策（review 终端错位根治）────────────────────
+  // xterm 官方 windowsPty：不开启时 ConPTY 重绘（缩放/回滚）会用空行顶掉视口、丢失数据；
+  // backend=conpty 且 buildNumber≥21376 才启用完整 reflow 行为（Win10 旧 ConPTY 走保守分支）
+  let windowsPty: { backend: 'conpty'; buildNumber: number } | undefined
+  try {
+    const info = await window.wslAPI.terminal.host()
+    if (info?.platform === 'win32' && info.conptyBuild) {
+      windowsPty = { backend: 'conpty', buildNumber: info.conptyBuild }
+    }
+  } catch {
+    /* 宿主信息不可用：不启用对策（等价旧行为） */
+  }
+
   const t = new Terminal({
     allowProposedApi: true,
     // 真 PTY 数据：不要 convertEol，避免 TUI 光标异常（评审 M2）
     convertEol: false,
+    // 显式零字距：与字体度量严格一致，防字符漂移
+    letterSpacing: 0,
     theme: resolveTerminalTheme(settings.terminalTheme, settings.accent),
     ...DEFAULT_TERMINAL_PREFS,
+    ...(windowsPty ? { windowsPty } : {}),
   })
   applyPrefs(t, props.prefs)
   term = t
+  termRef = t
   fit = new FitAddon()
   search = new SearchAddon()
   t.loadAddon(fit)
@@ -79,11 +156,15 @@ onMounted(() => {
   t.loadAddon(new Unicode11Addon())
   t.unicode.activeVersion = '11'
   t.open(host.value)
+  if (host.value) host.value.style.background = t.options.theme?.background ?? '#FBFCFE'
 
-  // 恢复历史缓冲（切标签 / 重挂时）
+  // 恢复历史缓冲后放行实时流（保序：初始缓冲 → 队列 → 直写）
   if (props.initialBuffer) {
     t.write(props.initialBuffer)
   }
+  streaming = true
+  for (const c of pending) t.write(c)
+  pending.length = 0
 
   doFit()
 
@@ -117,23 +198,20 @@ onMounted(() => {
     if (sel) void navigator.clipboard.writeText(sel).catch(() => {})
   })
 
-  const offData = window.wslAPI.terminal.onData((p) => {
-    if (p.ptyId !== props.ptyId) return
-    t.write(p.chunk)
-  })
-  const offExit = window.wslAPI.terminal.onExit((p) => {
-    if (p.ptyId !== props.ptyId) return
-    t.write(`\r\n\x1b[90m[进程已退出，代码 ${p.code}]\x1b[0m\r\n`)
-  })
-  unsubs.push(offData, offExit)
-
-  ro = new ResizeObserver(() => doFit())
+  // 布局稳定：rAF 合并 resize 连发 + 字体加载完成后复位再 fit（度量一致）
+  ro = new ResizeObserver(() => scheduleFit())
   ro.observe(host.value)
-
-  fitTimer = window.setTimeout(doFit, 50)
+  void document.fonts?.ready?.then(() => {
+    invalidateFit()
+    scheduleFit()
+  })
 })
 
 onBeforeUnmount(() => {
+  if (rafFit !== null) {
+    cancelAnimationFrame(rafFit)
+    rafFit = null
+  }
   if (fitTimer !== undefined) {
     window.clearTimeout(fitTimer)
     fitTimer = undefined
@@ -156,17 +234,21 @@ watch(
   (p) => {
     if (term) {
       applyPrefs(term, p)
+      // 字体/字号变化 → 度量改变，强制重新 fit（尺寸守卫会误跳过）
+      invalidateFit()
       doFit()
     }
   },
   { deep: true },
 )
 
-// 终端主题跟随设置（auto / follow-app / custom）
+// 终端主题跟随设置（auto / follow-app / custom）；容器底色同步跟随
 watch(
   () => [settings.terminalTheme, settings.accent] as const,
   () => {
-    if (term) term.options.theme = resolveTerminalTheme(settings.terminalTheme, settings.accent)
+    if (!term) return
+    term.options.theme = resolveTerminalTheme(settings.terminalTheme, settings.accent)
+    if (host.value) host.value.style.background = term.options.theme?.background ?? '#FBFCFE'
   },
 )
 
@@ -240,5 +322,31 @@ defineExpose({
 
 .xterm-host :deep(.xterm) {
   height: 100%;
+}
+
+/* xterm.css 的 viewport/屏幕默认黑底（#000）强制透明：底色由宿主跟随主题提供 */
+.xterm-host :deep(.xterm .xterm-viewport),
+.xterm-host :deep(.xterm .xterm-screen) {
+  background-color: transparent !important;
+}
+
+/* 滚动条跟主题：细滚动条 + 常规配色 */
+.xterm-host :deep(.xterm-viewport) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default, #cbd5e1) transparent;
+}
+
+.xterm-host :deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 8px;
+  height: 8px;
+}
+
+.xterm-host :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: var(--color-border-default, #cbd5e1);
+  border-radius: 4px;
+}
+
+.xterm-host :deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: transparent;
 }
 </style>

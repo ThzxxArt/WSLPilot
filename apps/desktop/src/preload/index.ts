@@ -112,6 +112,9 @@ const api = {
     kill: (ptyId: string): Promise<void> => ipcRenderer.invoke(CH.ptyKill, ptyId),
     list: (): Promise<PtySessionInfo[]> => ipcRenderer.invoke(CH.ptyList),
     maxSessions: (): Promise<number> => ipcRenderer.invoke(CH.ptyMaxSessions),
+    /** 终端宿主信息（xterm windowsPty ConPTY 对策用） */
+    host: (): Promise<{ platform: string; conptyBuild: number | null }> =>
+      ipcRenderer.invoke(CH.ptyHostInfo),
     onData: (cb: (p: { ptyId: string; chunk: string }) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, p: { ptyId: string; chunk: string }) => cb(p)
       ipcRenderer.on(CH.ptyData, h)

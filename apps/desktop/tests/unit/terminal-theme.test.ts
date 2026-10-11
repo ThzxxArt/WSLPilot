@@ -3,9 +3,31 @@ import {
   TERMINAL_LIGHT_THEME,
   TERMINAL_CONTRAST_THEME,
   DEFAULT_TERMINAL_PREFS,
+  normalizeFontFamily,
   resolveTerminalTheme,
 } from '../../src/renderer/features/terminal/theme'
 import { defaultConfig } from '@wslpilot/shared'
+
+describe('normalizeFontFamily（含空格字体名补引号 — review 度量错位根治）', () => {
+  it('含空格的名字补引号、单段名字原样', () => {
+    expect(normalizeFontFamily('Cascadia Mono, Consolas, monospace')).toBe(
+      '"Cascadia Mono", Consolas, monospace',
+    )
+    expect(normalizeFontFamily('Consolas')).toBe('Consolas')
+    expect(normalizeFontFamily('monospace')).toBe('monospace')
+  })
+
+  it('已引号的名字不再重复引号；空段剔除；防注入去内嵌引号', () => {
+    expect(normalizeFontFamily('"Cascadia Mono", Consolas')).toBe('"Cascadia Mono", Consolas')
+    expect(normalizeFontFamily('  Consolas , , monospace ')).toBe('Consolas, monospace')
+    expect(normalizeFontFamily('a"b c')).toBe('"ab c"')
+  })
+
+  it('空输入返回空串', () => {
+    expect(normalizeFontFamily('')).toBe('')
+    expect(normalizeFontFamily(undefined as never)).toBe('')
+  })
+})
 
 describe('terminal theme', () => {
   it('light theme has readable dark-on-light colors', () => {

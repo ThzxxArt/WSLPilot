@@ -1,4 +1,5 @@
 import { CH, createAppError, assertSafeDistroName, MAX_PTY_SESSIONS } from '@wslpilot/shared'
+import * as os from 'node:os'
 import type { PtyManager, PtyCreateOptions } from '../../services/pty-manager'
 import type { IpcContext } from '../router'
 
@@ -59,4 +60,17 @@ export function registerPtyHandlers(add: AddFn, deps: { pty: PtyManager }): void
 
   // 供 UI 展示上限
   add(CH.ptyMaxSessions, () => MAX_PTY_SESSIONS)
+
+  /**
+   * 终端宿主信息（xterm `windowsPty` ConPTY 伪影对策用 — review 终端错位根治）。
+   * buildNumber = Windows 构建号（os.release 形如 10.0.26200）；非 Windows 为 null。
+   */
+  add(CH.ptyHostInfo, () => {
+    const rel = os.release()
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec(rel)
+    return {
+      platform: process.platform,
+      conptyBuild: process.platform === 'win32' && m ? Number(m[3]) : null,
+    }
+  })
 }
