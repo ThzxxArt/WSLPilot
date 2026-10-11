@@ -30,6 +30,18 @@ import {
   type WslAction,
 } from '@wslpilot/shared'
 
+/**
+ * PTY 会话信息 — 与 main 的 services/pty-manager.ts PtySessionInfo 结构一致
+ * （跨进程只传形状；preload 不引用 main 模块）。
+ */
+export interface PtySessionInfo {
+  ptyId: string
+  distro: string
+  shell: string
+  cwd?: string
+  createdAt: number
+}
+
 /** 类型化窄接口 — 渲染进程唯一外部边界 */
 const api = {
   config: {
@@ -69,7 +81,8 @@ const api = {
       ipcRenderer.invoke(CH.distrosInstall, name ? { name } : {}),
     setVersion: (name: string, version: 1 | 2): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.distrosSetVersion, { name, version }),
-    uninstall: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosUnregister, name),
+    /** 注销（删除）发行版 — 与 `wsl --unregister` 及通道 distros:unregister 动词对齐 */
+    unregister: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosUnregister, name),
   },
 
   meta: {
@@ -78,10 +91,10 @@ const api = {
   },
 
   metrics: {
-    /** 单个发行版指标 */
+    /** 单发行版指标（metrics:sample — 只接受发行版名） */
     sample: (name: string): Promise<Metrics> => ipcRenderer.invoke(CH.metricsSample, name),
-    /** 全局概览指标 */
-    sampleOverview: (): Promise<OverviewMetrics> => ipcRenderer.invoke(CH.metricsSample, '*'),
+    /** 全局概览（metrics:overview — OverviewMetrics） */
+    sampleOverview: (): Promise<OverviewMetrics> => ipcRenderer.invoke(CH.metricsOverview),
   },
 
   terminal: {
@@ -91,15 +104,13 @@ const api = {
       cwd?: string
       cols: number
       rows: number
-    }): Promise<{ ptyId: string; distro: string; shell: string; createdAt: number }> =>
-      ipcRenderer.invoke(CH.ptyCreate, opts),
+    }): Promise<PtySessionInfo> => ipcRenderer.invoke(CH.ptyCreate, opts),
     input: (ptyId: string, data: string): Promise<void> =>
       ipcRenderer.invoke(CH.ptyInput, { ptyId, data }),
     resize: (ptyId: string, cols: number, rows: number): Promise<void> =>
       ipcRenderer.invoke(CH.ptyResize, { ptyId, cols, rows }),
     kill: (ptyId: string): Promise<void> => ipcRenderer.invoke(CH.ptyKill, ptyId),
-    list: (): Promise<{ ptyId: string; distro: string; shell: string }[]> =>
-      ipcRenderer.invoke(CH.ptyList),
+    list: (): Promise<PtySessionInfo[]> => ipcRenderer.invoke(CH.ptyList),
     maxSessions: (): Promise<number> => ipcRenderer.invoke(CH.ptyMaxSessions),
     onData: (cb: (p: { ptyId: string; chunk: string }) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, p: { ptyId: string; chunk: string }) => cb(p)
@@ -119,8 +130,9 @@ const api = {
     move: (req: IoMoveRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioMove, req),
     listBackups: (dir?: string): Promise<BackupFileInfo[]> =>
       ipcRenderer.invoke(CH.ioListBackups, dir ? { dir } : {}),
-    cleanupBackups: (opts: { dir?: string; keep: number }): Promise<{ removed: number }> =>
-      ipcRenderer.invoke(CH.ioCleanupBackups, opts ?? { keep: 5 }),
+    /** keep 可选：缺省由 ipc-schema 默认值（DEFAULT_BACKUP_KEEP）统一兜底 */
+    cleanupBackups: (opts?: { dir?: string; keep?: number }): Promise<{ removed: number }> =>
+      ipcRenderer.invoke(CH.ioCleanupBackups, opts ?? {}),
   },
 
   wslconf: {
@@ -142,8 +154,8 @@ const api = {
         .then((f: { actions?: WslAction[] } | null) =>
           Array.isArray(f?.actions) ? f.actions : [],
         ),
-    /** 写回动作清单（整表替换） */
-    save: (actions: WslAction[]): Promise<unknown> =>
+    /** 写回动作清单（整表替换）；返回更新后的 actions.jsonc 内容 */
+    save: (actions: WslAction[]): Promise<ConfigMap['actions']> =>
       ipcRenderer.invoke(CH.configSet, { fileKey: 'actions', patch: { actions } }),
   },
 
@@ -181,8 +193,8 @@ const api = {
         .then((f: { portForwarding?: unknown } | null) =>
           Array.isArray(f?.portForwarding) ? (f.portForwarding as PortForwardRule[]) : [],
         ),
-    /** 写回规则清单（整表替换） */
-    saveRules: (rules: PortForwardRule[]): Promise<unknown> =>
+    /** 写回规则清单（整表替换）；返回更新后的 network.jsonc 内容 */
+    saveRules: (rules: PortForwardRule[]): Promise<ConfigMap['network']> =>
       ipcRenderer.invoke(CH.configSet, { fileKey: 'network', patch: { portForwarding: rules } }),
     /** 代理配置（读 network.jsonc） */
     getProxy: (): Promise<ProxyConfig> =>
@@ -196,7 +208,8 @@ const api = {
               noProxy: 'localhost,127.0.0.1',
             },
       ),
-    saveProxy: (proxy: ProxyConfig): Promise<unknown> =>
+    /** 写回代理配置；返回更新后的 network.jsonc 内容 */
+    saveProxy: (proxy: ProxyConfig): Promise<ConfigMap['network']> =>
       ipcRenderer.invoke(CH.configSet, { fileKey: 'network', patch: { proxy } }),
   },
 
@@ -220,11 +233,11 @@ const api = {
   },
 
   diagnostics: {
-    /** 打开日志目录（logs/） */
-    openLogsDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenLogsDir),
-    /** 导出诊断包（主进程弹保存对话框；取消返回 null） */
+    /** 打开日志目录（logs/）— 通道 diagnostics:openLogsDir，动词与 API 一致 */
+    openLogsDir: (): Promise<void> => ipcRenderer.invoke(CH.diagnosticsOpenLogsDir),
+    /** 导出诊断包（主进程弹保存对话框；取消返回 null）— 通道 diagnostics:exportPackage */
     exportPackage: (): Promise<DiagnosticsExportResult | null> =>
-      ipcRenderer.invoke(CH.appExportDiagnostics, {}),
+      ipcRenderer.invoke(CH.diagnosticsExportPackage, {}),
   },
 
   update: {

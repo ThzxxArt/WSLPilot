@@ -81,7 +81,11 @@ const windowsProxyLabel = computed(() => {
   const w = props.windowsProxy
   if (!w) return '未检测到 Windows 代理设置'
   if (!w.enabled) return 'Windows 系统代理未启用'
-  return `Windows 系统代理：${normalizeProxyUrl(w.server) || w.server}`
+  const base = `Windows 系统代理：${normalizeProxyUrl(w.server) || w.server}`
+  // ProxyOverride = 系统的绕过列表（no_proxy 回退来源）：跟随系统代理时必须展示，
+  // 否则用户看不到「哪些地址不走代理」的真实语义（review 半展示根治）
+  const override = String(w.override ?? '').trim()
+  return override ? `${base} · 不代理列表（no_proxy 回退）：${override}` : base
 })
 
 async function save() {

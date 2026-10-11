@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import { assertSafeRuleId, MAX_PORT_FORWARD_RULES } from './network'
+import { DEFAULT_BACKUP_KEEP, DEFAULT_POLL_INTERVAL_MS } from './constants'
 
 /** settings.jsonc schema — v2 */
 export const generalSettingsSchema = z.object({
   autoRefreshOnStart: z.boolean().default(true),
-  pollIntervalMs: z.number().int().min(1000).max(60_000).default(5000),
+  pollIntervalMs: z.number().int().min(1000).max(60_000).default(DEFAULT_POLL_INTERVAL_MS),
   locale: z.enum(['system', 'zh-CN', 'en-US']).default('system'),
   // 浅色是唯一主题（不提供深色）；该策略不做成可写配置（幽灵字段根治）
   accent: z.enum(['aurora', 'sunset', 'ocean', 'forest']).default('aurora'),
@@ -32,7 +33,7 @@ export const terminalSettingsSchema = z.object({
 export const backupSettingsSchema = z.object({
   defaultDir: z.string().default('%USERPROFILE%\\WSL-Backups'),
   format: z.enum(['tar', 'vhd']).default('tar'),
-  keepRecent: z.number().int().min(1).max(50).default(5),
+  keepRecent: z.number().int().min(1).max(50).default(DEFAULT_BACKUP_KEEP),
   autoBackupBeforeDestructive: z.boolean().default(true),
 })
 
@@ -134,7 +135,7 @@ export const networkFileSchema = z.object({
     .default({}),
 })
 
-/** ui-state.jsonc */
+/** ui-state.jsonc（lastSelectedDistro/activeView/tableSort 为幽灵字段已根治：全仓无读写，旧文件中出现会被剥离） */
 export const uiStateFileSchema = z.object({
   $schemaVersion: z.number().int().default(1),
   window: z
@@ -146,12 +147,7 @@ export const uiStateFileSchema = z.object({
       maximized: z.boolean().default(false),
     })
     .default({}),
-  lastSelectedDistro: z.string().default(''),
   sidebarCollapsed: z.boolean().default(false),
-  activeView: z.string().default('dashboard'),
-  tableSort: z
-    .object({ key: z.string().default('name'), dir: z.enum(['asc', 'desc']).default('asc') })
-    .default({}),
   recentCommands: z.array(z.string()).default([]),
 })
 

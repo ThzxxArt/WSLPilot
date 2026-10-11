@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { sampleOverview, EMPTY_OVERVIEW } from '../../src/main/services/metrics-service'
-import type { DistroRuntime } from '@wslpilot/shared'
+import { createAppError, type DistroRuntime } from '@wslpilot/shared'
 
 function logger() {
   return {
@@ -130,5 +130,39 @@ describe('sampleOverview', () => {
     expect(result.cpuPercent).toBe(20)
     expect(result.runningCount).toBe(3)
     expect(Object.keys(result.perDistro)).toHaveLength(2)
+  })
+
+  it('sampleMetrics 抛 TASK_FAILED 时不进分母、不进 perDistro（失败样本零污染）', async () => {
+    const wsl: any = {
+      sampleMetrics: vi.fn(async (name: string) => {
+        if (name === 'bad') {
+          // 与 wsl-service 真实失败形态一致：createAppError('TASK_FAILED') 抛出
+          throw createAppError('TASK_FAILED', { message: `采样 ${name} 资源指标失败` })
+        }
+        return {
+          memUsedKB: 10,
+          memTotalKB: 100,
+          diskUsedKB: 1,
+          diskTotalKB: 2,
+          cpuPercent: name === 'a' ? 10 : 30,
+          sampledAt: 'T',
+        }
+      }),
+    }
+    const result = await sampleOverview(
+      wsl,
+      [distro('a', 'Running'), distro('bad', 'Running'), distro('b', 'Running')],
+      logger(),
+    )
+    // 分母只算成功样本：(10+30)/2 = 20
+    expect(result.cpuPercent).toBe(20)
+    // perDistro 不含失败项
+    expect(result.perDistro.bad).toBeUndefined()
+    expect(Object.keys(result.perDistro).sort()).toEqual(['a', 'b'])
+    // 内存/磁盘累加同样不掺失败样本
+    expect(result.memTotalKB).toBe(200)
+    expect(result.diskTotalKB).toBe(4)
+    expect(result.runningCount).toBe(3)
+    expect(result.totalCount).toBe(3)
   })
 })

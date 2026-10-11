@@ -26,10 +26,16 @@ export const CONFIG_FILE_NAMES = {
 /** 配置备份保留份数 */
 export const CONFIG_BACKUP_KEEP = 3
 
+/**
+ * 备份保留份数（keep=5 唯一事实源）：
+ * config-schema（backup.keepRecent 默认）、ipc-schema（io:cleanupBackups keep 默认）一律引用此处。
+ */
+export const DEFAULT_BACKUP_KEEP = 5
+
 /** PTY 会话上限 */
 export const MAX_PTY_SESSIONS = 10
 
-/** 默认轮询间隔 */
+/** 默认轮询间隔（config-schema 的 pollIntervalMs 默认引用此处，禁止再抄 5000） */
 export const DEFAULT_POLL_INTERVAL_MS = 5000
 
 /**

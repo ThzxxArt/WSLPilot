@@ -6,7 +6,7 @@
  * - `buildElevatedInvocation` 是 op → program/argv 的**唯一事实源**（参数数组，无 shell 拼接）
  * - 提权脚本二次校验 op 与 program 的对应关系（纵深防御）
  */
-import { formatCommand } from './commands'
+import { buildMoveArgs, formatCommand } from './commands'
 import { assertSafeDistroName, createAppError } from './errors'
 import { assertSafeBusId } from './usbipd'
 import { isValidAddress, buildPortProxyAddArgs, buildPortProxyDeleteArgs } from './network'
@@ -57,18 +57,6 @@ export interface ElevationRequest {
   params: ElevationParams
 }
 
-/** Helper 执行结果（result.json） */
-export interface ElevationResult {
-  ok: boolean
-  code: number
-  stdout: string
-  stderr: string
-  /** 用户取消了 UAC 弹窗 */
-  canceled: boolean
-  /** 请求未执行原因（校验失败等） */
-  error?: string
-}
-
 const distroField = z
   .string()
   .min(1)
@@ -86,8 +74,8 @@ const distroField = z
 
 const portField = z.number().int().min(1).max(65535)
 
-/** 各 op 的参数 schema（IPC 边界 / 服务层共用） */
-export const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
+/** 各 op 的参数 schema（仅 validateElevationRequest 内部消费，不导出） */
+const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
   'netsh.portproxy.add': z
     .object({
       listenAddress: z.string().refine(isValidAddress, '监听地址无效'),
@@ -213,12 +201,8 @@ export function buildElevatedInvocation(req: ElevationRequest): ElevatedInvocati
       args = buildUsbipdArgs('unbind', validated.params.busId as string)
       break
     case 'wsl.move':
-      args = [
-        '--manage',
-        validated.params.name as string,
-        '--move',
-        validated.params.path as string,
-      ]
+      // 与 preview / io-service 实跑同一 build*Args（唯一 argv 事实源）
+      args = buildMoveArgs(validated.params.name as string, validated.params.path as string)
       break
     case 'wsl.install':
       args = validated.params.name

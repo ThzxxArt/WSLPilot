@@ -138,8 +138,10 @@ describe('network-service 提权委托', () => {
   })
 
   it('applyAll：多条规则的待提权项合并为一次 UAC（run 批量，§14.3）', async () => {
-    // call1: show all → 空；then 每条规则 add → 权限不足
+    // call1: show 空；call2: RULE add → 权限不足；call3: show 空；call4: RULE2 add → 权限不足
     const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 1, stderr: ELEVATION_DENIED },
       { code: 0, stdout: '' },
       { code: 1, stderr: ELEVATION_DENIED },
     ])
@@ -163,6 +165,8 @@ describe('network-service 提权委托', () => {
     const tool = makeTool([
       { code: 0, stdout: '' },
       { code: 1, stderr: ELEVATION_DENIED },
+      { code: 0, stdout: '' },
+      { code: 1, stderr: ELEVATION_DENIED },
     ])
     const elevation = elevationMock()
     elevation.run.mockResolvedValueOnce({
@@ -180,6 +184,8 @@ describe('network-service 提权委托', () => {
 
   it('UAC 取消 → PERMISSION_DENIED + 可执行建议', async () => {
     const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 1, stderr: ELEVATION_DENIED },
       { code: 0, stdout: '' },
       { code: 1, stderr: ELEVATION_DENIED },
     ])

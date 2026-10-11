@@ -1,20 +1,10 @@
 /**
- * 间距 / 圆角 / 阴影 / 层级 — 唯一事实源在 @wslpilot/shared/tokens
+ * 圆角 / 阴影 / 层级 — 唯一事实源在 @wslpilot/shared/tokens
  * 本文件仅做键名适配，禁止新增数值。
+ * （space-* 间距档全仓零消费已根治：SPACING 与 spacing 适配层一并删除；
+ *   shadow 仅保留 utilities.scss 有消费的 xs/md，z 仅保留 --z-toast 对应的 toast。）
  */
-import { SPACING, RADIUS, SHADOW, Z_INDEX } from '@wslpilot/shared'
-
-export const spacing = {
-  1: SPACING['space-1'],
-  2: SPACING['space-2'],
-  3: SPACING['space-3'],
-  4: SPACING['space-4'],
-  5: SPACING['space-5'],
-  6: SPACING['space-6'],
-  8: SPACING['space-8'],
-  10: SPACING['space-10'],
-  16: SPACING['space-16'],
-} as const
+import { RADIUS, SHADOW, Z_INDEX } from '@wslpilot/shared'
 
 export const radius = {
   xs: RADIUS['radius-xs'],
@@ -27,19 +17,9 @@ export const radius = {
 
 export const shadow = {
   xs: SHADOW['shadow-xs'],
-  sm: SHADOW['shadow-sm'],
   md: SHADOW['shadow-md'],
-  lg: SHADOW['shadow-lg'],
-  glow: SHADOW['shadow-glow'],
 } as const
 
 export const z = {
-  base: Number(Z_INDEX['z-base']),
-  dropdown: Number(Z_INDEX['z-dropdown']),
-  sticky: Number(Z_INDEX['z-sticky']),
-  drawer: Number(Z_INDEX['z-drawer']),
-  modal: Number(Z_INDEX['z-modal']),
   toast: Number(Z_INDEX['z-toast']),
-  tooltip: Number(Z_INDEX['z-tooltip']),
-  command: Number(Z_INDEX['z-command']),
 } as const

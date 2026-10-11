@@ -6,8 +6,8 @@ import { formatCommand } from './commands'
 import { createAppError } from './errors'
 import type { NetworkMode, PortForwardRule, PortProxyEntry, ProxyConfig } from './types'
 
-/** netsh portproxy 隧道类型：仅支持 TCP v4→v4（udp 规则只在配置里记录意图） */
-export const PORTPROXY_KIND = 'v4tov4' as const
+/** netsh portproxy 隧道类型：仅支持 TCP v4→v4（udp 规则只在配置里记录意图）；模块内常量，行为经 parsePortProxyShow/build* 可观测 */
+const PORTPROXY_KIND = 'v4tov4' as const
 
 /** 发行版内代理脚本路径（应用/清除代理的唯一落点） */
 export const PROXY_SCRIPT_PATH = '/etc/profile.d/wslpilot-proxy.sh'
@@ -267,16 +267,6 @@ export function buildProxyScript(eff: EffectiveProxy): string {
 /** POSIX shell 单引号包裹（代理值可能含 `:` `/`，不进 shell 拼接语义也要防引号闭合） */
 export function shellQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`
-}
-
-/** 代理配置 → 一行摘要（列表/摘要展示） */
-export function proxySummary(proxy: ProxyConfig): string {
-  const eff = resolveEffectiveProxy(proxy, null)
-  const parts: string[] = []
-  if (proxy.useWindowsProxy) parts.push('跟随系统')
-  if (eff.http) parts.push(`HTTP ${eff.http}`)
-  if (eff.https) parts.push(`HTTPS ${eff.https}`)
-  return parts.length > 0 ? parts.join(' · ') : '未配置'
 }
 
 // ─────────────────────── 表单校验（渲染层与执行边界共用） ───────────────────────

@@ -1,5 +1,6 @@
 import {
   CH,
+  DEFAULT_BACKUP_KEEP,
   type BackupFileInfo,
   type IoExportRequest,
   type IoImportRequest,
@@ -33,7 +34,11 @@ export function registerIoHandlers(add: AddFn, deps: { io: IoService; tasks: Tas
       message: `导出 ${o.name}`,
       // 发行版名不区分大小写，锁键必须归一（review M11）
       lockKey: o.name.toLowerCase(),
-      run: (ctl) => io.runExport(o, ctl).then(() => undefined),
+      // 返回的 BackupFileInfo 供测试与内部使用；任务链只要求完成信号，
+      // 导出产物信息已由 ctl.log 报告，此处显式忽略返回值
+      run: async (ctl) => {
+        await io.runExport(o, ctl)
+      },
     })
   })
 
@@ -66,7 +71,8 @@ export function registerIoHandlers(add: AddFn, deps: { io: IoService; tasks: Tas
 
   add(CH.ioCleanupBackups, async (_c, arg: never): Promise<{ removed: number }> => {
     const o = (arg ?? {}) as { dir?: string; keep?: number }
-    return io.cleanupBackups(o.dir, typeof o.keep === 'number' ? o.keep : 5)
+    // schema 已默认 DEFAULT_BACKUP_KEEP；此处保留类型守卫，常量单源
+    return io.cleanupBackups(o.dir, typeof o.keep === 'number' ? o.keep : DEFAULT_BACKUP_KEEP)
   })
 
   add(CH.taskCancel, (_c, taskId: never): boolean => {

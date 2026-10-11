@@ -84,19 +84,7 @@ export const DISTRO_BRAND_COLORS: Record<string, string> = {
   Alpine: '#0D597F',
 }
 
-/** 间距 / 圆角 / 阴影 / 层级 / 动效 — 与 gen-tokens 输出保持一致 */
-export const SPACING = {
-  'space-1': '4px',
-  'space-2': '8px',
-  'space-3': '12px',
-  'space-4': '16px',
-  'space-5': '20px',
-  'space-6': '24px',
-  'space-8': '32px',
-  'space-10': '40px',
-  'space-16': '64px',
-} as const
-
+/** 圆角 / 阴影 / 层级 / 动效 — 与 gen-tokens 输出保持一致 */
 export const RADIUS = {
   'radius-xs': '6px',
   'radius-sm': '8px',
@@ -106,23 +94,15 @@ export const RADIUS = {
   'radius-full': '9999px',
 } as const
 
+/** 阴影档位：仅保留 utilities.scss 有消费的 xs/md（sm/lg/glow 全仓零消费已根治） */
 export const SHADOW = {
   'shadow-xs': '0 1px 2px rgba(15,23,42,.06)',
-  'shadow-sm': '0 2px 6px rgba(15,23,42,.08)',
   'shadow-md': '0 6px 16px -4px rgba(15,23,42,.12), 0 2px 6px -2px rgba(15,23,42,.08)',
-  'shadow-lg': '0 16px 40px -12px rgba(15,23,42,.22)',
-  'shadow-glow': '0 0 0 1px var(--color-border-default), 0 8px 32px -8px var(--color-accent-soft)',
 } as const
 
+/** 层级：仅保留 --z-toast（有消费）；其余 z-* 全仓零消费已根治 */
 export const Z_INDEX = {
-  'z-base': '0',
-  'z-dropdown': '1000',
-  'z-sticky': '1100',
-  'z-drawer': '1200',
-  'z-modal': '1300',
   'z-toast': '1400',
-  'z-tooltip': '1500',
-  'z-command': '1600',
 } as const
 
 export const MOTION = {

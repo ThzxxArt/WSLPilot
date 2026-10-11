@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { PRIMITIVE_GRADIENTS, SEMANTIC_LIGHT, ACCENT_MAPS, SEMANTIC_TO_CSS } from '../src/tokens'
+import { readFileSync } from 'node:fs'
+import * as tokensNs from '../src/tokens'
+import {
+  PRIMITIVE_GRADIENTS,
+  SEMANTIC_LIGHT,
+  ACCENT_MAPS,
+  SEMANTIC_TO_CSS,
+  SHADOW,
+  Z_INDEX,
+} from '../src/tokens'
 import {
   ACCENT_GRADIENTS,
   ACCENT_PRIMARY,
@@ -32,5 +41,42 @@ describe('设计令牌单源一致性', () => {
       expect(map.accentSoft, name).toBeTruthy()
       expect(map.bgActive, name).toBeTruthy()
     }
+  })
+})
+
+describe('死 token 已根治（源侧）', () => {
+  it('SPACING 不再导出（space-* 全仓零消费）', () => {
+    expect('SPACING' in tokensNs).toBe(false)
+  })
+
+  it('SHADOW 只剩 utilities.scss 有消费的 xs/md', () => {
+    expect(Object.keys(SHADOW)).toEqual(['shadow-xs', 'shadow-md'])
+  })
+
+  it('Z_INDEX 只剩有消费的 z-toast', () => {
+    expect(Object.keys(Z_INDEX)).toEqual(['z-toast'])
+    expect(Z_INDEX['z-toast']).toBe('1400')
+  })
+})
+
+describe('死 token 已根治（gen-tokens 生成物与源一致）', () => {
+  const scss = readFileSync(
+    new URL('../../ui/src/styles/tokens.generated.scss', import.meta.url),
+    'utf8',
+  )
+
+  it('生成物不含 --space-* / --shadow-glow / --glass-border / 超集 z-*', () => {
+    expect(scss).not.toMatch(/--space-/)
+    expect(scss).not.toContain('--shadow-glow')
+    expect(scss).not.toContain('--glass-border')
+    expect(scss).not.toMatch(/--z-(base|dropdown|sticky|drawer|modal|tooltip|command)/)
+  })
+
+  it('存活 token 仍在生成物里（shadow-xs/md、z-toast、glass-bg/blur）', () => {
+    expect(scss).toContain('--shadow-xs:')
+    expect(scss).toContain('--shadow-md:')
+    expect(scss).toContain('--z-toast:')
+    expect(scss).toContain('--glass-bg:')
+    expect(scss).toContain('--glass-blur:')
   })
 })

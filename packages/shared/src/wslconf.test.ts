@@ -7,7 +7,6 @@ import {
   parseWslConf,
   collectUnknownKeys,
   applyWslConfModel,
-  coerceWslConfValue,
   diffLines,
   isSameText,
   emptyWslConfModel,
@@ -126,15 +125,36 @@ describe('wsl.conf 表单模型', () => {
     expect(m.boot.systemd).toBeUndefined()
   })
 
-  it('coerceWslConfValue 处理布尔/数字/字符串/非法', () => {
-    expect(coerceWslConfValue('boolean', 'true')).toBe(true)
-    expect(coerceWslConfValue('boolean', 'NO')).toBe(false)
-    expect(coerceWslConfValue('boolean', 'maybe')).toBeUndefined()
-    expect(coerceWslConfValue('boolean', undefined)).toBeUndefined()
-    expect(coerceWslConfValue('number', '10000')).toBe(10000)
-    expect(coerceWslConfValue('number', 'x')).toBeUndefined()
-    expect(coerceWslConfValue('string', ' hi ')).toBe('hi')
-    expect(coerceWslConfValue('string', undefined)).toBeUndefined()
+  it('值强制转换经 parseWslConf 可观测（布尔/数字/字符串/非法视为未设置 — 模块内 coerceWslConfValue）', () => {
+    const m = parseWslConf(
+      [
+        '[automount]',
+        'enabled = true',
+        'mountFsTab = NO',
+        'options =  metadata ',
+        '[boot]',
+        'initTimeout = 10000',
+        '[network]',
+        'generateHosts = maybe',
+        '[interop]',
+        'enabled = 1',
+      ].join('\n'),
+    )
+    expect(m.automount.enabled).toBe(true) // true → true
+    expect(m.automount.mountFsTab).toBe(false) // NO → false
+    expect(m.automount.options).toBe('metadata') // 字符串 trim
+    expect(m.boot.initTimeout).toBe(10000) // 数字
+    expect(m.network.generateHosts).toBeUndefined() // 非法布尔 → 不落键
+    expect('generateHosts' in m.network).toBe(false)
+    expect(m.interop.enabled).toBe(true) // 1 → true
+
+    const bad = parseWslConf('[boot]\ninitTimeout = x\n')
+    expect(bad.boot.initTimeout).toBeUndefined() // 非法数字 → 不落键
+    expect('initTimeout' in bad.boot).toBe(false)
+
+    const empty = parseWslConf('')
+    expect(empty.user.default).toBeUndefined() // 未设置（raw=undefined）→ 不落键
+    expect('default' in empty.user).toBe(false)
   })
 
   it('collectUnknownKeys 找出目录外的键', () => {

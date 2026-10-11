@@ -51,14 +51,26 @@ try {
     $argList = @()
     if ($null -ne $item.args) { foreach ($a in @($item.args)) { $argList += [string]$a } }
     $errTmp = [System.IO.Path]::GetTempFileName()
+    $prevEnc = [Console]::OutputEncoding
     try {
+      # wsl.exe 以 UTF-16LE（Unicode）输出，须先切换控制台编码，否则按 OEM 码页解码会乱码；
+      # 其余程序恢复默认编码。失败也要在 finally 还原 $prevEnc。
+      if ([System.IO.Path]::GetFileName($program) -ieq 'wsl.exe') {
+        [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+      } else {
+        [Console]::OutputEncoding = [System.Text.Encoding]::Default
+      }
       $stdout = (& $program @argList 2>$errTmp | Out-String)
       $code = $LASTEXITCODE
       if ($null -eq $code) { $code = 0 }
       $stderr = ''
-      if (Test-Path -LiteralPath $errTmp) { $stderr = [System.IO.File]::ReadAllText($errTmp) }
+      if (Test-Path -LiteralPath $errTmp) {
+        # stderr 临时文件按同一编码读取（与 stdout 解码一致）
+        $stderr = [System.IO.File]::ReadAllText($errTmp, [Console]::OutputEncoding)
+      }
       $results += @{ op = $op; ok = ([int]$code -eq 0); code = [int]$code; stdout = [string]$stdout; stderr = [string]$stderr }
     } finally {
+      [Console]::OutputEncoding = $prevEnc
       Remove-Item -LiteralPath $errTmp -Force -ErrorAction SilentlyContinue
     }
   }

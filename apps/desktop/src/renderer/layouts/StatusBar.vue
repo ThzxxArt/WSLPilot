@@ -160,14 +160,4 @@ function openTasks() {
     opacity: 0;
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .task-pulse {
-    animation: none;
-  }
-}
-
-:root[data-reduce-motion='true'] .task-pulse {
-  animation: none;
-}
 </style>

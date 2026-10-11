@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { WslApi } from '../../src/preload/index'
 
 /**
  * preload 契约测试（review C4 根治）：
@@ -11,10 +12,13 @@ const invoke = vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined)
 const on = vi.fn((..._args: unknown[]) => undefined)
 const removeListener = vi.fn((..._args: unknown[]) => undefined)
 let exposed: Record<string, any> = {}
+/** contextBridge 桥名（item 8：此前 _name 被丢弃、'wslAPI' 零断言） */
+let exposedName = ''
 
 vi.mock('electron', () => ({
   contextBridge: {
-    exposeInMainWorld: (_name: string, api: Record<string, unknown>) => {
+    exposeInMainWorld: (name: string, api: Record<string, unknown>) => {
+      exposedName = name
       exposed = api as Record<string, any>
     },
   },
@@ -33,6 +37,52 @@ const PASSTHROUGH = { __passthrough__: true } as const
 
 /** 非直接透传的方法（内部做了形状变换），单独断言变换结果 */
 const DERIVED = new Set(['actions.list', 'network.listRules', 'network.getProxy'])
+
+/**
+ * 复用 config 通道的组合方法（API 动词与通道动词天然不同名）：
+ * 通道是 config:get/config:set，API 是面向资源的读写包装。白名单即声明，禁止静默扩大。
+ */
+const COMPOSITIONAL = new Set([
+  'actions.list',
+  'actions.save',
+  'network.listRules',
+  'network.saveRules',
+  'network.getProxy',
+  'network.saveProxy',
+])
+
+/** callAndCheck 实际覆盖的 API 路径 → 通道（末位用例做全量对账） */
+const invokedByPath = new Map<string, string>()
+
+/** 路径归一：'distros.install 无名' / 'io.listBackups(dir)' → 'distros.install' / 'io.listBackups' */
+function normPath(path: string): string {
+  return path.split(' ')[0]!.split('(')[0]!
+}
+
+/** 事件订阅方法（onXxx）不走 invoke 通道 */
+function isEventMethod(key: string): boolean {
+  return key.startsWith('on') && key.length > 2 && key[2] === key[2]!.toUpperCase()
+}
+
+/**
+ * 动词防漂移（review：命名漂移根治）：
+ * 通道 `域:动词` 的动词必须与 preload API 方法名一致（允许一方为另一方的后缀，
+ * 如 distros.registryDetail ↔ registry:detail、metrics.sampleOverview ↔ metrics:overview、
+ * app.close ↔ app:windowClose）；组合方法走 COMPOSITIONAL 白名单。
+ */
+function assertVerbAligned(path: string, channel: string): void {
+  const apiVerb = path.split('.')[1]!.toLowerCase()
+  const chVerb = (channel.split(':')[1] ?? '').toLowerCase()
+  const aligned = apiVerb === chVerb || apiVerb.endsWith(chVerb) || chVerb.endsWith(apiVerb)
+  if (COMPOSITIONAL.has(path)) {
+    expect(
+      aligned,
+      `${path} 在 COMPOSITIONAL 白名单但动词其实一致（${channel}）— 请移出白名单`,
+    ).toBe(false)
+    return
+  }
+  expect(aligned, `命名漂移：API ${path} ↔ 通道 ${channel} 动词不一致`).toBe(true)
+}
 
 /** 待校验的返回值（afterEach 统一 await，避免把每个用例改 async） */
 const pendingResults: Array<{ path: string; result: unknown }> = []
@@ -67,6 +117,10 @@ function callAndCheck(
     expectedChannel,
     ...expectedArgs,
   )
+  // 防漂移：API 方法名 ↔ 通道动词一致（命名漂移在此逐调用点即红）
+  const key = normPath(path)
+  invokedByPath.set(key, expectedChannel)
+  assertVerbAligned(key, expectedChannel)
   if (expectedArgs.length === 1) {
     // 参数形状必须通过 ipc-schema 校验（契约与校验零漂移）
     expect(() => parseIpcArgs(expectedChannel, expectedArgs)).not.toThrow()
@@ -74,6 +128,10 @@ function callAndCheck(
 }
 
 describe('preload 契约', () => {
+  it('contextBridge 桥名必须是 wslAPI（Window.wslAPI 类型契约的运行时锚点）', () => {
+    expect(exposedName).toBe('wslAPI')
+  })
+
   it('exposed API 面与契约清单零漂移', () => {
     // 新增 preload 域/方法而不补契约测试时，本用例必须红
     expect(Object.keys(exposed).sort()).toEqual(
@@ -148,7 +206,7 @@ describe('preload 契约', () => {
         'shutdown',
         'start',
         'terminate',
-        'uninstall',
+        'unregister',
       ].sort(),
     )
     expect(Object.keys(exposed.meta).sort()).toEqual(['get', 'set'])
@@ -221,8 +279,8 @@ describe('preload 契约', () => {
       { name: 'U', version: 2 },
     )
     callAndCheck(
-      'distros.uninstall',
-      () => exposed.distros.uninstall('U'),
+      'distros.unregister',
+      () => exposed.distros.unregister('U'),
       CH.distrosUnregister,
       'U',
     )
@@ -243,11 +301,11 @@ describe('preload 契约', () => {
     }
     callAndCheck('meta.set', () => exposed.meta.set(meta), CH.metaSet, meta)
     callAndCheck('metrics.sample', () => exposed.metrics.sample('U'), CH.metricsSample, 'U')
+    // 全局概览走独立通道 metrics:overview（单通道双返回形状已拆 — review 契约清晰化）
     callAndCheck(
       'metrics.sampleOverview',
       () => exposed.metrics.sampleOverview(),
-      CH.metricsSample,
-      '*',
+      CH.metricsOverview,
     )
   })
 
@@ -292,6 +350,14 @@ describe('preload 契约', () => {
       CH.ioCleanupBackups,
       { keep: 3 },
     )
+    // keep 可选：无参调用只发 {}，缺省 5 由 ipc-schema 默认值统一兜底（preload 不再抄 5）
+    callAndCheck(
+      'io.cleanupBackups 无参',
+      () => exposed.io.cleanupBackups(),
+      CH.ioCleanupBackups,
+      {},
+    )
+    expect(parseIpcArgs(CH.ioCleanupBackups, [{}])).toEqual({ keep: 5 })
   })
 
   it('wslconf / actions / fs 域（M5）', () => {
@@ -326,7 +392,7 @@ describe('preload 契约', () => {
       data: 'y',
     })
     callAndCheck(
-      'fs.reveal',
+      'fs.revealInExplorer',
       () => exposed.fs.revealInExplorer('U', '/etc'),
       CH.fsRevealInExplorer,
       {
@@ -438,12 +504,12 @@ describe('preload 契约', () => {
     callAndCheck(
       'diagnostics.openLogsDir',
       () => exposed.diagnostics.openLogsDir(),
-      CH.appOpenLogsDir,
+      CH.diagnosticsOpenLogsDir,
     )
     callAndCheck(
       'diagnostics.exportPackage',
       () => exposed.diagnostics.exportPackage(),
-      CH.appExportDiagnostics,
+      CH.diagnosticsExportPackage,
       {},
     )
     callAndCheck('app.signatureStatus', () => exposed.app.signatureStatus(), CH.appSignatureStatus)
@@ -503,6 +569,77 @@ describe('preload 契约', () => {
         channel,
         handler,
       ])
+    }
+  })
+
+  it('类型精度钉子：terminal 返回 PtySessionInfo 形状、save 系返回配置文件形状、keep 可选', async () => {
+    // —— 类型层（vue-tsc 强制；返回类型漂移/丢字段即红）——
+    const sessionPin: Awaited<ReturnType<WslApi['terminal']['create']>> = {
+      ptyId: 'p1',
+      distro: 'U',
+      shell: '/bin/sh',
+      cwd: '/tmp',
+      createdAt: 123,
+    }
+    const listPin: Awaited<ReturnType<WslApi['terminal']['list']>>[number] = {
+      ptyId: 'p1',
+      distro: 'U',
+      shell: '/bin/sh',
+      createdAt: 123,
+    }
+    const actionsSaved: Awaited<ReturnType<WslApi['actions']['save']>> = {
+      $schemaVersion: 1,
+      actions: [],
+    }
+    const networkSaved: Awaited<ReturnType<WslApi['network']['saveRules']>> = {
+      $schemaVersion: 1,
+      portForwarding: [],
+      proxy: { useWindowsProxy: false, httpProxy: '', httpsProxy: '', noProxy: '' },
+    }
+    // 精确类型可直接取字段（若收窄为 unknown 会在编译期红）
+    expect(actionsSaved.actions).toEqual([])
+    expect(networkSaved.portForwarding).toEqual([])
+    // keep? 可选：空对象与显式 keep 都合法（keep 若变回必填，`{}` 会红）
+    const keepEmpty: Parameters<WslApi['io']['cleanupBackups']>[0] = {}
+    const keepExplicit: Parameters<WslApi['io']['cleanupBackups']>[0] = { keep: 3, dir: 'D:\\b' }
+    expect(keepEmpty).toEqual({})
+    expect(keepExplicit.keep).toBe(3)
+
+    // —— 运行时层：完整形状不被 preload 吞掉（cwd/createdAt 等字段透传）——
+    invoke.mockResolvedValue(sessionPin)
+    await expect(exposed.terminal.create({ distro: 'U', cols: 80, rows: 24 })).resolves.toEqual(
+      sessionPin,
+    )
+    invoke.mockResolvedValue([listPin])
+    await expect(exposed.terminal.list()).resolves.toEqual([listPin])
+    invoke.mockResolvedValue(actionsSaved)
+    await expect(exposed.actions.save([])).resolves.toEqual(actionsSaved)
+    invoke.mockResolvedValue(networkSaved)
+    await expect(exposed.network.saveRules([])).resolves.toEqual(networkSaved)
+    await expect(exposed.network.saveProxy(networkSaved.proxy)).resolves.toEqual(networkSaved)
+  })
+
+  /**
+   * 末位用例（必须保持最后）：汇总前序 callAndCheck 的路径 → 通道映射，
+   * 1) 全 API 面每个 invoke 方法都被契约调用覆盖（漏测即红）
+   * 2) COMPOSITIONAL 白名单恰好等于「复用 config 通道」的组合方法，且其中无动词一致项
+   */
+  it('API ↔ 通道全面对账：契约覆盖零缺口、命名漂移零容忍', () => {
+    const surface: string[] = []
+    for (const [domain, obj] of Object.entries(exposed)) {
+      for (const key of Object.keys(obj as Record<string, unknown>)) {
+        if (isEventMethod(key)) continue
+        surface.push(`${domain}.${key}`)
+      }
+    }
+    expect([...invokedByPath.keys()].sort(), '存在未被 callAndCheck 覆盖的 API 方法').toEqual(
+      [...surface].sort(),
+    )
+    for (const path of COMPOSITIONAL) {
+      const ch = invokedByPath.get(path)
+      expect(ch, `COMPOSITIONAL 白名单成员 ${path} 未被契约调用`).toBeTruthy()
+      expect([CH.configGet, CH.configSet], `${path} 只应复用 config 通道`).toContain(ch)
+      assertVerbAligned(path, ch!)
     }
   })
 })

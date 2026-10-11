@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { defaultConfig, appSettingsSchema } from '../src/config-schema'
+import { defaultConfig, appSettingsSchema, uiStateFileSchema } from '../src/config-schema'
 import { migrateConfig } from '../src/config-migrations'
+import { sanitizeWithSchema } from '../src/schema-sanitize'
+import { DEFAULT_BACKUP_KEEP, DEFAULT_POLL_INTERVAL_MS } from '../src/constants'
 import { createAppError, ERROR_CATALOG } from '../src/errors'
 
 describe('config schema', () => {
@@ -16,6 +18,51 @@ describe('config schema', () => {
     expect(parsed.general.accent).toBe('ocean')
     expect(parsed.general.pollIntervalMs).toBe(5000)
     expect(parsed.terminal.fontSize).toBe(14)
+  })
+
+  it('默认值单源：pollIntervalMs / keepRecent 引用 shared 常量（禁再抄 5000/5）', () => {
+    const s = defaultConfig('settings')
+    expect(DEFAULT_POLL_INTERVAL_MS).toBe(5000)
+    expect(DEFAULT_BACKUP_KEEP).toBe(5)
+    expect(s.general.pollIntervalMs).toBe(DEFAULT_POLL_INTERVAL_MS)
+    expect(s.backup.keepRecent).toBe(DEFAULT_BACKUP_KEEP)
+  })
+})
+
+describe('uiState 幽灵字段根治', () => {
+  it('旧配置带 lastSelectedDistro/activeView/tableSort 被 sanitize 剥离且不报错', () => {
+    const legacy = {
+      $schemaVersion: 1,
+      window: { width: 900, height: 600, x: 1, y: 2, maximized: true },
+      lastSelectedDistro: 'Ubuntu-22.04',
+      activeView: 'dashboard',
+      tableSort: { key: 'name', dir: 'desc' },
+      sidebarCollapsed: true,
+      recentCommands: ['wsl --list'],
+    }
+    const out = sanitizeWithSchema(
+      uiStateFileSchema,
+      legacy,
+      defaultConfig('uiState') as any,
+    ) as Record<string, unknown>
+    expect(out.lastSelectedDistro).toBeUndefined()
+    expect(out.activeView).toBeUndefined()
+    expect(out.tableSort).toBeUndefined()
+    // 存活字段原样保留
+    expect(out.sidebarCollapsed).toBe(true)
+    expect(out.recentCommands).toEqual(['wsl --list'])
+    expect(out.window).toMatchObject({ width: 900, maximized: true })
+  })
+
+  it('parse 同样剥离幽灵键（非 strict，剩余键面固定）', () => {
+    const parsed = uiStateFileSchema.parse({
+      lastSelectedDistro: 'U',
+      activeView: 'x',
+      tableSort: { key: 'name', dir: 'asc' },
+    })
+    expect(Object.keys(parsed).sort()).toEqual(
+      ['$schemaVersion', 'recentCommands', 'sidebarCollapsed', 'window'].sort(),
+    )
   })
 })
 

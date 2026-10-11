@@ -19,8 +19,12 @@ import { useSettingsStore } from '../stores/settings'
 import { useUpdateStore } from '../stores/update'
 import { errorLine } from '../composables/useAppError'
 import { HOTKEY_TABLE } from '../composables/useHotkeys'
-import { ACCENT_GRADIENTS, ACCENT_PRIMARY } from '@shared/constants'
-import type { AccentName, SignatureStatus } from '@shared/types'
+import {
+  ACCENT_GRADIENTS,
+  ACCENT_PRIMARY,
+  type AccentName,
+  type SignatureStatus,
+} from '@wslpilot/shared'
 import { applyAccentToDom, Kbd } from '@wslpilot/ui'
 
 const settings = useSettingsStore()
@@ -190,9 +194,10 @@ async function onDownloadUpdate() {
   }
 }
 
-function onInstallUpdate() {
+async function onInstallUpdate() {
   try {
-    update.install()
+    // install() 是异步拒绝（如提权失败/安装器报错）：不 await 则 catch 形同虚设
+    await update.install()
   } catch (e) {
     message.error(errorLine(e, '安装更新失败'))
   }
@@ -664,6 +669,11 @@ async function exportDiagnostics() {
             {{ Math.round(update.percent) }}%
           </n-tag>
         </n-space>
+        <!-- 更新内容（主进程 UpdateState.releaseNotes 有值才展示） -->
+        <div v-if="update.releaseNotes" class="release-notes">
+          <div class="label">更新内容</div>
+          <pre class="release-body">{{ update.releaseNotes }}</pre>
+        </div>
       </div>
 
       <n-divider />
@@ -858,6 +868,25 @@ async function exportDiagnostics() {
 
 .about-section {
   padding: 4px 0;
+}
+
+.release-notes {
+  margin-top: 12px;
+}
+
+.release-body {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-sunken);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow: auto;
 }
 
 .smartscreen-note {

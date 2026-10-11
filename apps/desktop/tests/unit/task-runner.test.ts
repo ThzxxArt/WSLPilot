@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createTaskRunner, type TaskRecord } from '../../src/main/services/task-runner'
+import {
+  createTaskRunner,
+  type TaskControl,
+  type TaskRecord,
+} from '../../src/main/services/task-runner'
 import { createAppError, type TaskProgress } from '@wslpilot/shared'
 
 function logger() {
@@ -62,7 +66,11 @@ describe('TaskRunner', () => {
   })
 
   it('clamps reported percent to 0-100 and ignores non-finite', async () => {
-    const { runner } = makeRunner()
+    const observed: Array<number | null> = []
+    const runner = createTaskRunner({
+      logger: logger(),
+      onProgress: (p) => observed.push(p.percent),
+    })
     const handle = runner.start({
       type: 'export',
       message: 'm',
@@ -70,10 +78,23 @@ describe('TaskRunner', () => {
         ctl.report(250)
         ctl.report(-20)
         ctl.report(Number.NaN)
+        ctl.report(Number.POSITIVE_INFINITY)
+        ctl.report(50)
       },
     })
     const rec = await runner.waitFor(handle.taskId)
-    // 结束即 100；中途 clamp 记录在 logs/percent 路径（NaN 被忽略）
+    // 每一次 onProgress 上报的 percent 必须有限且落在 [0,100]（null = 尚无估算）
+    for (const p of observed) {
+      if (p === null) continue
+      expect(Number.isFinite(p)).toBe(true)
+      expect(p).toBeGreaterThanOrEqual(0)
+      expect(p).toBeLessThanOrEqual(100)
+    }
+    // 去重后的 percent 状态链：250→100、-20→0 的 clamp 真实生效；
+    // NaN/Infinity 被丢弃且不改写当前值（期间仍为 0），report(50) 照常生效，
+    // 终态 success 置 100
+    const states = observed.filter((v, i, a) => i === 0 || v !== a[i - 1])
+    expect(states).toEqual([null, 100, 0, 50, 100])
     expect(rec.percent).toBe(100)
   })
 
@@ -298,16 +319,24 @@ describe('TaskRunner', () => {
 
   it('report after settle is ignored', async () => {
     const { runner, events } = makeRunner()
+    let ctlRef: TaskControl | undefined
     const handle = runner.start({
       type: 'export',
       message: 'm',
-      run: async () => {},
+      run: async (ctl) => {
+        ctlRef = ctl
+      },
     })
     await runner.waitFor(handle.taskId)
     const count = events.length
-    // 无法拿到 ctl，验证 settle 后事件不再增长即可
+    // settle 后显式再上报：事件不得增长、记录不得被改写
+    ctlRef!.report(50, 'late')
     expect(events.length).toBe(count)
-    expect(runner.get(handle.taskId)?.status).toBe('success')
+    expect(runner.get(handle.taskId)).toMatchObject({
+      status: 'success',
+      percent: 100,
+      message: 'm',
+    })
   })
 
   it('tolerates onProgress / onFinish listener throws', async () => {

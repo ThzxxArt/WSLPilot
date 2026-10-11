@@ -206,7 +206,7 @@ export interface Metrics {
   sampledAt: string
 }
 
-/** 驾驶舱全局概览指标（metrics:sample('*') 返回） */
+/** 驾驶舱全局概览指标（metrics:overview 返回） */
 export interface OverviewMetrics {
   runningCount: number
   totalCount: number
@@ -334,10 +334,7 @@ export interface ConfigMap {
   uiState: {
     $schemaVersion: number
     window: { width: number; height: number; x: number; y: number; maximized: boolean }
-    lastSelectedDistro: string
     sidebarCollapsed: boolean
-    activeView: string
-    tableSort: { key: string; dir: 'asc' | 'desc' }
     recentCommands: string[]
   }
   state: {

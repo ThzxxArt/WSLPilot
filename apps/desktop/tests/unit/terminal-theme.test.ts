@@ -5,7 +5,7 @@ import {
   DEFAULT_TERMINAL_PREFS,
   resolveTerminalTheme,
 } from '../../src/renderer/features/terminal/theme'
-import { defaultConfig } from '@shared/config-schema'
+import { defaultConfig } from '@wslpilot/shared'
 
 describe('terminal theme', () => {
   it('light theme has readable dark-on-light colors', () => {

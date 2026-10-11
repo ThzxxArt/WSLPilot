@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 import {
   EMPTY_OVERVIEW,
-  formatKb,
   formatKbPair,
+  toAppError,
+  type AppError,
   type OverviewMetrics,
   type Metrics,
 } from '@wslpilot/shared'
-import { toAppError, type AppError } from '@shared/errors'
 
 /** 迷你趋势图采样点（保留最近 20 个） */
 const MAX_POINTS = 20
@@ -14,7 +14,6 @@ const MAX_POINTS = 20
 export const useMetricsStore = defineStore('metrics', {
   state: () => ({
     overview: { ...EMPTY_OVERVIEW, perDistro: {} } as OverviewMetrics,
-    loading: false,
     lastError: null as AppError | null,
     history: {
       cpu: [] as number[],
@@ -22,6 +21,8 @@ export const useMetricsStore = defineStore('metrics', {
       disk: [] as number[],
       running: [] as number[],
     },
+    /** 代际守卫：并发 sample 时只认最新一次发起的响应 */
+    sampleGen: 0,
   }),
 
   getters: {
@@ -32,18 +33,18 @@ export const useMetricsStore = defineStore('metrics', {
 
   actions: {
     async sample() {
-      this.loading = true
+      const gen = ++this.sampleGen
       this.lastError = null
       try {
         const raw = (await window.wslAPI.metrics.sampleOverview()) as OverviewMetrics
+        if (gen !== this.sampleGen) return
         if (raw && typeof raw === 'object' && 'runningCount' in raw) {
           this.overview = { ...raw, perDistro: raw.perDistro ?? {} }
           this.pushHistory(this.overview)
         }
       } catch (e) {
+        if (gen !== this.sampleGen) return
         this.lastError = toAppError(e)
-      } finally {
-        this.loading = false
       }
     },
 
@@ -69,5 +70,3 @@ export const useMetricsStore = defineStore('metrics', {
     },
   },
 })
-
-export { formatKb, formatKbPair }

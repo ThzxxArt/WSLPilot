@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NSwitch, NTag, NTooltip } from 'naive-ui'
-import { EmptyState } from '@ui/components'
+import { EmptyState } from '@wslpilot/ui'
 import { canApplyRule, type NetworkStatus, type PortForwardRule } from '@wslpilot/shared'
 import {
   formatRuleRange,
@@ -137,9 +137,19 @@ const stateType = (s: RuleSystemState): 'success' | 'warning' | 'error' | 'defau
                 </template>
                 {{ row.canApply ? row.applyCommand : 'netsh portproxy 仅支持 TCP' }}
               </n-tooltip>
-              <n-button size="tiny" secondary @click="emit('removeSystem', row.rule)">
-                从系统移除
-              </n-button>
+              <n-tooltip>
+                <template #trigger>
+                  <n-button
+                    size="tiny"
+                    secondary
+                    :disabled="!row.canApply"
+                    @click="emit('removeSystem', row.rule)"
+                  >
+                    从系统移除
+                  </n-button>
+                </template>
+                {{ row.canApply ? '从 netsh 转发表删除该监听' : 'netsh portproxy 仅支持 TCP' }}
+              </n-tooltip>
               <n-button size="tiny" quaternary @click="emit('edit', row.rule)">编辑</n-button>
               <n-button size="tiny" quaternary type="error" @click="emit('remove', row.rule)">
                 ⚠ 删除

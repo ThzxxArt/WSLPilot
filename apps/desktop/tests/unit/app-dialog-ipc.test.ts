@@ -56,6 +56,24 @@ describe('app dialog handlers (M4 路径选择)', () => {
     vi.clearAllMocks()
   })
 
+  it('registerAppHandlers 注册面：诊断通道动词与 API 一致且不挂在 app: 域（防命名漂移）', () => {
+    const { handlers } = register()
+    const names = [...handlers.keys()]
+    for (const [channel, apiVerb] of [
+      [CH.diagnosticsExportPackage, 'exportPackage'],
+      [CH.diagnosticsOpenLogsDir, 'openLogsDir'],
+    ] as const) {
+      // 通道尾段动词 === preload diagnostics.* API 方法名
+      expect(channel.split(':')[1], `${channel} 动词应等于 ${apiVerb}`).toBe(apiVerb)
+      expect(names, `handler 未注册 ${channel}`).toContain(channel)
+    }
+    // 历史漂移命名（app:exportDiagnostics / app:openLogsDir）不得复活
+    expect(names).not.toContain('app:exportDiagnostics')
+    expect(names).not.toContain('app:openLogsDir')
+    // 签名状态仍是 app: 域
+    expect(names).toContain(CH.appSignatureStatus)
+  })
+
   it('pickDirectory returns selected path', async () => {
     dialogMocks.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['D:\\sel'] })
     const { handlers, ctx } = register()

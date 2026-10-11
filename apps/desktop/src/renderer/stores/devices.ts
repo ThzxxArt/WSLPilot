@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
-import type { TaskHandle, UsbDevice, UsbipdStatus } from '@wslpilot/shared'
-import { toAppError, type AppError } from '@shared/errors'
+import {
+  toAppError,
+  type AppError,
+  type TaskHandle,
+  type UsbDevice,
+  type UsbipdStatus,
+} from '@wslpilot/shared'
 import { useTasksStore } from './tasks'
 
 /**
@@ -17,7 +22,6 @@ export const useDevicesStore = defineStore('devices', {
   }),
 
   getters: {
-    byBusId: (s) => (busId: string) => s.items.find((d) => d.busId === busId) ?? null,
     attachedCount: (s) => s.items.filter((d) => d.state === 'attached').length,
     sharedCount: (s) => s.items.filter((d) => d.state === 'shared').length,
   },

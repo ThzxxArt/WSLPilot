@@ -166,7 +166,7 @@ WSLPilot 要求三层同时达标：功能层是地基，行为层是好用的�
 | 状态管理    | **Pinia**                                                 | 轻量，与 Vue3 深度集成，支持持久化插件                                                                |
 | UI 组件库   | **Naive UI**                                              | Vue 3 原生、TypeScript 友好、组件齐全、可深度定制；通过 `themeOverrides` 把设计令牌注入 Naive UI 主题 |
 | 样式方案    | **CSS 变量（设计令牌）+ SCSS + Naive UI 主题变量**        | 设计令牌驱动 Naive UI 主题，业务样式用 SCSS，避免 CSS-in-JS 运行时开销                                |
-| 图标        | **Iconify + Lucide**（按需）                              | 风格统一、可换色、体积可控                                                                            |
+| 图标        | **emoji + 内联 SVG**（零图标库依赖）                      | 侧栏/卡片用 emoji，装饰图形用内联 SVG，无需额外依赖与字体                                             |
 | 动效        | **CSS Transition + Web Animations API + 可选 Motion One** | 轻量、GPU 加速、可降级                                                                                |
 | 终端        | **node-pty + xterm.js**                                   | VS Code 集成终端同源，ConPTY 底层，真伪终端                                                           |
 | 配置解析    | **jsonc-parser**                                          | 支持注释/尾逗号，能返回语法错误位置                                                                   |
@@ -177,7 +177,7 @@ WSLPilot 要求三层同时达标：功能层是地基，行为层是好用的�
 | 日志        | **自研轻量 logger**（`@wslpilot/kit`）                    | 结构化 JSON 行文本日志、按天滚动、级别可控（非数据库）；如需可替换为 pino                             |
 | 测试        | **Vitest + @vue/test-utils + Playwright**                 | 单元/组件/E2E 全覆盖                                                                                  |
 | 打包        | **electron-builder**（NSIS + portable）                   | 安装包与免安装版                                                                                      |
-| 代码质量    | **ESLint + Prettier + Stylelint + commitlint + husky**    | 工程规范                                                                                              |
+| 代码质量    | **ESLint + Prettier + Stylelint**                         | 工程规范；提交信息遵循 Conventional Commits 约定（暂不强制校验）                                      |
 | 版本管理    | **changesets**                                            | 多包版本与 changelog                                                                                  |
 
 ### 3.1 为什么"不用数据库"
@@ -222,7 +222,7 @@ flowchart TB
     C7[FsBridge]
     C8[NetworkService]
     C9[ActionRunner]
-    C10[SystemService 托盘/通知/单实例]
+    C10[Tray 托盘/单实例聚焦]
     C11[ElevationHelper 客户端]
   end
 
@@ -248,7 +248,7 @@ flowchart TB
 
 - **渲染进程**：只负责视图与交互，通过 `window.wslAPI` 发起请求，不 import 任何 Node 模块。
 - **预加载脚本**：唯一内外边界，用 `contextBridge.exposeInMainWorld` 暴露收敛的、带类型的方法。
-- **主进程**：业务与系统能力的唯一实现地，分若干 Service，通过依赖注入装配。
+- **主进程**：业务与系统能力的唯一实现地，分若干 Service，在 `index.ts` 的 `bootstrap()` 以工厂函数装配（依赖经参数注入，无独立 DI 容器模块）。
 
 ### 4.3 关键设计原则
 
@@ -270,26 +270,19 @@ WSLPilot/
 │  └─ config.json
 ├─ .github/
 │  └─ workflows/
-│     ├─ ci.yml                    # lint + typecheck + test
+│     ├─ ci.yml                    # lint + format + typecheck + test（85%/70% 门禁）+ build + smoke + e2e
 │     ├─ release.yml               # 打包 + 签名 + 发布
 │     └─ build-arm64.yml
-├─ .husky/                         # Git hooks
-│  ├─ pre-commit                   # lint-staged
-│  └─ commit-msg                   # commitlint
-├─ .vscode/
-│  ├─ settings.json
-│  ├─ extensions.json
-│  └─ launch.json
-├─ build/                          # electron-builder 资源
+├─ build/                          # electron-builder 资源（buildResources，仅图标）
 │  ├─ icon.ico
 │  ├─ icon.png
-│  ├─ installer.nsh                # NSIS 自定义脚本
-│  └─ entitlements.mac.plist
+│  └─ icon-256.png
+├─ resources/                      # 应用图标源（多尺寸 PNG/ICO）
 ├─ docs/                           # 项目文档
 │  ├─ architecture.md
 │  ├─ design-system.md
-│  ├─ contributing.md
-│  └─ config-reference.md
+│  ├─ config-reference.md
+│  └─ testing.md
 ├─ packages/
 │  ├─ shared/                      # @wslpilot/shared —— 跨进程共享
 │  │  ├─ package.json
@@ -301,57 +294,67 @@ WSLPilot/
 │  │     ├─ config-schema.ts       # zod schema + 默认值
 │  │     ├─ config-migrations.ts   # 版本迁移函数链
 │  │     ├─ ipc-schema.ts          # 各通道入参 zod
+│  │     ├─ commands.ts            # 等价命令构建
+│  │     ├─ actions.ts             # 动作模型/变量替换
+│  │     ├─ network.ts             # 端口转发/代理模型与校验
+│  │     ├─ usbipd.ts              # usbipd 解析与命令构建
+│  │     ├─ wslconf.ts             # wsl.conf INI 行级模型
+│  │     ├─ diagnostics.ts         # 诊断包脱敏规则
+│  │     ├─ elevation.ts           # 提权 op 白名单与 op→argv 映射
+│  │     ├─ format.ts              # 展示格式化/发行版图标 emoji
+│  │     ├─ fuzzy.ts               # 命令面板模糊打分
+│  │     ├─ schema-sanitize.ts     # schema 清洗
+│  │     ├─ tokens.ts              # 设计令牌唯一事实源
 │  │     └─ constants.ts
 │  ├─ ui/                          # @wslpilot/ui —— 设计令牌与 Naive UI 主题
 │  │  ├─ package.json
-│  │  ├─ src/
-│  │  │  ├─ index.ts
-│  │  │  ├─ tokens/                # 设计令牌（唯一事实源）
-│  │  │  │  ├─ colors.ts
-│  │  │  │  ├─ spacing.ts
-│  │  │  │  ├─ typography.ts
-│  │  │  │  ├─ radius.ts
-│  │  │  │  ├─ shadow.ts
-│  │  │  │  ├─ motion.ts
-│  │  │  │  └─ index.ts
-│  │  │  ├─ naive/                 # Naive UI 主题适配层
-│  │  │  │  ├─ theme-overrides.ts  # 令牌 → Naive UI themeOverrides
-│  │  │  │  ├─ global-theme.ts     # NConfigProvider 用的全局主题
-│  │  │  │  └─ index.ts
-│  │  │  ├─ styles/                # 全局样式
-│  │  │  │  ├─ base.scss
-│  │  │  │  ├─ tokens.scss         # 令牌 → CSS 变量
-│  │  │  │  ├─ theme.scss          # 浅色主题令牌映射
-│  │  │  │  ├─ naive-bridge.scss   # 少量 Naive 组件微调
-│  │  │  │  ├─ reset.scss
-│  │  │  │  └─ utilities.scss
-│  │  │  ├─ components/            # 业务组合组件（基于 Naive UI 封装）
-│  │  │  │  ├─ DistroCard/         # 发行版卡片
-│  │  │  │  ├─ MetricCard/         # 指标卡（含 Sparkline）
-│  │  │  │  ├─ StatusDot/          # 呼吸脉冲状态点
-│  │  │  │  ├─ ProgressRing/       # 渐变环形进度
-│  │  │  │  ├─ Sparkline/          # 迷你趋势图
-│  │  │  │  ├─ CommandPalette/     # ⌘K 命令面板
-│  │  │  │  ├─ TerminalPane/       # xterm 终端面板
-│  │  │  │  ├─ CodeEditor/         # 配置文本编辑器
-│  │  │  │  ├─ Kbd/                # 快捷键提示
-│  │  │  │  └─ EmptyState/         # 空状态插画
-│  │  │  ├─ icons/                 # 图标封装（Iconify / Lucide）
-│  │  │  ├─ composables/
-│  │  │  │  ├─ useNaiveTheme.ts    # 生成 themeOverrides
-│  │  │  │  ├─ useToast.ts         # 封装 Naive message/notification
-│  │  │  │  ├─ useHotkey.ts
-│  │  │  │  └─ useReducedMotion.ts
-│  │  │  └─ directives/
-│  │  │     └─ vTooltip.ts
-│  │  └─ showroom/                 # 组件陈列预览（Naive + 组合组件）
+│  │  └─ src/
+│  │     ├─ index.ts
+│  │     ├─ shims-vue.d.ts
+│  │     ├─ tokens/                # 设计令牌 re-export（唯一事实源在 shared/src/tokens.ts）
+│  │     │  ├─ colors.ts
+│  │     │  ├─ spacing.ts
+│  │     │  ├─ typography.ts
+│  │     │  ├─ motion.ts
+│  │     │  ├─ theme.ts
+│  │     │  └─ index.ts
+│  │     ├─ naive/                 # Naive UI 主题适配层
+│  │     │  ├─ theme-overrides.ts  # 令牌 → Naive UI themeOverrides
+│  │     │  └─ index.ts
+│  │     ├─ styles/                # 全局样式
+│  │     │  ├─ base.scss
+│  │     │  ├─ tokens.scss         # 令牌 → CSS 变量
+│  │     │  ├─ theme.scss          # 浅色主题令牌映射
+│  │     │  ├─ motion.scss         # 动效基座（涟漪/按压/FLIP/reduced-motion）
+│  │     │  ├─ utilities.scss
+│  │     │  ├─ index.scss
+│  │     │  └─ tokens.generated.scss # 由 npm run tokens 生成（不入 Git）
+│  │     ├─ components/            # 业务组合组件（基于 Naive UI 封装）
+│  │     │  ├─ DistroCard.vue      # 发行版卡片
+│  │     │  ├─ MetricCard.vue      # 指标卡
+│  │     │  ├─ StatusDot.vue       # 呼吸脉冲状态点
+│  │     │  ├─ ProgressRing.vue    # 渐变环形进度
+│  │     │  ├─ Sparkline.vue       # 迷你趋势图
+│  │     │  ├─ CodeEditor.vue      # 配置文本编辑器
+│  │     │  ├─ Kbd.vue             # 快捷键提示
+│  │     │  ├─ EmptyState.vue      # 空状态插画
+│  │     │  ├─ Skeleton.vue        # 骨架屏
+│  │     │  └─ index.ts
+│  │     ├─ composables/
+│  │     │  ├─ useNaiveTheme.ts    # 生成 themeOverrides
+│  │     │  └─ useReducedMotion.ts
+│  │     └─ directives/
+│  │        └─ vRipple.ts          # 涟漪指令
 │  └─ kit/                         # @wslpilot/kit —— 主进程工具集
 │     └─ src/
 │        ├─ index.ts
 │        ├─ exec-wsl.ts            # execFile 封装 + UTF16 解码
+│        ├─ run-tool.ts            # 控制台工具执行封装（参数数组、失败不抛）
+│        ├─ tool-output.ts         # 输出编码探测（UTF-16LE/UTF-8/GBK）
 │        ├─ atomic-write.ts        # 原子写文件
 │        ├─ jsonc.ts               # JSONC 读写
 │        ├─ paths.ts               # 路径解析
+│        ├─ zip.ts                 # 极简 ZIP 写入器（诊断包）
 │        ├─ logger.ts
 │        └─ env.ts
 ├─ apps/
@@ -359,123 +362,139 @@ WSLPilot/
 │     ├─ package.json
 │     ├─ electron.vite.config.ts
 │     ├─ electron-builder.yml
-│     ├─ index.html
+│     ├─ installer.nsh             # NSIS 自定义脚本（electron-builder `include`）
+│     ├─ tsconfig.json
 │     ├─ resources/                # 应用内静态资源
-│     │  ├─ tray/
-│     │  ├─ fonts/
-│     │  └─ distro-icons/          # 各发行版图标
+│     │  ├─ tray/                  # 托盘图标
+│     │  └─ WSLPilot-*.png         # 窗口/应用图标
 │     ├─ src/
 │     │  ├─ main/                  # 主进程
-│     │  │  ├─ index.ts            # 入口、窗口、生命周期、单实例锁
+│     │  │  ├─ index.ts            # 入口、bootstrap() 装配 Service、生命周期、单实例锁
+│     │  │  ├─ app-state.ts        # 退出状态标记（tray / index 解耦）
+│     │  │  ├─ settings-boot.ts    # app.ready 前读取启动设置（硬件加速）
 │     │  │  ├─ window/
-│     │  │  │  ├─ main-window.ts
-│     │  │  │  ├─ splash-window.ts
-│     │  │  │  └─ window-state.ts  # 尺寸位置持久化
+│     │  │  │  ├─ main-window.ts   # 窗口创建与位置/尺寸持久化（ui-state.jsonc）
+│     │  │  │  ├─ close-policy.ts  # 关闭行为（最小化到托盘 / 退出）
+│     │  │  │  └─ navigation-guard.ts # 外部导航 / window.open 守卫
 │     │  │  ├─ tray/
-│     │  │  │  └─ tray.ts
+│     │  │  │  └─ tray.ts          # 托盘与单实例聚焦
 │     │  │  ├─ ipc/
 │     │  │  │  ├─ router.ts        # 通道注册 + zod 校验
 │     │  │  │  └─ handlers/        # 各域 handler
 │     │  │  │     ├─ distros.ts
+│     │  │  │     ├─ meta.ts
 │     │  │  │     ├─ io.ts
-│     │  │  │     ├─ config.ts
-│     │  │  │     ├─ pty.ts
 │     │  │  │     ├─ fs.ts
+│     │  │  │     ├─ config.ts
+│     │  │  │     ├─ wslconf.ts
+│     │  │  │     ├─ pty.ts
 │     │  │  │     ├─ network.ts
+│     │  │  │     ├─ devices.ts
 │     │  │  │     ├─ actions.ts
-│     │  │  │     └─ app.ts
+│     │  │  │     ├─ app.ts
+│     │  │  │     └─ update.ts
 │     │  │  ├─ services/
 │     │  │  │  ├─ wsl-service.ts
 │     │  │  │  ├─ registry-service.ts
 │     │  │  │  ├─ config-service.ts
+│     │  │  │  ├─ wslconf-service.ts
 │     │  │  │  ├─ pty-manager.ts
 │     │  │  │  ├─ task-runner.ts
+│     │  │  │  ├─ spawn-task.ts
+│     │  │  │  ├─ io-service.ts
 │     │  │  │  ├─ fs-bridge.ts
+│     │  │  │  ├─ metrics-service.ts
 │     │  │  │  ├─ network-service.ts
 │     │  │  │  ├─ action-runner.ts
-│     │  │  │  └─ system-service.ts
+│     │  │  │  ├─ usbipd-service.ts
+│     │  │  │  ├─ diagnostics-service.ts
+│     │  │  │  └─ signature-service.ts
 │     │  │  ├─ elevation/
-│     │  │  │  ├─ client.ts
-│     │  │  │  └─ operations.ts    # 提权操作白名单
-│     │  │  ├─ updater/
-│     │  │  │  └─ auto-update.ts
-│     │  │  └─ di/
-│     │  │     └─ container.ts     # 依赖注入装配
+│     │  │  │  ├─ client.ts         # 提权请求客户端
+│     │  │  │  └─ helper-script.ts  # PowerShell Helper 生成（op/program 二次校验）
+│     │  │  └─ updater/
+│     │  │     └─ auto-update.ts   # electron-updater 接入
 │     │  ├─ preload/
-│     │  │  ├─ index.ts            # contextBridge
-│     │  │  └─ api/                # 按域拆分的 API
-│     │  │     ├─ distros.ts
-│     │  │     ├─ io.ts
-│     │  │     ├─ config.ts
-│     │  │     ├─ terminal.ts
-│     │  │     ├─ fs.ts
-│     │  │     └─ app.ts
+│     │  │  └─ index.ts            # contextBridge：window.wslAPI 类型化窄接口（单文件）
 │     │  └─ renderer/              # 渲染进程
 │     │     ├─ main.ts
 │     │     ├─ App.vue
+│     │     ├─ index.html
+│     │     ├─ env.d.ts
 │     │     ├─ router/
 │     │     │  └─ index.ts
 │     │     ├─ layouts/
 │     │     │  ├─ DefaultLayout.vue
-│     │     │  ├─ SidebarNav.vue
-│     │     │  └─ TitleBar.vue     # 自定义标题栏（frameless）
+│     │     │  ├─ SidebarNav.vue     # 侧栏导航（菜单文案以此为准）
+│     │     │  ├─ StatusBar.vue      # 长任务常驻进度
+│     │     │  └─ TitleBar.vue       # 自定义标题栏（frameless）
 │     │     ├─ views/
 │     │     │  ├─ DashboardView.vue
 │     │     │  ├─ DistrosView.vue
-│     │     │  ├─ DistroDetailView.vue
 │     │     │  ├─ TerminalView.vue
 │     │     │  ├─ NetworkView.vue
 │     │     │  ├─ BackupView.vue
 │     │     │  ├─ DevicesView.vue
-│     │     │  ├─ SettingsView.vue
-│     │     │  └─ OnboardingView.vue
+│     │     │  └─ SettingsView.vue
 │     │     ├─ features/           # 按业务域组织的组合
-│     │     │  ├─ dashboard/
-│     │     │  │  ├─ MetricCard.vue
-│     │     │  │  ├─ DistroCard.vue
-│     │     │  │  └─ QuickActions.vue
-│     │     │  ├─ distro/
+│     │     │  ├─ distros/
+│     │     │  │  ├─ DistroDetailModal.vue  # 发行版详情（弹窗，四标签）
+│     │     │  │  └─ InstallDistroModal.vue # 安装向导
+│     │     │  ├─ actions/
+│     │     │  │  └─ ActionsPanel.vue
 │     │     │  ├─ terminal/
 │     │     │  │  ├─ TerminalTabs.vue
 │     │     │  │  ├─ XtermPane.vue
-│     │     │  │  └─ TerminalToolbar.vue
+│     │     │  │  ├─ TerminalToolbar.vue
+│     │     │  │  ├─ input-chunk.ts
+│     │     │  │  └─ theme.ts
 │     │     │  ├─ config/
-│     │     │  │  ├─ ConfigEditor.vue
-│     │     │  │  ├─ WslConfForm.vue
-│     │     │  │  └─ RawJsonEditor.vue
+│     │     │  │  ├─ WslConfPanel.vue
+│     │     │  │  └─ ConflictResolver.vue
+│     │     │  ├─ fs/
+│     │     │  │  └─ FileBrowserPanel.vue
 │     │     │  ├─ network/
+│     │     │  │  ├─ PortForwardTable.vue
+│     │     │  │  ├─ PortForwardForm.vue
+│     │     │  │  ├─ MirrorModeCard.vue
+│     │     │  │  ├─ ProxyPanel.vue
+│     │     │  │  └─ forms.ts
 │     │     │  ├─ backup/
 │     │     │  │  ├─ ExportWizard.vue
-│     │     │  │  └─ ImportWizard.vue
+│     │     │  │  ├─ ImportWizard.vue
+│     │     │  │  ├─ MoveWizard.vue
+│     │     │  │  └─ forms.ts
+│     │     │  ├─ tasks/
+│     │     │  │  └─ TaskDrawer.vue
 │     │     │  └─ command/
-│     │     │     └─ CommandPalette.vue
-│     │     ├─ stores/
+│     │     │     ├─ CommandPalette.vue
+│     │     │     └─ palette.ts
+│     │     ├─ stores/             # Pinia
 │     │     │  ├─ distros.ts
+│     │     │  ├─ metrics.ts
+│     │     │  ├─ terminal.ts
 │     │     │  ├─ settings.ts
 │     │     │  ├─ tasks.ts
-│     │     │  ├─ terminal.ts
-│     │     │  ├─ ui.ts
-│     │     │  └─ toast.ts
-│     │     ├─ composables/
-│     │     │  ├─ useDistros.ts
-│     │     │  ├─ usePolling.ts
-│     │     │  ├─ useTerminal.ts
-│     │     │  ├─ useTaskProgress.ts
-│     │     │  └─ useCommandRegistry.ts
-│     │     ├─ assets/
-│     │     │  ├─ images/
-│     │     │  └─ fonts/
-│     │     └─ workers/            # Web Worker（大列表解析等）
+│     │     │  ├─ network.ts
+│     │     │  ├─ devices.ts
+│     │     │  ├─ actions.ts
+│     │     │  └─ update.ts
+│     │     └─ composables/
+│     │        ├─ usePolling.ts
+│     │        ├─ useTaskProgress.ts
+│     │        ├─ useCommandPalette.ts
+│     │        ├─ useHotkeys.ts
+│     │        ├─ useAppError.ts
+│     │        ├─ useWslConf.ts
+│     │        └─ state-label.ts
 │     ├─ tests/
 │     │  ├─ unit/
 │     │  ├─ component/
 │     │  └─ e2e/
 │     └─ tsconfig.json
 ├─ scripts/
-│  ├─ dev.mjs
-│  ├─ build.mjs
-│  ├─ gen-tokens.ts                # 设计令牌 → CSS 变量
-│  └─ notarize.mjs
+│  ├─ gen-tokens.ts                # 设计令牌 → CSS 变量（npm run tokens）
+│  └─ smoke-product.mjs            # 产物模块图冒烟（npm run smoke:product）
 ├─ configs-samples/                # 示例配置（文档用）
 │  ├─ settings.jsonc
 │  ├─ distros.jsonc
@@ -486,10 +505,16 @@ WSLPilot/
 ├─ .prettierrc
 ├─ .stylelintrc.json
 ├─ .gitignore
-├─ commitlint.config.cjs
 ├─ package.json
+├─ package-lock.json
+├─ tsconfig.base.json
+├─ playwright.config.ts
+├─ vitest.config.ts
+├─ vitest.component.config.ts
+├─ CONTRIBUTING.md
 ├─ README.md
 ├─ CHANGELOG.md
+├─ WSLPilot-设计书.md              # 本文档
 └─ LICENSE
 ```
 
@@ -509,13 +534,13 @@ WSLPilot/
 {
   "name": "wslpilot",
   "private": true,
-  "packageManager": "npm@10",
+  "packageManager": "npm@12",
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "dev": "npm run dev --workspace @wslpilot/desktop",
     "build": "npm run build --workspaces --if-present && npm run package --workspace @wslpilot/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint . --ext .ts,.vue && stylelint \"**/*.{scss,css,vue}\"",
+    "lint": "eslint . --ext .ts,.vue,.mjs && stylelint \"**/*.{scss,css,vue}\"",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -528,8 +553,8 @@ WSLPilot/
 
 ### 5.3 分支与提交规范
 
-- **分支**：`main`（稳定）、`dev`（集成）、`feat/*`、`fix/*`、`chore/*`。
-- **提交**：Conventional Commits（`feat:`、`fix:`、`docs:`、`style:`、`refactor:`、`perf:`、`test:`、`chore:`），由 commitlint + husky 强制。
+- **分支**：`master`（稳定）、`feat/*`、`fix/*`、`chore/*`。
+- **提交**：Conventional Commits（`feat:`、`fix:`、`docs:`、`style:`、`refactor:`、`perf:`、`test:`、`chore:`）约定（暂不强制校验，未接入 commitlint/husky）。
 - **发版**：changesets 生成 changelog 与版本号。
 - **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**——小版本递增表达功能累积，里程碑交付不以 1.0.0 计。
 
@@ -606,6 +631,7 @@ WSLPilot/
     "confirmDestructive": true,
     "logLevel": "info", // trace | debug | info | warn | error
     "hardwareAcceleration": true,
+    "autoUpdate": true, // 启动时后台检查更新（M7）
   },
 }
 ```
@@ -865,6 +891,7 @@ export interface AppSettings {
     confirmDestructive: boolean
     logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error'
     hardwareAcceleration: boolean
+    autoUpdate: boolean
   }
 }
 
@@ -1137,10 +1164,14 @@ function createSession(o: { distro: string; shell?: string; cwd?: string; cols: 
 
 令牌分三层：**原始令牌（Primitive）→ 语义令牌（Semantic）→ 组件令牌（Component）**。Naive UI 组件通过 `themeOverrides` 消费语义令牌，业务样式通过 CSS 变量消费同一套令牌；强调色切换只改语义令牌映射。
 
+> **唯一事实源是 `packages/shared/src/tokens.ts`**（TypeScript 侧，禁止在其他位置手写色值）；
+> `packages/ui/src/tokens/` 为其 **re-export 层**，`packages/ui/src/styles/tokens.generated.scss`
+> 由 `npm run tokens`（`scripts/gen-tokens.ts`）从唯一事实源生成。
+
 ```mermaid
 flowchart LR
   P[Primitive<br/>原始色板/间距/字号] --> S[Semantic<br/>bg/surface/text/accent...]
-  S --> C[Component<br/>button-bg/input-border...]
+  S --> C[Component<br/>Naive themeOverrides<br/>Button/Card/DataTable...]
   T[Theme<br/>light/accent] -.重映射.-> S
 ```
 
@@ -1347,11 +1378,13 @@ export const themeOverrides: GlobalThemeOverrides = {
 
 ### 10.6 图标系统
 
-- 统一使用 **Lucide** 线性图标（24px 网格，2px 描边），保证风格一致。
-- 尺寸阶梯：16 / 18 / 20 / 24 / 32px。
-- 图标继承 `currentColor`，随文字色变化。
-- 发行版图标使用品牌 SVG（`resources/distro-icons/`）。
-- 动效图标（如运行中旋转、更新脉冲）单独实现，非静态图。
+不引入图标库（无 Iconify / Lucide 依赖），采用 **emoji + 内联 SVG** 两层：
+
+- **emoji**：侧栏导航、发行版卡片与空状态插画——发行版图标经 `shared/format.ts` 的
+  `distroIconEmoji`（`meta.icon`/发行版名 → emoji 映射，含缺省回退）解析，零依赖、随字号缩放。
+- **内联 SVG**：需精确描边与 `currentColor` 的装饰图形（标题栏窗口控件、进度环、迷你趋势图），
+  继承文字色，随主题变化。
+- 动效图标（如运行中呼吸、更新脉冲）由 CSS 动画驱动，非静态图。
 
 ### 10.7 组件策略与清单
 
@@ -1371,18 +1404,18 @@ WSLPilot **不自研基础组件**，而是以 **Naive UI** 作为组件基座�
 
 #### 10.7.2 WSLPilot 自研的业务组件（基于 Naive UI 封装）
 
-| 组件             | 说明                                                                          | 依赖基础                   |
-| ---------------- | ----------------------------------------------------------------------------- | -------------------------- |
-| `DistroCard`     | 发行版卡片（品牌色描边 + 状态脉冲）                                           | `NCard`                    |
-| `MetricCard`     | 指标卡（数值滚动 + 迷你趋势）                                                 | `NCard` + `Sparkline`      |
-| `StatusDot`      | 呼吸脉冲状态点                                                                | `NIcon`                    |
-| `ProgressRing`   | 渐变环形进度                                                                  | `NProgress`（自定义）      |
-| `Sparkline`      | 迷你趋势图                                                                    | 原生 SVG                   |
-| `CommandPalette` | ⌘K 命令面板（模糊匹配）— 实现于 `renderer/features/command`（依赖路由/Store） | `NModal` + `NInput`        |
-| `TerminalPane`   | xterm.js 终端面板 — 实现命名 `XtermPane`（`features/terminal`）               | 原生 + `NCard`             |
-| `CodeEditor`     | 配置文本 / JSONC 编辑器                                                       | 原生 textarea / CodeMirror |
-| `Kbd`            | 快捷键提示                                                                    | `NText`                    |
-| `EmptyState`     | 空状态插画                                                                    | `NEmpty`                   |
+| 组件             | 说明                                                                          | 依赖基础              |
+| ---------------- | ----------------------------------------------------------------------------- | --------------------- |
+| `DistroCard`     | 发行版卡片（品牌色描边 + 状态脉冲）                                           | `NCard`               |
+| `MetricCard`     | 指标卡（数值滚动 + 迷你趋势）                                                 | `NCard` + `Sparkline` |
+| `StatusDot`      | 呼吸脉冲状态点                                                                | `NIcon`               |
+| `ProgressRing`   | 渐变环形进度                                                                  | `NProgress`（自定义） |
+| `Sparkline`      | 迷你趋势图                                                                    | 原生 SVG              |
+| `CommandPalette` | ⌘K 命令面板（模糊匹配）— 实现于 `renderer/features/command`（依赖路由/Store） | `NModal` + `NInput`   |
+| `TerminalPane`   | xterm.js 终端面板 — 实现命名 `XtermPane`（`features/terminal`）               | 原生 + `NCard`        |
+| `CodeEditor`     | 配置文本 / JSONC 编辑器（原生 textarea + 行号槽）                             | 原生                  |
+| `Kbd`            | 快捷键提示                                                                    | `NText`               |
+| `EmptyState`     | 空状态插画                                                                    | `NEmpty`              |
 
 ---
 
@@ -1482,15 +1515,19 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ```
 侧边栏导航
 ├─ 🛫 驾驶舱 Dashboard       — 全局概览、指标、快捷入口
-├─ 🐧 发行版 Distros          — 列表 + 详情（概览/终端/文件/配置/动作）
+├─ 🐧 发行版 Distros          — 列表 + 详情弹窗（概览/配置/动作/文件）
 ├─ ⌨️ 终端 Terminal           — 多标签终端工作区
 ├─ 🌐 网络 Network            — 端口转发、代理、镜像模式引导
-├─ 💾 备份与迁移 Backup        — 导出/导入/迁移向导
+├─ 💾 备份迁移 Backup          — 导出/导入/迁移向导
 ├─ 🔌 USB 设备 Devices (可选)  — usbipd 绑定管理
 └─ ⚙️ 设置 Settings           — 应用偏好、配置路径、日志、关于
 ```
 
-### 12.2 首次启动 · 引导（Onboarding）
+### 12.2 首次启动 · 引导（Onboarding）（规划中）
+
+> **现状**：沉浸式引导页尚未实现。WSL 未安装 / 找不到 `wsl.exe` 时走错误提示 + 建议操作
+> （管理员终端 `wsl --install`，见 `shared/errors` 的 `ERROR_CATALOG`）；无发行版时驾驶舱展示
+> 空态 CTA「安装发行版」进入安装向导（`InstallDistroModal`）。以下为规划形态：
 
 冷启动若检测到 WSL 未安装或无发行版，展示**沉浸式引导页**：
 
@@ -1538,15 +1575,14 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 **列表视图**：支持卡片网格 / 紧凑表格切换（Segmented 控件），支持按标签筛选、按名称/状态排序、搜索。
 
-**详情页**五个标签：
+**详情弹窗**（`DistroDetailModal`）四个标签；终端不在弹窗内嵌，经「打开终端」按钮进入独立终端工作区：
 
-| 标签     | 内容                                                                           |
-| -------- | ------------------------------------------------------------------------------ |
-| **概览** | 名称、GUID、BasePath（可复制）、默认用户、WSL 版本、资源 Mini 仪表盘、最近任务 |
-| **终端** | 内嵌 xterm 全功能终端，用户/目录选择，多标签                                   |
-| **文件** | 双栏浏览器（宿主 ↔ 发行版），拖拽复制，面包屑导航                              |
-| **配置** | `wsl.conf` 可视化表单 + 原始文本双模式，带 Diff 预览                           |
-| **动作** | `quickActions` 与全部动作卡片，一键运行，展示等价命令                          |
+| 标签     | 内容                                                                                                                             |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **概览** | 名称、GUID、BasePath（可复制）、默认用户、WSL 版本、资源 Mini 仪表盘、最近任务、元数据编辑（图标/品牌色/启动目录/置顶/快捷动作） |
+| **配置** | `wsl.conf` 可视化表单 + 原始文本双模式，带 Diff 预览                                                                             |
+| **动作** | `quickActions` 与全部动作卡片，一键运行，展示等价命令                                                                            |
+| **文件** | 双栏浏览器（宿主 ↔ 发行版），拖拽复制，面包屑导航                                                                                |
 
 ### 12.5 终端工作区（Terminal）
 
@@ -1559,22 +1595,23 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ### 12.6 网络 / 备份迁移 / 设备
 
 - **网络**：端口转发规则表；镜像网络模式开启时展示"推荐"提示卡；代理配置表单。
-- **备份与迁移**：分步向导（选择发行版 → 选择位置/格式 → 确认 → 进度），进度用大号环形进度 + 实时日志抽屉。
+- **备份迁移**：分步向导（选择发行版 → 选择位置/格式 → 确认 → 进度），进度用大号环形进度 + 实时日志抽屉。
 - **设备**：usbipd 设备列表，绑定/附加开关，状态徽章。
 
 ### 12.7 设置（Settings）
 
-左侧二级导航，右侧内容区：
+单页分区卡片（各分区与 `settings.jsonc` 契约一一对应）：
 
 ```
 设置
-├─ 通用       强调色、语言、启动行为、动效
-├─ WSL        默认 Shell、安装源、关机策略
-├─ 终端       字体、字号、光标、回滚缓冲、配色
-├─ 备份       默认目录、格式、保留数量
-├─ 高级       命令可见、破坏性确认、日志级别、硬件加速
-├─ 配置目录   展示路径 + 一键打开 + 逐个打开文件
-└─ 关于       版本、更新、许可、诊断包导出
+├─ 外观      强调色、语言、关闭行为、启动行为、减弱动效
+├─ WSL       默认 Shell、wsl.conf 变更后自动终止发行版（安装源：规划中）
+├─ 终端      字体、字号、光标、回滚缓冲、行高、选中即复制、配色
+├─ 备份      默认目录、格式、保留数量、破坏性操作前自动备份
+├─ 高级      命令可见、破坏性确认、日志级别、硬件加速、自动更新
+├─ 快捷键    全局快捷键一览
+├─ 配置目录  展示路径 + 一键打开 + 逐个打开文件
+└─ 关于      版本、软件更新、代码签名状态、诊断与反馈（打开日志目录 / 导出诊断包）
 ```
 
 **外观设置**提供**实时预览卡片**：切换强调色时，旁边的小预览区立即变化，无需保存即可看到效果。
@@ -1619,7 +1656,7 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 核心便捷性组件，`Ctrl/⌘+K` 唤起：
 
 - 全屏半透明模糊遮罩，中央浮出玻璃拟态面板。
-- 输入即过滤，支持模糊匹配（自研打分 `@wslpilot/shared/fuzzy`：连续 / 词首 / 前缀 / 缺口，无第三方依赖）。
+- 输入即过滤，支持模糊匹配（自研打分 `@shared/fuzzy`（即 `packages/shared/src/fuzzy.ts`）：连续 / 词首 / 前缀 / 缺口，无第三方依赖）。
 - 结果分组：发行版、动作、导航、设置项。
 - 每项显示图标、标题、副标题、快捷键提示（Kbd）。
 - `↑↓` 导航，`Enter` 执行，`Esc` 关闭。
@@ -1637,7 +1674,7 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ### 13.5 加载与占位
 
 - 首屏用骨架屏，避免布局跳动。
-- 列表分页/虚拟滚动（大列表用 vue-virtual-scroller）。
+- 列表分页/虚拟滚动（当前列表量级小，未启用；大列表如需可再引入 vue-virtual-scroller）。
 - 长任务进度不可估算时用**不确定进度条**（流光扫过）。
 
 ---
@@ -1737,7 +1774,7 @@ export interface AppError {
 | IPC 契约 | Vitest                   | 每通道入参 zod 通过与拒绝用例                                                   |
 | 组件     | Vitest + @vue/test-utils | 按钮、卡片、确认框、配置表单、命令面板                                          |
 | 视觉回归 | Playwright + 截图对比    | 关键页面浅色主题渲染一致性                                                      |
-| 端到端   | Playwright + Electron    | 启动、列出（模拟）发行版、打开终端、改设置并落盘                                |
+| 端到端   | Playwright + Electron    | 启动冒烟、侧栏各页关键元素、命令面板可见性（实跑含视觉回归 `@visual`）          |
 
 **关键单测样例**：含中文、`*` 默认标记、多空格的 `wsl -l -v` 输出解析；损坏 JSONC 返回带行号错误；强调色切换下语义令牌映射正确。
 
@@ -1748,10 +1785,13 @@ export interface AppError {
 - **开发**：`npm run dev`（electron-vite，主/渲染双端 HMR）。
 - **打包**：`electron-builder` 输出 NSIS 安装包与 portable 版；目标 x64 与 arm64。
 - **原生模块**：`node-pty` 需 `electron-rebuild` 针对 Electron ABI 重编译；CI 双架构构建。
-- **签名**：预留代码签名配置；未签名时说明 SmartScreen 警告。
+- **签名**（M7 已接入）：`electron-builder` 的 `signtoolOptions`（sha256）+ `verifyUpdateCodeSignature`，
+  证书经 `CSC_LINK` / `CSC_KEY_PASSWORD` 注入；`app:signatureStatus` 检测当前可执行文件 Authenticode 状态，
+  未签名构建在「设置 → 关于」给出 SmartScreen 警告说明。
 - **版本注入**：`package.json` 版本注入 `app:getVersion` 与配置迁移逻辑。
-- **自动更新**：预留 `electron-updater` 接入点。
-- **产物**：`WSLPilot-Setup-x.y.z.exe`、`WSLPilot-x.y.z-portable.exe`。
+- **自动更新**（M7 已接入）：`electron-updater` 完整接入（GitHub Releases 更新源，`publish` 生成 `app-update.yml`）；
+  启动后台检查由 `advanced.autoUpdate` 控制，「设置 → 关于」手动检查 / 下载 / 重启安装。
+- **产物**：`WSLPilot-{version}-{arch}-setup.exe`（NSIS）、`WSLPilot-{version}-{arch}-portable.exe`（免安装）。
 
 ---
 
@@ -1872,7 +1912,6 @@ export const migrations: Record<ConfigKey, Array<(old: any) => any>> = {
 - node-pty：https://github.com/microsoft/node-pty
 - xterm.js：https://xtermjs.org/
 - jsonc-parser：https://github.com/microsoft/node-jsonc-parser
-- Lucide Icons：https://lucide.dev/
 - Electron 安全清单：https://www.electronjs.org/docs/latest/tutorial/security
 
 ---

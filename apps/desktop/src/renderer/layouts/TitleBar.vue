@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { NTooltip } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
 import { useCommandPalette } from '../composables/useCommandPalette'
-import { ACCENT_GRADIENTS } from '@shared/constants'
+import { ACCENT_GRADIENTS } from '@wslpilot/shared'
 
 const settings = useSettingsStore()
 const { openPalette } = useCommandPalette()

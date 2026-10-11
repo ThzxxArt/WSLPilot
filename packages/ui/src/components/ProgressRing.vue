@@ -161,14 +161,4 @@ const displayLabel = computed(() => {
     transform: rotate(360deg);
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .progress-ring.indeterminate svg {
-    animation: none;
-  }
-}
-
-:root[data-reduce-motion='true'] .progress-ring.indeterminate svg {
-  animation: none;
-}
 </style>

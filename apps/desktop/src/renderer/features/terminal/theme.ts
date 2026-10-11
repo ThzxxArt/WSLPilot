@@ -1,6 +1,4 @@
-import { defaultConfig } from '@shared/config-schema'
-import { ACCENT_MAPS } from '@shared/constants'
-import type { AccentName, TerminalTheme } from '@shared/types'
+import { ACCENT_MAPS, defaultConfig, type AccentName, type TerminalTheme } from '@wslpilot/shared'
 
 /** 明亮终端配色 — 与浅色应用协调（设计书 §12.5） */
 export const TERMINAL_LIGHT_THEME = {

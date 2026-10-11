@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   NConfigProvider,
   NMessageProvider,
+  NNotificationProvider,
   NDialogProvider,
   NSpin,
   zhCN,
@@ -114,25 +115,23 @@ onUnmounted(() => {
     class="h-full"
   >
     <n-message-provider>
-      <n-dialog-provider>
-        <ConflictResolver />
-        <CommandPalette />
-        <div v-if="ready" class="pilot-shell">
-          <DefaultLayout />
-        </div>
-        <div v-else class="loading-screen">
-          <n-spin size="large" />
-        </div>
-      </n-dialog-provider>
+      <n-notification-provider>
+        <n-dialog-provider>
+          <ConflictResolver />
+          <CommandPalette />
+          <div v-if="ready" class="pilot-shell">
+            <DefaultLayout />
+          </div>
+          <div v-else class="loading-screen">
+            <n-spin size="large" />
+          </div>
+        </n-dialog-provider>
+      </n-notification-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <style scoped>
-.pilot-shell {
-  height: 100%;
-}
-
 .loading-screen {
   height: 100%;
   display: flex;

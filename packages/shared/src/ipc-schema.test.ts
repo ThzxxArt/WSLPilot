@@ -3,6 +3,7 @@ import {
   parseIpcArgs,
   IPC_SCHEMAS,
   nameSchema,
+  metricsNameSchema,
   configKeySchema,
   utf8Bytes,
 } from '../src/ipc-schema'
@@ -356,7 +357,9 @@ describe('ipc-schema · 补漏通道（review 假信心根治 M2）', () => {
     expect(() => parseIpcArgs(CH.distrosInstall, [{ name: 'Ubuntu' }])).not.toThrow()
     expect(() => parseIpcArgs(CH.distrosInstall, [{ name: '' }])).toThrow()
     expect(() => parseIpcArgs(CH.distrosInstall, [{ name: 'a/b' }])).toThrow()
-    expect(() => parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).not.toThrow() // 非 strict，多余键忽略
+    // 非 strict：多余键忽略，但必须 strip（只断言 not.toThrow 是形状盲假信心 — review 根治）
+    expect(parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).toEqual({ name: 'U' })
+    expect(() => parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).not.toThrow()
   })
 
   it('io:cleanupBackups 的 keep 越界拒绝、缺省 5', () => {
@@ -368,17 +371,71 @@ describe('ipc-schema · 补漏通道（review 假信心根治 M2）', () => {
     expect(() => parseIpcArgs(CH.ioCleanupBackups, [{ keep: 7, dir: 'a\u0000b' }])).toThrow()
   })
 
-  it('app:exportDiagnostics 接受空参与可选目录，拒绝非法路径', () => {
-    expect(() => parseIpcArgs(CH.appExportDiagnostics, [{}])).not.toThrow()
-    expect(() => parseIpcArgs(CH.appExportDiagnostics, [])).not.toThrow()
-    expect(() => parseIpcArgs(CH.appExportDiagnostics, [{ defaultPath: 'C:\\logs' }])).not.toThrow()
-    expect(() => parseIpcArgs(CH.appExportDiagnostics, [{ defaultPath: 'a\u0000b' }])).toThrow()
+  it('diagnostics:exportPackage 接受空参与可选目录，拒绝非法路径', () => {
+    expect(() => parseIpcArgs(CH.diagnosticsExportPackage, [{}])).not.toThrow()
+    expect(() => parseIpcArgs(CH.diagnosticsExportPackage, [])).not.toThrow()
+    expect(() =>
+      parseIpcArgs(CH.diagnosticsExportPackage, [{ defaultPath: 'C:\\logs' }]),
+    ).not.toThrow()
+    expect(() => parseIpcArgs(CH.diagnosticsExportPackage, [{ defaultPath: 'a\u0000b' }])).toThrow()
   })
 
-  it('metrics:sample 接受发行版名与全局键 `*`，拒绝其它', () => {
-    expect(parseIpcArgs(CH.metricsSample, ['*'])).toBe('*')
+  it('metrics:sample 只接受发行版名，拒绝全局概览键 `*`（概览走 metrics:overview）', () => {
     expect(parseIpcArgs(CH.metricsSample, ['Ubuntu'])).toBe('Ubuntu')
+    expect(() => parseIpcArgs(CH.metricsSample, ['*'])).toThrow()
     expect(() => parseIpcArgs(CH.metricsSample, ['x/y'])).toThrow()
     expect(() => parseIpcArgs(CH.metricsSample, [''])).toThrow()
+  })
+
+  it('metrics:sample 的 schema 是 metricsNameSchema（禁 `*`），nameSchema 本身不变', () => {
+    expect(IPC_SCHEMAS[CH.metricsSample]).toBe(metricsNameSchema)
+    expect(IPC_SCHEMAS[CH.metricsSample]).not.toBe(nameSchema)
+    // nameSchema 仍按 assertSafeDistroName 规则放行 `*`（合法发行版名字符，执行边界认可），
+    // 只有 metrics:sample 通道显式拒绝全局保留键
+    expect(nameSchema.parse('*')).toBe('*')
+    expect(nameSchema.parse('Ubuntu')).toBe('Ubuntu')
+    expect(metricsNameSchema.parse('Ubuntu')).toBe('Ubuntu')
+    expect(() => metricsNameSchema.parse('*')).toThrow()
+  })
+
+  it('metrics:overview 无入参或空对象（OverviewMetrics 全局概览）', () => {
+    expect(parseIpcArgs(CH.metricsOverview, [])).toBeUndefined()
+    expect(parseIpcArgs(CH.metricsOverview, [{}])).toEqual({})
+  })
+
+  it('app:pickSaveFile 的 suggestedName 拒绝控制字符与超长', () => {
+    expect(() => parseIpcArgs(CH.appPickSaveFile, [{ suggestedName: 'a\u0001b.tar' }])).toThrow()
+    expect(() => parseIpcArgs(CH.appPickSaveFile, [{ suggestedName: 'a'.repeat(256) }])).toThrow()
+    expect(() =>
+      parseIpcArgs(CH.appPickSaveFile, [{ suggestedName: 'a'.repeat(255) }]),
+    ).not.toThrow()
+  })
+
+  it('metaSet 的 tags/quickActions 条数与条目长度边界', () => {
+    const base = { name: 'Ubuntu' }
+    expect(() =>
+      parseIpcArgs(CH.metaSet, [{ ...base, tags: Array.from({ length: 20 }, (_, i) => `t${i}`) }]),
+    ).not.toThrow()
+    expect(() =>
+      parseIpcArgs(CH.metaSet, [{ ...base, tags: Array.from({ length: 21 }, (_, i) => `t${i}`) }]),
+    ).toThrow()
+    expect(() => parseIpcArgs(CH.metaSet, [{ ...base, tags: ['a'.repeat(65)] }])).toThrow()
+    expect(() => parseIpcArgs(CH.metaSet, [{ ...base, tags: ['a'.repeat(64)] }])).not.toThrow()
+    expect(() =>
+      parseIpcArgs(CH.metaSet, [
+        { ...base, quickActions: Array.from({ length: 21 }, (_, i) => `q${i}`) },
+      ]),
+    ).toThrow()
+    expect(() => parseIpcArgs(CH.metaSet, [{ ...base, quickActions: ['a'.repeat(65)] }])).toThrow()
+  })
+
+  it('configSet 的 patch 序列化后超 256KB 拒绝、循环引用拒绝', () => {
+    const big = { general: { note: 'x'.repeat(256 * 1024) } }
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: big }])).toThrow()
+    const ok = { general: { note: 'x'.repeat(1024) } }
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: ok }])).not.toThrow()
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: cyclic }])).toThrow()
   })
 })

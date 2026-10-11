@@ -38,7 +38,7 @@ describe('useDevicesStore', () => {
     await s.load()
     expect(s.status.installed).toBe(true)
     expect(s.items).toHaveLength(1)
-    expect(s.byBusId('1-2')?.description).toBe('USB Receiver')
+    expect(s.items.find((d) => d.busId === '1-2')?.description).toBe('USB Receiver')
     expect(s.sharedCount).toBe(1)
   })
 

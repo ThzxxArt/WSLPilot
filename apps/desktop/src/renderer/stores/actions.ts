@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
-import type { TaskHandle, WslAction } from '@wslpilot/shared'
-import { toAppError, type AppError } from '@shared/errors'
+import { toAppError, type AppError, type TaskHandle, type WslAction } from '@wslpilot/shared'
 import { useTerminalStore } from './terminal'
 
 /**
@@ -13,22 +12,14 @@ export const useActionsStore = defineStore('actions', {
   state: () => ({
     items: [] as WslAction[],
     loaded: false,
-    loading: false,
     saving: false,
     lastError: null as AppError | null,
     /** 最近删除（供 Toast 撤销） */
     lastRemoved: null as WslAction | null,
   }),
 
-  getters: {
-    byId: (s) => (id: string) => s.items.find((a) => a.id === id) ?? null,
-    /** 全部动作（发行版级 + 全局） */
-    all: (s) => s.items,
-  },
-
   actions: {
     async load() {
-      this.loading = true
       this.lastError = null
       try {
         const list = (await window.wslAPI.actions.list()) as WslAction[]
@@ -36,8 +27,6 @@ export const useActionsStore = defineStore('actions', {
         this.loaded = true
       } catch (e) {
         this.lastError = toAppError(e)
-      } finally {
-        this.loading = false
       }
     },
 

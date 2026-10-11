@@ -194,6 +194,18 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
     async getVersion() {
       const ver = await runWsl(['--version'])
       const status = await runWsl(['--status'])
+      // 两条命令都失败（wsl.exe 缺失 / 未安装 / 未更新）时绝不能装作成功返回空串
+      if (ver.code !== 0 && status.code !== 0) {
+        throw createAppError('TASK_FAILED', {
+          message: '无法获取 WSL 版本',
+          detail: [ver.stderr, ver.stdout, status.stderr, status.stdout]
+            .map((t) => (t ?? '').trim())
+            .filter(Boolean)
+            .join('\n'),
+          rawCommand: 'wsl.exe --version',
+          suggestion: '请安装 WSL 或运行 wsl --update',
+        })
+      }
       const text = `${ver.stdout}\n${status.stdout}`
       const wslVersion =
         /WSL\s+version[:：]\s*([\d.]+)/i.exec(text)?.[1] ??
@@ -203,13 +215,22 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
         /Kernel\s+version[:：]\s*([^\r\n]+)/i.exec(text)?.[1] ??
         /内核版本[:：]\s*([^\r\n]+)/.exec(text)?.[1] ??
         ''
+      // 一成功一失败、或命令成功但解析不到版本号：如实返回 raw/空串并告警（旧版 wsl 可能不支持 --version）
+      if (ver.code !== 0 || status.code !== 0 || !wslVersion) {
+        logger.warn('wsl version degraded', {
+          verCode: ver.code,
+          statusCode: status.code,
+          wslVersion,
+        })
+      }
       return { raw: text.trim(), wslVersion, kernelVersion }
     },
 
     /**
      * 采样单个发行版资源指标。
      * free / df / /proc/stat 两次差分（真实 CPU%）；
-     * 失败时返回零值（展示层显示 —）而不是抛错。
+     * 采样失败（命令非零退出，或输出解析后 mem/disk 总量都不可信）时抛 TASK_FAILED，
+     * 由 sampleOverview 按失败样本处理——不进 CPU 分母、不进 perDistro，绝不返回零值假成功。
      */
     async sampleMetrics(name: string): Promise<Metrics> {
       const n = assertName(name)
@@ -221,20 +242,21 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
         'sleep 0.25',
         'head -n1 /proc/stat 2>/dev/null',
       ].join('; ')
-      const r = await runWsl(['-d', n, '-e', 'sh', '-c', script], { timeoutMs: 8000 })
+      const args = ['-d', n, '-e', 'sh', '-c', script]
+      const r = await runWsl(args, { timeoutMs: 8000 })
       const now = new Date().toISOString()
-      const zero: Metrics = {
-        memUsedKB: 0,
-        memTotalKB: 0,
-        diskUsedKB: 0,
-        diskTotalKB: 0,
-        cpuPercent: 0,
-        sampledAt: now,
-      }
 
       if (r.code !== 0) {
         logger.debug('metrics sample failed', { name: n, code: r.code })
-        return zero
+        throw createAppError('TASK_FAILED', {
+          message: `采样 ${n} 资源指标失败（exit ${r.code}）`,
+          detail: [r.stderr, r.stdout]
+            .map((t) => (t ?? '').trim())
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 500),
+          rawCommand: getRawCommand('wsl.exe', args),
+        })
       }
 
       const lines = r.stdout
@@ -264,6 +286,20 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
             .filter((x) => Number.isFinite(x))
           if (nums.length) cpuSamples.push(nums)
         }
+      }
+
+      // 命令成功但没有可信数据（free/df 缺失、输出被截断…）：不能静默返回零值污染统计
+      if (memTotalKB <= 0 && diskTotalKB <= 0) {
+        logger.debug('metrics sample unparsable', { name: n })
+        throw createAppError('TASK_FAILED', {
+          message: `采样 ${n} 资源指标失败：输出中无可信数据`,
+          detail: [r.stderr, r.stdout]
+            .map((t) => (t ?? '').trim())
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 500),
+          rawCommand: getRawCommand('wsl.exe', args),
+        })
       }
 
       // /proc/stat 两次差分 = 真实 CPU 占用率（不再用 loadavg 伪造 — review M18）

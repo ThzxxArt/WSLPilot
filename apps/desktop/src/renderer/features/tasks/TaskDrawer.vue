@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { NButton, NDrawer, NTag, useMessage } from 'naive-ui'
-import { EmptyState } from '@ui/components'
+import { EmptyState } from '@wslpilot/ui'
 import { useTasksStore, type TaskEntry } from '../../stores/tasks'
 import { formatElapsed, taskStatusLabel, taskTypeLabel } from '../../composables/useTaskProgress'
 import { errorLine } from '../../composables/useAppError'
@@ -36,6 +36,14 @@ const ordered = computed(() => [...tasks.entries].sort((a, b) => b.startedAt - a
 const selected = computed<TaskEntry | null>(() => {
   if (selectedId.value) return tasks.byId(selectedId.value)
   return ordered.value[0] ?? null
+})
+
+/**
+ * selectedId 可能指向被 trimFinished 淘汰的任务（详情区会整个消失）：
+ * 选中项失效时自动回退到最新一条，绝不留下「有列表没详情」的半成品态。
+ */
+watch(selected, (s) => {
+  if (!s && selectedId.value) selectedId.value = ordered.value[0]?.taskId ?? ''
 })
 
 watch(

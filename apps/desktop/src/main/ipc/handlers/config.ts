@@ -1,4 +1,10 @@
-import { CH, createAppError, type ConfigKey, type ConfigMap } from '@wslpilot/shared'
+import {
+  CH,
+  CONFIG_FILE_NAMES,
+  createAppError,
+  type ConfigKey,
+  type ConfigMap,
+} from '@wslpilot/shared'
 import type { ConfigConflictAction, DeepPartial } from '../../services/config-service'
 import type { IpcContext } from '../router'
 
@@ -8,7 +14,8 @@ type AddFn = (
   handler: (ctx: IpcContext, arg: never) => unknown,
 ) => void
 
-const CONFIG_KEYS: ConfigKey[] = ['settings', 'distros', 'actions', 'network', 'uiState', 'state']
+/** 键集合唯一事实源 = shared 的 CONFIG_FILE_NAMES（禁止再抄一份硬编码） */
+const CONFIG_KEYS = Object.keys(CONFIG_FILE_NAMES) as ConfigKey[]
 
 function assertConfigKey(key: string): ConfigKey {
   if (!CONFIG_KEYS.includes(key as ConfigKey)) {

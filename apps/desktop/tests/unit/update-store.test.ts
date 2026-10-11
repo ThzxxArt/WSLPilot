@@ -109,6 +109,19 @@ describe('useUpdateStore（M7 自动更新）', () => {
     s.applyState({ status: 'error', currentVersion: '0.1.0', error: 'x' })
     expect(s.version).toBe('')
     expect(s.releaseNotes).toBe('')
-    expect(s.feedUrl).toBe('')
+  })
+
+  it('load 失败置 status=error（不得伪装成 idle）', async () => {
+    wslAPI.update.status.mockRejectedValue(new Error('ipc down'))
+    const s = useUpdateStore()
+    await s.load()
+    expect(s.status).toBe('error')
+    expect(s.error).toBe('ipc down')
+  })
+
+  it('releaseNotes 随状态落地（SettingsView 更新卡展示）', () => {
+    const s = useUpdateStore()
+    s.applyState({ status: 'available', currentVersion: '0.1.0', releaseNotes: '- 修复 X' })
+    expect(s.releaseNotes).toBe('- 修复 X')
   })
 })

@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
-import type {
-  NetworkStatus,
-  PortForwardRule,
-  ProxyConfig,
-  ProxyScriptState,
-  TaskHandle,
+import {
+  defaultConfig,
+  toAppError,
+  type AppError,
+  type NetworkStatus,
+  type PortForwardRule,
+  type ProxyConfig,
+  type ProxyScriptState,
+  type TaskHandle,
 } from '@wslpilot/shared'
-import { defaultConfig } from '@shared/config-schema'
-import { toAppError, type AppError } from '@shared/errors'
 import { useTasksStore } from './tasks'
 
 /**
@@ -21,7 +22,6 @@ export const useNetworkStore = defineStore('network', {
     rules: [] as PortForwardRule[],
     proxy: { ...defaultConfig('network').proxy } as ProxyConfig,
     status: null as NetworkStatus | null,
-    loading: false,
     saving: false,
     statusLoading: false,
     lastError: null as AppError | null,
@@ -29,10 +29,15 @@ export const useNetworkStore = defineStore('network', {
     lastRemoved: null as PortForwardRule | null,
     /** 代理脚本当前状态（按发行版查询结果） */
     proxyScript: null as ProxyScriptState | null,
+    /** 代际守卫：并发 load/save 时只认最新一次发起的响应（防旧响应覆盖新数据） */
+    loadGen: 0,
+    statusGen: 0,
+    proxyStateGen: 0,
+    rulesSaveGen: 0,
+    proxySaveGen: 0,
   }),
 
   getters: {
-    byId: (s) => (id: string) => s.rules.find((r) => r.id === id) ?? null,
     enabledRules: (s) => s.rules.filter((r) => r.enabled),
     /** 已在系统中生效的规则数（监听键命中系统转发表） */
     appliedCount: (s) =>
@@ -45,47 +50,63 @@ export const useNetworkStore = defineStore('network', {
 
   actions: {
     async load() {
-      this.loading = true
+      const gen = ++this.loadGen
       this.lastError = null
       try {
+        // 规则与代理必须一起提交：先写 rules 再 await getProxy 会在后者失败时
+        // 留下「规则已刷新、代理还是旧值」的混合态（review 根治）
         const rules = await window.wslAPI.network.listRules()
+        const proxy = await window.wslAPI.network.getProxy()
+        if (gen !== this.loadGen) return
         this.rules = Array.isArray(rules) ? rules : []
-        this.proxy = await window.wslAPI.network.getProxy()
+        this.proxy = proxy
       } catch (e) {
+        if (gen !== this.loadGen) return
         this.lastError = toAppError(e)
-      } finally {
-        this.loading = false
       }
     },
 
     async loadStatus() {
+      const gen = ++this.statusGen
       this.statusLoading = true
       try {
-        this.status = await window.wslAPI.network.status()
+        const status = await window.wslAPI.network.status()
+        if (gen !== this.statusGen) return
+        this.status = status
       } catch (e) {
+        if (gen !== this.statusGen) return
         this.lastError = toAppError(e)
       } finally {
-        this.statusLoading = false
+        if (gen === this.statusGen) this.statusLoading = false
       }
     },
 
     async persistRules(next: PortForwardRule[]) {
+      const gen = ++this.rulesSaveGen
       this.saving = true
       this.lastError = null
       try {
         await window.wslAPI.network.saveRules(next)
-        this.rules = next
+        // 有更新的写入在途时，旧响应不得覆盖新状态
+        if (gen === this.rulesSaveGen) this.rules = next
       } catch (e) {
-        this.lastError = toAppError(e)
-        throw this.lastError
+        const err = toAppError(e)
+        if (gen === this.rulesSaveGen) this.lastError = err
+        throw err
       } finally {
-        this.saving = false
+        if (gen === this.rulesSaveGen) this.saving = false
       }
     },
 
-    async upsert(rule: PortForwardRule) {
+    /**
+     * 新增 / 更新 / 重命名一条规则。
+     * `originalId`：编辑态改 id 时传入旧 id，命中旧条目整体替换（重命名）；
+     * 不传则按 `rule.id` 匹配（同 id 覆盖，否则新增）。
+     */
+    async upsert(rule: PortForwardRule, originalId?: string) {
       const next = [...this.rules]
-      const idx = next.findIndex((r) => r.id === rule.id)
+      const key = originalId?.trim() || rule.id
+      const idx = next.findIndex((r) => r.id === key)
       if (idx >= 0) next[idx] = rule
       else next.push(rule)
       await this.persistRules(next)
@@ -115,16 +136,18 @@ export const useNetworkStore = defineStore('network', {
     },
 
     async saveProxy(proxy: ProxyConfig) {
+      const gen = ++this.proxySaveGen
       this.saving = true
       this.lastError = null
       try {
         await window.wslAPI.network.saveProxy(proxy)
-        this.proxy = proxy
+        if (gen === this.proxySaveGen) this.proxy = proxy
       } catch (e) {
-        this.lastError = toAppError(e)
-        throw this.lastError
+        const err = toAppError(e)
+        if (gen === this.proxySaveGen) this.lastError = err
+        throw err
       } finally {
-        this.saving = false
+        if (gen === this.proxySaveGen) this.saving = false
       }
     },
 
@@ -191,10 +214,14 @@ export const useNetworkStore = defineStore('network', {
     },
 
     async loadProxyState(distro: string) {
+      const gen = ++this.proxyStateGen
       this.lastError = null
       try {
-        this.proxyScript = await window.wslAPI.network.proxyState(distro)
+        const script = await window.wslAPI.network.proxyState(distro)
+        if (gen !== this.proxyStateGen) return
+        this.proxyScript = script
       } catch (e) {
+        if (gen !== this.proxyStateGen) return
         this.lastError = toAppError(e)
         this.proxyScript = null
       }

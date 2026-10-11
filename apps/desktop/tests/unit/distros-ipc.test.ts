@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
 }))
 
 import { registerIpcHandlers } from '../../src/main/ipc/router'
-import { CH } from '@wslpilot/shared'
+import { CH, CONFIG_FILE_NAMES } from '@wslpilot/shared'
 
 function makeCtx() {
   const load = vi.fn(async (key: string) => {
@@ -287,10 +287,18 @@ describe('distros + meta IPC handlers', () => {
     expect(m.memTotalKB).toBe(20)
   })
 
-  it("metrics:sample '*' returns overview", async () => {
+  it("metrics:sample 拒绝概览保留键 '*'（概览语义已拆到 metrics:overview）", async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    // 入参 schema（metricsNameSchema）在边界即拒绝 `*`，不会漏到执行侧
+    await expect(wrapped.get(CH.metricsSample)({}, '*')).rejects.toThrow(/CONFIG_INVALID/)
+    expect(deps.wsl.sampleMetrics).not.toHaveBeenCalled()
+  })
+
+  it('metrics:overview returns global overview', async () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
-    const o = await wrapped.get(CH.metricsSample)({}, '*')
+    const o = await wrapped.get(CH.metricsOverview)({}, undefined)
     expect(o).toHaveProperty('runningCount')
     expect(o.runningCount).toBe(1)
   })
@@ -331,6 +339,71 @@ describe('distros + meta IPC handlers', () => {
     await expect(wrapped.get(CH.metaSet)({}, null)).rejects.toThrow()
   })
 
+  it('meta 名称大小写不敏感：命中同一条目且不产生重复', async () => {
+    const ctx = makeCtx()
+    // 让 update 还原到「已有 Ubuntu 条目」的真实读-改-写现场，直接断言改写结果
+    ctx.configService.update = vi.fn(async (_k: string, fn: any) =>
+      fn({
+        $schemaVersion: 1,
+        distros: [
+          {
+            name: 'Ubuntu',
+            alias: '主力',
+            tags: [],
+            color: '',
+            icon: 'ubuntu',
+            note: '',
+            startupCwd: '~',
+            pinned: false,
+            quickActions: [],
+          },
+        ],
+      }),
+    )
+    const { wrapped } = register(ctx)
+
+    // 查询：换大小写也命中同一条目
+    const hit = await wrapped.get(CH.metaGet)({}, 'uBuNtU')
+    expect(hit?.alias).toBe('主力')
+
+    // 写入：换大小写更新同一份，而不是新增条目（保留 meta.name 原样）
+    const saved = await wrapped.get(CH.metaSet)(
+      {},
+      {
+        name: 'UBUNTU',
+        alias: '新别名',
+        tags: [],
+        color: '',
+        icon: 'ubuntu',
+        note: '',
+        startupCwd: '~',
+        pinned: false,
+        quickActions: [],
+      },
+    )
+    expect(saved.name).toBe('UBUNTU')
+    const after = (ctx.configService.update as any).mock.results[0].value as Promise<any>
+    const file = await after
+    expect(file.distros).toHaveLength(1)
+    expect(file.distros[0].alias).toBe('新别名')
+  })
+
+  it('config 键集合与 shared CONFIG_FILE_NAMES 同源（禁双份事实源）', async () => {
+    const ctx = makeCtx()
+    const { wrapped } = register(ctx)
+    const expected = Object.keys(CONFIG_FILE_NAMES)
+    // 变更监听挂载的键必须与 CONFIG_FILE_NAMES 完全一致
+    const mounted = (ctx.configService.onChange as any).mock.calls.map((c: any[]) => c[0])
+    expect([...mounted].sort()).toEqual([...expected].sort())
+    // 每个合法键都能 configGet（不被当成未知键）
+    for (const key of expected) {
+      await expect(wrapped.get(CH.configGet)({}, key)).resolves.toBeDefined()
+    }
+    // 集合之外的键仍然拒绝
+    await expect(wrapped.get(CH.configGet)({}, 'evil')).rejects.toThrow()
+    await expect(wrapped.get(CH.configOpenExternal)({}, 'evil')).rejects.toThrow()
+  })
+
   it('config handlers reject unknown keys and bad actions', async () => {
     const ctx = makeCtx()
     const { wrapped } = register(ctx)
@@ -344,6 +417,16 @@ describe('distros + meta IPC handlers', () => {
   it('distros:install / setVersion / unregister 任务派发与执行（review 假信心 M3）', async () => {
     const ctx = makeCtx()
     const { wrapped, deps } = register(ctx)
+    // 异步完成标记：run(ctl) 不 await 时断言时机早于微任务完成 → 必红（悬浮 promise 锁）
+    const flags = { install: 0, setVersion: 0 }
+    deps.wsl.install = vi.fn(async () => {
+      await Promise.resolve()
+      flags.install++
+    })
+    deps.wsl.setVersion = vi.fn(async () => {
+      await Promise.resolve()
+      flags.setVersion++
+    })
     const ctl = {
       taskId: 't',
       report: vi.fn(),
@@ -360,22 +443,25 @@ describe('distros + meta IPC handlers', () => {
     expect(installOpts.type).toBe('install')
     expect(installOpts.distro).toBe('Ubuntu')
     expect(installOpts.lockKey).toBe('install:ubuntu')
-    installOpts.run(ctl)
+    await installOpts.run(ctl)
     expect(deps.wsl.install).toHaveBeenCalledWith('Ubuntu', ctl)
+    expect(flags.install).toBe(1)
 
     // 省略名字（安装 WSL 本体）：lockKey 走全局
     await wrapped.get(CH.distrosInstall)({}, {})
     const bareOpts = deps.tasks.start.mock.calls[1]![0]
     expect(bareOpts.lockKey).toBe('install:*')
-    bareOpts.run(ctl)
+    await bareOpts.run(ctl)
     expect(deps.wsl.install).toHaveBeenCalledWith(undefined, ctl)
+    expect(flags.install).toBe(2)
 
     // setVersion → convert 任务
     await wrapped.get(CH.distrosSetVersion)({}, { name: 'Ubuntu', version: 1 })
     const convertOpts = deps.tasks.start.mock.calls[2]![0]
     expect(convertOpts.type).toBe('convert')
-    convertOpts.run(ctl)
+    await convertOpts.run(ctl)
     expect(deps.wsl.setVersion).toHaveBeenCalledWith('Ubuntu', 1, ctl)
+    expect(flags.setVersion).toBe(1)
 
     // unregister 直达 wsl.unregister
     await wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')

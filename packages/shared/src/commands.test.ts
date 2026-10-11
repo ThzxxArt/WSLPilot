@@ -7,7 +7,12 @@ import {
   backupExtension,
   exportFileName,
   backupFileRegex,
+  backupFileGroup,
   isBackupFileName,
+  normalizeBackupTarget,
+  buildExportArgs,
+  buildImportArgs,
+  buildMoveArgs,
 } from './commands'
 import { formatBytes } from './format'
 
@@ -93,6 +98,84 @@ describe('preview commands (display only)', () => {
   })
 })
 
+describe('normalizeBackupTarget（扩展名归一唯一事实源）', () => {
+  it('vhd：.vhd/.tar 错配归一为 .vhdx，缺失补 .vhdx', () => {
+    expect(normalizeBackupTarget('u.vhd', 'vhd')).toBe('u.vhdx')
+    expect(normalizeBackupTarget('u.tar', 'vhd')).toBe('u.vhdx')
+    expect(normalizeBackupTarget('u.vhdx', 'vhd')).toBe('u.vhdx')
+    expect(normalizeBackupTarget('u', 'vhd')).toBe('u.vhdx')
+  })
+
+  it('tar：.vhdx/.vhd 错配归一为 .tar，缺失补 .tar', () => {
+    expect(normalizeBackupTarget('u.vhdx', 'tar')).toBe('u.tar')
+    expect(normalizeBackupTarget('u.vhd', 'tar')).toBe('u.tar')
+    expect(normalizeBackupTarget('u.tar', 'tar')).toBe('u.tar')
+    expect(normalizeBackupTarget('u', 'tar')).toBe('u.tar')
+  })
+
+  it('trim + 幂等（对归一结果再调用不变）', () => {
+    expect(normalizeBackupTarget('  u.vhd  ', 'vhd')).toBe('u.vhdx')
+    for (const fmt of ['tar', 'vhd'] as const) {
+      const once = normalizeBackupTarget('dir\\my file.vhd', fmt)
+      expect(normalizeBackupTarget(once, fmt)).toBe(once)
+    }
+  })
+})
+
+describe('build*Args（argv 唯一事实源 — preview 与实跑同源）', () => {
+  it('buildExportArgs 归一目标扩展名并按格式追加 --vhd', () => {
+    expect(buildExportArgs('U', 'u.vhd', 'vhd')).toEqual(['--export', 'U', 'u.vhdx', '--vhd'])
+    expect(buildExportArgs('U', 'C:\\b\\u.tar', 'tar')).toEqual(['--export', 'U', 'C:\\b\\u.tar'])
+  })
+
+  it('preview* 就是 build*Args 的等价命令行（同源）', () => {
+    const exportReq = { name: 'U', path: 'u.vhd', format: 'vhd' as const }
+    expect(previewExportCommand(exportReq)).toBe(
+      formatCommand('wsl.exe', buildExportArgs('U', 'u.vhd', 'vhd')),
+    )
+    expect(previewExportCommand(exportReq)).toContain('u.vhdx')
+
+    const importReq = {
+      name: 'N',
+      installPath: 'D:\\N',
+      archivePath: 'D:\\a.tar',
+      format: 'tar' as const,
+      version: 2 as const,
+      inPlace: false,
+    }
+    expect(previewImportCommand(importReq)).toBe(
+      formatCommand('wsl.exe', buildImportArgs(importReq)),
+    )
+    expect(previewMoveCommand({ name: 'U', path: 'D:\\U', terminateFirst: true })).toBe(
+      formatCommand('wsl.exe', buildMoveArgs('U', 'D:\\U')),
+    )
+  })
+
+  it('buildImportArgs 分支 inPlace / format / version；buildMoveArgs 恒 --manage --move', () => {
+    expect(
+      buildImportArgs({
+        name: 'N',
+        installPath: '',
+        archivePath: 'D:\\a.vhdx',
+        format: 'vhd',
+        version: 2,
+        inPlace: true,
+      }),
+    ).toEqual(['--import-in-place', 'N', 'D:\\a.vhdx'])
+    expect(
+      buildImportArgs({
+        name: 'N',
+        installPath: 'D:\\N',
+        archivePath: 'D:\\a.vhdx',
+        format: 'vhd',
+        version: 1,
+        inPlace: false,
+      }),
+    ).toEqual(['--import', 'N', 'D:\\N', 'D:\\a.vhdx', '--vhd'])
+    expect(buildMoveArgs('U', 'D:\\U')).toEqual(['--manage', 'U', '--move', 'D:\\U'])
+  })
+})
+
 describe('backup naming & rotation pattern', () => {
   it('backupExtension maps vhd → vhdx', () => {
     expect(backupExtension('tar')).toBe('tar')
@@ -158,6 +241,24 @@ describe('backup naming & rotation pattern', () => {
     expect(isBackupFileName('U_20260102-030405.zip')).toBe(false)
     expect(isBackupFileName('random.tar')).toBe(false)
     expect(isBackupFileName('a/b_20260102-030405.tar')).toBe(false)
+  })
+
+  it('backupFileGroup 返回规范名头；与 isBackupFileName 同源', () => {
+    expect(backupFileGroup('Ubuntu_20260102-030405.tar')).toBe('Ubuntu')
+    expect(backupFileGroup('a%3Ab_20260102-030405.vhdx')).toBe('a%3Ab')
+    // 非规范文件不算备份 → null（不冒充）
+    expect(backupFileGroup('my.tar')).toBeNull()
+    expect(backupFileGroup('weird.vhdx')).toBeNull()
+    expect(backupFileGroup('U_20260102-030405.zip')).toBeNull()
+    // 与 isBackupFileName 判定一致（同一名字事实源）
+    for (const f of [
+      'U_20260102-030405.tar',
+      'my.tar',
+      'x_20260102-030405.vhdx',
+      'bad/name_1.tar',
+    ]) {
+      expect(backupFileGroup(f) !== null, `group/isBackup 判定分歧：${f}`).toBe(isBackupFileName(f))
+    }
   })
 })
 

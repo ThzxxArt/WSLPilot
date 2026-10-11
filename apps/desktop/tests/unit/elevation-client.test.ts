@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -211,6 +211,26 @@ describe('提权 Helper 脚本（纵深防御）', () => {
     // 白名单 JSON 与 shared 同源（禁止脚本内另抄一份）
     expect(script).toContain(JSON.stringify(ELEVATION_PROGRAMS))
   })
+
+  it('wsl.exe 分支切换 OutputEncoding=Unicode（UTF-16LE 输出不再乱码）', () => {
+    const script = buildElevationHelperScript()
+    // wsl.exe 用 Unicode，其余程序恢复默认
+    expect(script).toContain('[System.Text.Encoding]::Unicode')
+    expect(script).toContain('[System.Text.Encoding]::Default')
+    expect(script).toContain("[System.IO.Path]::GetFileName($program) -ieq 'wsl.exe'")
+    // 保存/还原 $prevEnc，且还原在 finally 里
+    expect(script).toContain('$prevEnc = [Console]::OutputEncoding')
+    expect(script).toContain('[Console]::OutputEncoding = $prevEnc')
+    // stderr 临时文件按同一编码读取
+    expect(script).toContain('ReadAllText($errTmp, [Console]::OutputEncoding)')
+    // 顺序：编码切换必须发生在命令执行之前，还原必须在执行之后
+    const encAt = script.indexOf('[System.Text.Encoding]::Unicode')
+    const invokeAt = script.indexOf('& $program @argList')
+    const restoreAt = script.indexOf('[Console]::OutputEncoding = $prevEnc')
+    expect(encAt).toBeGreaterThan(-1)
+    expect(encAt).toBeLessThan(invokeAt)
+    expect(restoreAt).toBeGreaterThan(invokeAt)
+  })
 })
 
 describe('提权客户端启动器细节（review 根治回归）', () => {
@@ -286,19 +306,33 @@ describe('提权客户端启动器细节（review 根治回归）', () => {
   })
 
   it('run 结束后提权工作目录被清空（含失败路径 — 用完即焚）', async () => {
-    const fsLike = makeFs()
-    const runTool = vi.fn(async (_program: string, _args: string[], _opts?: unknown) => ({
-      stdout: '',
-      stderr: '',
-      code: 0,
-    }))
+    // 真实 fs：临时文件真的落盘，才能观测「有物可清 → 清完为空」
+    // （全 mock 下 readdir 恒空 — 此前断言捕获不到任何清理行为）
+    const fsLike = {
+      writeFile: vi.fn(async (path: string, content: string) => {
+        writeFileSync(path, content)
+      }),
+      readFile: vi.fn(async (path: string) => readFileSync(path, 'utf8')),
+      rm: vi.fn(async (path: string) => {
+        rmSync(path, { force: true })
+      }),
+    }
+    let duringRun: string[] = []
+    const runTool = vi.fn(async () => {
+      // 运行中途：提权工作目录真实存在且 helper/request/result 三件套已落盘
+      duringRun = readdirSync(spaceRoot).flatMap((d) => readdirSync(join(spaceRoot, d)))
+      return { stdout: '', stderr: '', code: 0 }
+    })
     const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
     await client.run([bindReq])
+    expect(duringRun.sort()).toEqual(['helper.ps1', 'request.json', 'result.json'])
     expect(readdirSync(spaceRoot)).toEqual([])
 
     // 失败路径（结果 JSON 损坏）同样清理
     fsLike.readFile.mockResolvedValueOnce('not-json{{')
+    duringRun = []
     await client.run([bindReq])
+    expect(duringRun.sort()).toEqual(['helper.ps1', 'request.json', 'result.json'])
     expect(readdirSync(spaceRoot)).toEqual([])
   })
 })

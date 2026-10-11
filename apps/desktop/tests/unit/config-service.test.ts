@@ -192,6 +192,45 @@ describe('ConfigService', () => {
     expect(conflict!.detail).toContain('外部')
   })
 
+  it('冲突未决时 patch/update/replace 拒绝写（不吞外部修改）', async () => {
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    await new Promise((r) => setTimeout(r, 100))
+    const filePath = join(dir, 'settings.jsonc')
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({ $schemaVersion: 2, general: { accent: 'sunset' } }),
+      'utf8',
+    )
+    let conflict: { fileKey: string } | null = null
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 25))
+      conflict = svc.getConflict('settings')
+      if (conflict) break
+    }
+    expect(conflict).not.toBeNull()
+    const before = await fs.readFile(filePath, 'utf8')
+
+    // 三条写路径都必须拒绝
+    await expect(svc.patch('settings', { general: { accent: 'ocean' } })).rejects.toMatchObject({
+      code: 'CONFIG_INVALID',
+      message: expect.stringContaining('外部修改冲突'),
+    })
+    await expect(
+      svc.update('settings', (s) => ({ ...s, general: { ...s.general, accent: 'ocean' } })),
+    ).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
+    await expect(
+      svc.replace('settings', { $schemaVersion: 2, general: { accent: 'ocean' } } as never),
+    ).rejects.toMatchObject({ code: 'CONFIG_INVALID' })
+
+    // 外部编辑原样保留（未被静默覆盖），冲突标记仍在
+    expect(await fs.readFile(filePath, 'utf8')).toBe(before)
+    expect(svc.getConflict('settings')).not.toBeNull()
+
+    // resolveConflict 后写路径恢复
+    await svc.resolveConflict('settings', 'reload')
+    await expect(svc.patch('settings', { general: { accent: 'forest' } })).resolves.toBeTruthy()
+  })
+
   it('resolveConflict reload takes disk as source of truth', async () => {
     const filePath = join(dir, 'settings.jsonc')
     await fs.writeFile(

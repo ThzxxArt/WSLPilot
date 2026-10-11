@@ -33,7 +33,20 @@ type KeyTarget = {
   removeEventListener(type: 'keydown', fn: (e: KeyboardEvent) => void): void
 }
 
+/**
+ * 输入上下文守卫：焦点在输入控件 / contenteditable / xterm 终端内时，
+ * Ctrl+K/N/R/1-9 等快捷键属于「打字语境」，绝不能被全局快捷键劫持
+ * （否则 xterm 里清屏/换行/重绘全被抢走）。
+ */
+export function isTypingContext(target: EventTarget | null): boolean {
+  if (!target) return false
+  const el = target as Element
+  if (typeof el.closest !== 'function') return false
+  return !!el.closest('input, textarea, select, [contenteditable], .xterm, .xterm-helper-textarea')
+}
+
 function matchHotkey(e: KeyboardEvent, h: HotkeyHandlers): boolean {
+  if (isTypingContext(e.target)) return false
   const mod = e.ctrlKey || e.metaKey
   if (!mod || e.altKey) return false
   const key = e.key

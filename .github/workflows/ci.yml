@@ -93,3 +93,12 @@ jobs:
       # Electron E2E 用 electron.launch，不需要 Playwright 浏览器（review m3）
       - name: Run E2E (hard gate)
         run: npm run test:e2e
+
+      # 基线取证：缺基线/新增截图时把生成结果带出，供维护者入库（不放行假绿）
+      - name: Upload visual baselines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: apps/desktop/tests/e2e/__screenshots__
+          if-no-files-found: ignore

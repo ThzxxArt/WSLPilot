@@ -55,6 +55,7 @@ export const CH = {
 
   // metrics / tasks
   metricsSample: 'metrics:sample',
+  metricsOverview: 'metrics:overview',
   taskCancel: 'task:cancel',
   taskProgress: 'task:progress',
 
@@ -90,9 +91,11 @@ export const CH = {
   appPickSaveFile: 'app:pickSaveFile',
   appPickOpenFile: 'app:pickOpenFile',
   appOpenPath: 'app:openPath',
-  appOpenLogsDir: 'app:openLogsDir',
-  appExportDiagnostics: 'app:exportDiagnostics',
   appSignatureStatus: 'app:signatureStatus',
+
+  // diagnostics（M7 诊断包 / 日志目录 — 动词与 preload diagnostics.* API 对齐，禁止 app: 域命名漂移）
+  diagnosticsOpenLogsDir: 'diagnostics:openLogsDir',
+  diagnosticsExportPackage: 'diagnostics:exportPackage',
 
   // 更新（M7 自动更新）
   updateStatus: 'update:status',
@@ -140,6 +143,7 @@ export const INVOKE_CHANNELS = [
   CH.fsWrite,
   CH.fsRevealInExplorer,
   CH.metricsSample,
+  CH.metricsOverview,
   CH.taskCancel,
   CH.actionRun,
   CH.networkStatus,
@@ -162,8 +166,8 @@ export const INVOKE_CHANNELS = [
   CH.appPickSaveFile,
   CH.appPickOpenFile,
   CH.appOpenPath,
-  CH.appOpenLogsDir,
-  CH.appExportDiagnostics,
+  CH.diagnosticsOpenLogsDir,
+  CH.diagnosticsExportPackage,
   CH.appSignatureStatus,
   CH.updateStatus,
   CH.updateCheck,

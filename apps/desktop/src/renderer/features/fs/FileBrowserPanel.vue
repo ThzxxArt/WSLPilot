@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NSpin, NTag, useDialog, useMessage } from 'naive-ui'
-import { CodeEditor } from '@ui/components'
-import type { DirEntry } from '@shared/types'
-import { FS_READ_LIMIT_BYTES } from '@shared/constants'
+import { CodeEditor } from '@wslpilot/ui'
+import { FS_READ_LIMIT_BYTES, type DirEntry } from '@wslpilot/shared'
 import { errorLine } from '../../composables/useAppError'
 
 const props = defineProps<{ distroName: string }>()

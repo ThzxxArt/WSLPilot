@@ -7,9 +7,9 @@ import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
-import { MetricCard, DistroCard, EmptyState, StatusDot, Skeleton } from '@ui/components'
+import { MetricCard, DistroCard, EmptyState, StatusDot, Skeleton } from '@wslpilot/ui'
 import { vRipple } from '@wslpilot/ui'
-import { ACCENT_GRADIENTS, DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
+import { ACCENT_GRADIENTS, DEFAULT_POLL_INTERVAL_MS } from '@wslpilot/shared'
 import InstallDistroModal from '../features/distros/InstallDistroModal.vue'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
@@ -46,12 +46,16 @@ async function refreshAll() {
 onMounted(() => {
   // settings.general.autoRefreshOnStart：关闭后仅在尚无数据时兜底拉取一次
   if (settings.autoRefreshOnStart || distros.items.length === 0) void refreshAll()
-  void window.wslAPI.app
-    .getWslVersion()
-    .then((info) => {
+  // 版本探测失败（如 getVersion 双失败抛 AppError）不得成为 unhandled rejection 炸页：
+  // 兜底 catch + 同步异常 try，hero 文案静默保持「WSL」
+  void (async () => {
+    try {
+      const info = await window.wslAPI.app.getWslVersion()
       if (info) wslInfo.value = { wslVersion: info.wslVersion, kernelVersion: info.kernelVersion }
-    })
-    .catch(() => {})
+    } catch {
+      /* 版本未知：保持 wslLabel 降级文案 */
+    }
+  })()
 })
 
 const { start: startPolling, stop: stopPolling } = usePolling(() => void refreshAll(), {

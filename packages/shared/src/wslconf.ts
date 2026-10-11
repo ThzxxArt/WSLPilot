@@ -300,8 +300,8 @@ export const WSL_CONF_FIELDS: WslConfField[] = [
   },
 ] as const
 
-/** 文本值 → 表单类型值；无法识别返回 undefined（视为未设置） */
-export function coerceWslConfValue(
+/** 文本值 → 表单类型值；无法识别返回 undefined（视为未设置）。模块内实现，行为经 parseWslConf 观测 */
+function coerceWslConfValue(
   type: WslConfFieldType,
   raw: string | undefined,
 ): boolean | string | number | undefined {

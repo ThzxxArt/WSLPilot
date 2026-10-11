@@ -12,7 +12,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { formatBytes, type BackupFileInfo } from '@wslpilot/shared'
-import { ProgressRing, EmptyState } from '@ui/components'
+import { ProgressRing, EmptyState } from '@wslpilot/ui'
 import { useDistrosStore } from '../stores/distros'
 import { useSettingsStore } from '../stores/settings'
 import { useTasksStore } from '../stores/tasks'
@@ -61,6 +61,8 @@ const activeTaskId = ref('')
 const logOpen = ref(false)
 const backups = ref<BackupFileInfo[]>([])
 const backupsLoading = ref(false)
+/** 备份列表读取失败：与「目录里还没有文件」的空态分开呈现 */
+const backupsError = ref('')
 
 const exportForm = ref<ExportForm>({ ...DEFAULT_EXPORT_FORM })
 const importForm = ref<ImportForm>({ ...DEFAULT_IMPORT_FORM })
@@ -254,12 +256,13 @@ async function cancel() {
 }
 
 async function openResultDir() {
+  // 迁移的目标 path 本身就是目录（发行版被搬到那里）；导出/导入才看父目录
   const target =
-    mode.value === 'export'
-      ? parentDir(exportForm.value.path || settings.backupDefaultDir)
-      : mode.value === 'import'
-        ? parentDir(importForm.value.installPath || settings.backupDefaultDir)
-        : parentDir(moveForm.value.path || settings.backupDefaultDir)
+    mode.value === 'move'
+      ? moveForm.value.path || settings.backupDefaultDir
+      : mode.value === 'export'
+        ? parentDir(exportForm.value.path || settings.backupDefaultDir)
+        : parentDir(importForm.value.installPath || settings.backupDefaultDir)
   try {
     await window.wslAPI.app.openPath(target || settings.backupDefaultDir)
   } catch {
@@ -271,8 +274,11 @@ async function refreshBackups() {
   backupsLoading.value = true
   try {
     backups.value = await window.wslAPI.io.listBackups(settings.backupDefaultDir || undefined)
-  } catch {
+    backupsError.value = ''
+  } catch (e) {
+    // 失败 ≠ 空目录：独立错误态，绝不伪装成「还没有文件」
     backups.value = []
+    backupsError.value = errorLine(e, '读取备份列表失败')
   } finally {
     backupsLoading.value = false
   }
@@ -436,8 +442,12 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
         <n-button text type="primary" @click="refreshBackups"> 刷新 </n-button>
       </div>
       <n-spin :show="backupsLoading">
+        <p v-if="backupsError" class="backups-error" role="alert">
+          {{ backupsError }}
+          <n-button size="tiny" quaternary type="primary" @click="refreshBackups">重试</n-button>
+        </p>
         <EmptyState
-          v-if="backups.length === 0"
+          v-else-if="backups.length === 0"
           description="备份目录里还没有文件"
           illustration="💾"
         />
@@ -695,6 +705,18 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
 
 .backups {
   padding: 18px 22px;
+}
+
+.backups-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 12.5px;
 }
 
 .backups-head {

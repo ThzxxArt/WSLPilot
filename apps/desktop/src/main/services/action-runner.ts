@@ -17,7 +17,7 @@ import {
   type TaskHandle,
   type WslAction,
 } from '@wslpilot/shared'
-import { getRawCommand, runWsl, type Logger } from '@wslpilot/kit'
+import { runWsl, type Logger } from '@wslpilot/kit'
 import type { TaskControl } from './task-runner'
 import { spawnWslTask, type SpawnWslFn } from './spawn-task'
 import type { PtyManager, PtySessionInfo } from './pty-manager'
@@ -154,7 +154,8 @@ export function createActionRunner(deps: ActionRunnerDeps): ActionRunner {
         actionId: action.id,
         distro: target,
         terminal: action.terminal,
-        rawCommand: getRawCommand('wsl.exe', ['-d', target]),
+        // 等价命令行必须可复制可执行：带完整动作参数，而不是半截 wsl.exe -d
+        rawCommand,
       })
       return {
         action,

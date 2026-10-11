@@ -48,9 +48,9 @@ function escapeRegExp(s: string): string {
 
 /**
  * 生成用户主目录的全部变体（Windows 大小写不敏感 + 分隔符变体 + JSON 转义形态）。
- * 只做确定性替换，不做模糊匹配，避免误伤非用户路径。
+ * 只做确定性替换，不做模糊匹配，避免误伤非用户路径。模块内实现，行为经 sanitizeDiagnosticsText 观测。
  */
-export function homeDirVariants(homeDir: string): string[] {
+function homeDirVariants(homeDir: string): string[] {
   const raw = String(homeDir ?? '').trim()
   if (!raw) return []
   const slash = raw.replace(/\\/g, '/')

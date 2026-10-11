@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
-import type {
-  AccentName,
-  AppSettings,
-  BackupFormat,
-  LogLevel,
-  TerminalTheme,
+import {
+  defaultConfig,
+  toAppError,
+  type AccentName,
+  type AppError,
+  type AppSettings,
+  type BackupFormat,
+  type LogLevel,
+  type TerminalTheme,
 } from '@wslpilot/shared'
-import { defaultConfig } from '@shared/config-schema'
-import { toAppError, type AppError } from '@shared/errors'
 
 /**
  * 默认值唯一事实源：settings.jsonc schema（defaultConfig）。
@@ -46,7 +47,15 @@ function initialState() {
     lastError: null as AppError | null,
     /** 落盘失败时间戳：界面监听它给出一次性提示（review M-3） */
     persistErrorAt: 0,
+    /** load 是否成功完成过（失败态与「还没加载」可区分） */
+    loaded: false,
+    /** 最近一次 load 失败时间戳：界面监听它给出一次性提示 */
+    loadErrorAt: 0,
     version: '',
+    /** 代际守卫：并发 load 时只认最新一次发起的响应 */
+    loadGen: 0,
+    /** 落盘代际（按字段）：旧的失败响应不得回滚更新的写入 */
+    persistGens: {} as Record<string, number>,
   }
 }
 
@@ -59,10 +68,14 @@ export const useSettingsStore = defineStore('settings', {
     /**
      * 加载设置。失败降级到默认值并记录错误——
      * 绝不让启动链卡死在 loading（review C11）。
+     * 失败落 lastError + loadErrorAt（界面一次性提示）；成功清 lastError。
      */
     async load() {
+      const gen = ++this.loadGen
       try {
         const s = (await window.wslAPI.config.get('settings')) as AppSettings
+        // 有更新的 load 在途：旧响应不得覆盖新状态
+        if (gen !== this.loadGen) return
         this.accent = s.general.accent
         this.locale = s.general.locale
         this.reduceMotion = s.general.reduceMotion
@@ -89,13 +102,18 @@ export const useSettingsStore = defineStore('settings', {
         this.backupFormat = s.backup.format
         this.backupKeepRecent = s.backup.keepRecent
         this.backupAutoBeforeDestructive = s.backup.autoBackupBeforeDestructive
+        this.lastError = null
+        this.loaded = true
       } catch (e) {
+        if (gen !== this.loadGen) return
         this.lastError = toAppError(e)
+        this.loadErrorAt = Date.now()
       }
       try {
-        this.version = await window.wslAPI.app.getVersion()
+        const version = await window.wslAPI.app.getVersion()
+        if (gen === this.loadGen) this.version = version
       } catch {
-        this.version = ''
+        if (gen === this.loadGen) this.version = ''
       }
     },
 
@@ -114,10 +132,14 @@ export const useSettingsStore = defineStore('settings', {
       const state = this as unknown as SettingsState
       const prev = state[field]
       state[field] = value
+      // 按字段记代际：旧的失败响应不得回滚更新的写入（防把新值写回旧值）
+      const key = String(field)
+      const gen = (state.persistGens[key] = (state.persistGens[key] ?? 0) + 1)
       try {
         await window.wslAPI.config.set('settings', patch)
         return true
       } catch (e) {
+        if (state.persistGens[key] !== gen) return false
         state[field] = prev
         this.lastError = toAppError(e)
         this.persistErrorAt = Date.now()

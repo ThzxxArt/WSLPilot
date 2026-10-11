@@ -8,8 +8,6 @@ function initialState() {
     releaseNotes: '',
     percent: 0,
     error: '',
-    currentVersion: '',
-    feedUrl: '',
     busy: false,
   }
 }
@@ -28,8 +26,6 @@ export const useUpdateStore = defineStore('update', {
       this.releaseNotes = s.releaseNotes ?? ''
       this.percent = typeof s.percent === 'number' ? s.percent : 0
       this.error = s.error ?? ''
-      this.currentVersion = s.currentVersion
-      this.feedUrl = s.feedUrl ?? ''
     },
 
     /** 订阅主进程状态推送（App 挂载时调用一次）；返回解绑函数 */
@@ -43,7 +39,8 @@ export const useUpdateStore = defineStore('update', {
         const s = await window.wslAPI.update.status()
         this.applyState(s)
       } catch (e) {
-        // 状态拉取失败如实落 error 字段（界面状态行可见），不静默
+        // 状态拉取失败如实落 error 字段并置 error 状态（界面状态行可见），不静默
+        this.status = 'error'
         this.error = e instanceof Error ? e.message : String(e)
       }
     },

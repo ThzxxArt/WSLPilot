@@ -133,3 +133,63 @@ describe('HOTKEY_TABLE', () => {
     }
   })
 })
+
+/** 带 closest 的事件目标模拟（unit 环境无 DOM）：matchers 命中任一选择器即视为「自身命中」 */
+class FakeElement extends EventTarget {
+  constructor(private readonly matchers: string[]) {
+    super()
+  }
+  closest(sel: string): FakeElement | null {
+    return this.matchers.some((m) => sel.includes(m)) ? this : null
+  }
+}
+
+describe('输入上下文守卫（xterm/输入框内不劫持快捷键）', () => {
+  const typingSelectors = ['input', 'textarea', 'select', '[contenteditable]']
+
+  it.each(typingSelectors)('焦点在 %s 内时 Ctrl+K/N/R/1-9 全部放行给输入语境', (sel) => {
+    const el = new FakeElement([sel])
+    const h = makeHandlers()
+    const off = bindGlobalHotkeys(h, el as never)
+    el.dispatchEvent(key('k', { ctrlKey: true }))
+    el.dispatchEvent(key('n', { ctrlKey: true }))
+    el.dispatchEvent(key('r', { ctrlKey: true }))
+    el.dispatchEvent(key('3', { ctrlKey: true }))
+    expect(h.openPalette).not.toHaveBeenCalled()
+    expect(h.newTerminal).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(h.switchTab).not.toHaveBeenCalled()
+    off()
+  })
+
+  it('xterm 终端内（含 helper textarea）不被劫持', () => {
+    const term = new FakeElement(['.xterm'])
+    const h = makeHandlers()
+    const off = bindGlobalHotkeys(h, term as never)
+    term.dispatchEvent(key('k', { ctrlKey: true }))
+    term.dispatchEvent(key('n', { ctrlKey: true }))
+    term.dispatchEvent(key('5', { ctrlKey: true }))
+    expect(h.openPalette).not.toHaveBeenCalled()
+    expect(h.newTerminal).not.toHaveBeenCalled()
+    expect(h.switchTab).not.toHaveBeenCalled()
+    off()
+
+    const helper = new FakeElement(['.xterm-helper-textarea'])
+    const h2 = makeHandlers()
+    const off2 = bindGlobalHotkeys(h2, helper as never)
+    helper.dispatchEvent(key('r', { ctrlKey: true }))
+    expect(h2.refresh).not.toHaveBeenCalled()
+    off2()
+  })
+
+  it('非输入上下文仍正常触发（守卫不误伤）', () => {
+    const el = new FakeElement([])
+    const h = makeHandlers()
+    const off = bindGlobalHotkeys(h, el as never)
+    el.dispatchEvent(key('k', { ctrlKey: true }))
+    el.dispatchEvent(key('2', { ctrlKey: true }))
+    expect(h.openPalette).toHaveBeenCalledTimes(1)
+    expect(h.switchTab).toHaveBeenCalledWith(1)
+    off()
+  })
+})

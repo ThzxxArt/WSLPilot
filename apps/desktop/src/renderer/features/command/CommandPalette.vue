@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
-import { Kbd } from '@ui/components'
+import { useDialog, useMessage } from 'naive-ui'
+import { Kbd } from '@wslpilot/ui'
 import { useDistrosStore } from '../../stores/distros'
 import { useActionsStore } from '../../stores/actions'
 import { useSettingsStore } from '../../stores/settings'
@@ -24,7 +24,23 @@ const actions = useActionsStore()
 const settings = useSettingsStore()
 const terminal = useTerminalStore()
 const message = useMessage()
+const dialog = useDialog()
 const { open, closePalette } = useCommandPalette()
+
+/** 危险/需确认操作统一走 naive dialog（全仓一致，禁止 window.confirm） */
+function confirmDangerous(opts: { title: string; content: string }): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: opts.title,
+      content: opts.content,
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
 
 const query = ref('')
 const activeIndex = ref(0)
@@ -83,14 +99,18 @@ function buildItems(): PaletteItem[] {
       keywords: `${a.id} action`,
       run: async () => {
         if (a.confirm) {
-          const ok = window.confirm(`执行动作「${a.label}」？（确认后运行）`)
-          if (!ok) return
+          const ok = await confirmDangerous({
+            title: `执行动作「${a.label}」`,
+            content: `确认后运行：${a.description || a.id}`,
+          })
+          if (!ok) return false
         }
         const handle = await actions.run(
           a.id,
           a.scope === 'global' ? undefined : (target ?? undefined),
         )
         message.success(handle.ptyId ? `已在终端中运行「${a.label}」` : `已开始执行「${a.label}」`)
+        return true
       },
     })
   }
@@ -134,8 +154,15 @@ function buildItems(): PaletteItem[] {
     hint: 'wsl --shutdown',
     icon: '🔌',
     run: async () => {
+      // 破坏性操作：与 DashboardView「全部关机」popconfirm 同语义，必须二次确认
+      const ok = await confirmDangerous({
+        title: '全部关机',
+        content: '将执行 wsl --shutdown，关闭所有运行中的发行版，确定吗？',
+      })
+      if (!ok) return false
       await distros.shutdownAll()
       message.success('已关闭全部发行版')
+      return true
     },
   })
 
@@ -157,7 +184,8 @@ function buildItems(): PaletteItem[] {
       label: `查看发行版：${display}`,
       hint: '配置 / 动作 / 文件',
       icon: '🐧',
-      run: () => router.push({ path: '/distros', query: { focus: d.name } }),
+      // detail 查询参数由 DistrosView 接住并打开详情弹窗（配置/动作/文件三个页签在里面）
+      run: () => router.push({ path: '/distros', query: { focus: d.name, detail: d.name } }),
     })
     if (d.state !== 'Running') {
       items.push({
@@ -201,7 +229,7 @@ function buildItems(): PaletteItem[] {
   items.push(navItem('nav-distros', '发行版', '/distros', '列表与操作', undefined, '🐧'))
   items.push(navItem('nav-terminal', '终端', '/terminal', '多标签工作区', undefined, '🖥️'))
   items.push(navItem('nav-network', '网络', '/network', '端口转发 / 镜像 / 代理', undefined, '🌐'))
-  items.push(navItem('nav-backup', '备份与迁移', '/backup', undefined, undefined, '💾'))
+  items.push(navItem('nav-backup', '备份迁移', '/backup', undefined, undefined, '💾'))
   items.push(navItem('nav-devices', 'USB 设备', '/devices', 'usbipd 绑定管理', undefined, '🔌'))
   items.push(navItem('nav-settings', '设置', '/settings', undefined, undefined, '⚙️'))
 
@@ -333,9 +361,10 @@ function onKeydown(e: KeyboardEvent) {
 async function execute(cmd: PaletteItem | undefined) {
   if (!cmd) return
   closePalette()
-  void persistRecent(cmd.id)
   try {
-    await cmd.run()
+    // run 成功才进「最近使用」：失败（抛错）与用户取消（run 返回 false）都不记
+    const r = await Promise.resolve(cmd.run())
+    if (r !== false) void persistRecent(cmd.id)
   } catch (e) {
     message.error(errorLine(e, `执行失败：${cmd.label}`))
   }

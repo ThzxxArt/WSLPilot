@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { promises as fsp, mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { promises as fsp, mkdtempSync, rmSync, existsSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -7,6 +7,7 @@ import {
   parseLinuxPath,
   joinDistroPath,
   defaultRootFor,
+  defaultFallbackRootFor,
   READ_LIMIT,
 } from '../../src/main/services/fs-bridge'
 
@@ -61,8 +62,9 @@ describe('joinDistroPath', () => {
     expect(joinDistroPath('/root/', '/etc/x', '/')).toBe('/root/etc/x')
   })
 
-  it('defaultRootFor 生成 wsl.localhost UNC', () => {
+  it('defaultRootFor 生成 wsl.localhost UNC，备用根生成 wsl$ UNC', () => {
     expect(defaultRootFor('Ubuntu')).toBe('\\\\wsl.localhost\\Ubuntu')
+    expect(defaultFallbackRootFor('Ubuntu')).toBe('\\\\wsl$\\Ubuntu')
   })
 })
 
@@ -189,5 +191,122 @@ describe('createFsBridge（临时目录模拟发行版根）', () => {
     expect(r.binary).toBe(false)
     expect(r.sizeBytes).toBe(3 * 1024 * 1024)
     expect(r.text.length).toBe(READ_LIMIT)
+  })
+})
+
+describe('createFsBridge 备用根回退（wsl.localhost → wsl$）', () => {
+  let fallbackRoot: string
+  let lockedDir: string
+  let primaryRoot: string
+
+  beforeEach(async () => {
+    fallbackRoot = mkdtempSync(join(tmpdir(), 'wslpilot-fb-'))
+    await fsp.mkdir(join(fallbackRoot, 'etc'), { recursive: true })
+    await fsp.writeFile(join(fallbackRoot, 'etc', 'wsl.conf'), '[boot]\nsystemd = true\n', 'utf8')
+    // 主根挂在只读目录下：读操作 ENOENT、写操作 EACCES，均属 UNC 不可达类可回退错误
+    lockedDir = mkdtempSync(join(tmpdir(), 'wslpilot-lock-'))
+    chmodSync(lockedDir, 0o555)
+    primaryRoot = join(lockedDir, 'wsl.localhost')
+  })
+
+  afterEach(() => {
+    chmodSync(lockedDir, 0o755)
+    rmSync(lockedDir, { recursive: true, force: true })
+    rmSync(fallbackRoot, { recursive: true, force: true })
+    vi.restoreAllMocks()
+  })
+
+  function makeBridge(over: Record<string, unknown> = {}) {
+    return createFsBridge({
+      logger: logger(),
+      rootFor: () => primaryRoot,
+      fallbackRootFor: () => fallbackRoot,
+      sep: '/',
+      reveal: vi.fn(),
+      ...over,
+    })
+  }
+
+  it('readDir 主根失败自动回退备用根成功', async () => {
+    const b = makeBridge()
+    const entries = await b.readDir('Ubuntu', '/')
+    expect(entries.map((e) => e.name)).toContain('etc')
+    const nested = await b.readDir('Ubuntu', '/etc')
+    expect(nested.map((e) => e.name)).toEqual(['wsl.conf'])
+  })
+
+  it('read 主根失败自动回退备用根成功', async () => {
+    const b = makeBridge()
+    const r = await b.read('Ubuntu', '/etc/wsl.conf')
+    expect(r.binary).toBe(false)
+    expect(r.text).toContain('systemd = true')
+  })
+
+  it('write 主根失败自动回退备用根成功', async () => {
+    const b = makeBridge()
+    await b.write('Ubuntu', '/etc/new.conf', 'x = 1\n')
+    expect(existsSync(join(fallbackRoot, 'etc', 'new.conf'))).toBe(true)
+    expect(existsSync(join(primaryRoot, 'etc', 'new.conf'))).toBe(false)
+  })
+
+  it('revealInExplorer 主根失败自动回退备用根成功', async () => {
+    const reveal = vi.fn()
+    const b = makeBridge({ reveal })
+    await b.revealInExplorer('Ubuntu', '/etc/wsl.conf')
+    expect(reveal).toHaveBeenCalledWith(join(fallbackRoot, 'etc', 'wsl.conf'))
+  })
+
+  it('两根都失败才抛错，错误信息如实说明两个根都试过', async () => {
+    const primary = join(primaryRoot, 'a')
+    const backup = join(fallbackRoot, 'b')
+    const b = createFsBridge({
+      logger: logger(),
+      rootFor: () => primary,
+      fallbackRootFor: () => backup,
+      sep: '/',
+      reveal: vi.fn(),
+    })
+    const err = await b.readDir('Ubuntu', '/').catch((e) => e)
+    expect(err).toMatchObject({ code: 'IO_ERROR' })
+    expect(err.message).toContain('目录不存在')
+    expect(err.message).toContain('已尝试')
+    expect(err.message).toContain(primary)
+    expect(err.message).toContain(backup)
+    expect(err.detail).toContain(primary)
+    expect(err.detail).toContain(backup)
+  })
+
+  it('路径逃逸仍被拦（回退不绕过校验，且不触碰备用根）', async () => {
+    const fallbackRootFor = vi.fn(() => fallbackRoot)
+    const b = createFsBridge({
+      logger: logger(),
+      rootFor: () => primaryRoot,
+      fallbackRootFor,
+      sep: '/',
+      reveal: vi.fn(),
+    })
+    await expect(b.write('Ubuntu', '/../evil', 'x')).rejects.toMatchObject({
+      code: 'IO_ERROR',
+      message: expect.stringContaining('逃逸'),
+    })
+    await expect(b.readDir('Ubuntu', '/../evil')).rejects.toMatchObject({ code: 'IO_ERROR' })
+    await expect(b.read('Ubuntu', '/../etc/passwd')).rejects.toMatchObject({ code: 'IO_ERROR' })
+    // 校验先于回退：备用根解析器不应被调用
+    expect(fallbackRootFor).not.toHaveBeenCalled()
+    expect(existsSync(join(fallbackRoot, 'evil'))).toBe(false)
+    expect(existsSync(join(fallbackRoot, 'passwd'))).toBe(false)
+  })
+
+  it('自定义 rootFor 未显式传 fallbackRootFor 时不启用回退（错误保持单根语义）', async () => {
+    const b = createFsBridge({
+      logger: logger(),
+      rootFor: () => primaryRoot,
+      sep: '/',
+      reveal: vi.fn(),
+    })
+    const err = await b.readDir('Ubuntu', '/').catch((e) => e)
+    expect(err).toMatchObject({ code: 'IO_ERROR' })
+    expect(err.message).toContain('目录不存在')
+    expect(err.message).not.toContain('已尝试')
   })
 })

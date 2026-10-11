@@ -1,7 +1,7 @@
 import type { AccentName } from './tokens'
 import { accentMaps } from './tokens'
 
-/** 强调色切换过渡时长（§13.2：全局强调色 300ms 平滑过渡） */
+/** 强调色切换过渡时长（§13.2：全局强调色 320ms 平滑过渡；与 motion.scss 过渡时长一致） */
 const ACCENT_TRANSITION_MS = 320
 let accentAnimTimer: ReturnType<typeof setTimeout> | null = null
 

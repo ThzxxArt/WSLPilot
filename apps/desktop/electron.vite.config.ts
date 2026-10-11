@@ -6,15 +6,20 @@ import vue from '@vitejs/plugin-vue'
 // sandbox preload 禁止 require 任意 npm 包（评审 C1/C2）
 const bundleWorkspace = ['@wslpilot/shared', '@wslpilot/kit']
 
+// main / preload / renderer 三端统一的 workspace 包别名：显式指向各包 src，
+// 不依赖 workspace node_modules 隐式解析（此前 renderer/preload 隐式、main 显式，策略不一致）
+const workspaceAlias = {
+  '@wslpilot/shared': resolve(__dirname, '../../packages/shared/src'),
+  '@wslpilot/kit': resolve(__dirname, '../../packages/kit/src'),
+  '@wslpilot/ui': resolve(__dirname, '../../packages/ui/src'),
+}
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: bundleWorkspace })],
     resolve: {
       alias: {
-        '@shared': resolve(__dirname, '../../packages/shared/src'),
-        '@kit': resolve(__dirname, '../../packages/kit/src'),
-        '@wslpilot/shared': resolve(__dirname, '../../packages/shared/src'),
-        '@wslpilot/kit': resolve(__dirname, '../../packages/kit/src'),
+        ...workspaceAlias,
       },
     },
   },
@@ -23,18 +28,16 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: bundleWorkspace })],
     resolve: {
       alias: {
-        '@shared': resolve(__dirname, '../../packages/shared/src'),
-        '@wslpilot/shared': resolve(__dirname, '../../packages/shared/src'),
+        ...workspaceAlias,
       },
     },
   },
   renderer: {
     resolve: {
       alias: {
+        ...workspaceAlias,
         '@': resolve(__dirname, 'src/renderer'),
         '@ui': resolve(__dirname, '../../packages/ui/src'),
-        '@shared': resolve(__dirname, '../../packages/shared/src'),
-        '@wslpilot/shared': resolve(__dirname, '../../packages/shared/src'),
       },
     },
     plugins: [vue()],

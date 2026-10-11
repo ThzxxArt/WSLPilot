@@ -149,6 +149,22 @@ describe('actionRunner.prepare', () => {
     expect(p.rawCommand).not.toContain('${')
   })
 
+  it('prepare 日志 rawCommand 含完整动作参数（可复制执行，非半截 wsl.exe -d）', async () => {
+    const deps = makeDeps()
+    const runner = createActionRunner(deps)
+    await runner.prepare('update-all', 'Ubuntu')
+    const logged = (deps.logger.info as any).mock.calls.find(
+      ([msg]: [string]) => msg === 'action prepared',
+    )
+    expect(logged).toBeTruthy()
+    const rawCommand = logged![1].rawCommand as string
+    expect(rawCommand).toContain('/usr/bin/bash')
+    expect(rawCommand).toContain('sudo apt update')
+    expect(rawCommand).toContain('-d Ubuntu')
+    // 不允许退回半截命令
+    expect(rawCommand).not.toBe('wsl.exe -d Ubuntu')
+  })
+
   it('global 动作落到默认发行版并探测 ${user}', async () => {
     const deps = makeDeps()
     const runner = createActionRunner(deps)

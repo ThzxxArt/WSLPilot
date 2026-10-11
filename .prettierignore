@@ -1,0 +1,21 @@
+# 与 .gitignore 对齐：生成物/产物/报告不参与 format 回荡
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+out/
+release/
+
+# Test / coverage reports
+coverage/
+coverage-component/
+playwright-report/
+test-results/
+
+# Generated sources（gen-tokens 产物，format 会与生成器输出互相回荡）
+packages/ui/src/styles/tokens.generated.scss
+
+# Packaging artifacts
+*.vhdx
+*.tar

@@ -3,10 +3,8 @@ import {
   createUsbipdService,
   isToolMissing,
   isUnknownOptionError,
-  USBIPD_INSTALL_HINT,
 } from '../../src/main/services/usbipd-service'
 import type { TaskControl } from '../../src/main/services/task-runner'
-import { USBIPD_INSTALL_COMMAND } from '@wslpilot/shared'
 
 function logger() {
   return {
@@ -115,7 +113,6 @@ describe('UsbipdService.list', () => {
       code: 'TASK_FAILED',
       suggestion: expect.stringContaining('winget install usbipd'),
     })
-    expect(USBIPD_INSTALL_HINT).toBe(USBIPD_INSTALL_COMMAND)
   })
 
   it('其它失败映射 TASK_FAILED', async () => {

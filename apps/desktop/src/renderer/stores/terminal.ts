@@ -1,13 +1,11 @@
 import { defineStore } from 'pinia'
-import { toAppError, type AppError } from '@shared/errors'
+import { toAppError, type AppError } from '@wslpilot/shared'
 
 export interface TerminalSession {
   ptyId: string
   /** 显示名（可重命名） */
   title: string
   distro: string
-  shell: string
-  cwd?: string
   createdAt: number
   /** 会话存活 */
   alive: boolean
@@ -69,7 +67,6 @@ export const useTerminalStore = defineStore('terminal', {
     sessions: [] as TerminalSession[],
     activeId: '' as string,
     lastError: null as AppError | null,
-    busy: false,
     maxSessions: 10,
   }),
 
@@ -102,7 +99,6 @@ export const useTerminalStore = defineStore('terminal', {
         }
         return null
       }
-      this.busy = true
       try {
         const info = await window.wslAPI.terminal.create({
           distro,
@@ -115,8 +111,6 @@ export const useTerminalStore = defineStore('terminal', {
           ptyId: info.ptyId,
           title: opts.shell ? `${distro} · ${opts.shell}` : distro,
           distro: info.distro,
-          shell: info.shell,
-          cwd: opts.cwd,
           createdAt: info.createdAt ?? Date.now(),
           alive: true,
         }
@@ -127,8 +121,6 @@ export const useTerminalStore = defineStore('terminal', {
       } catch (e) {
         this.lastError = toAppError(e)
         return null
-      } finally {
-        this.busy = false
       }
     },
 
@@ -140,10 +132,7 @@ export const useTerminalStore = defineStore('terminal', {
      * 收编已存在的主进程 PTY 会话（M5 terminal 动作的临时 PTY / 窗口重载恢复）。
      * 不发 pty:create，只登记标签与输出缓冲；保留 adopt 前已到达的数据。
      */
-    adopt(
-      ptyId: string,
-      opts: { title?: string; distro: string; shell?: string },
-    ): TerminalSession | null {
+    adopt(ptyId: string, opts: { title?: string; distro: string }): TerminalSession | null {
       const existing = this.sessions.find((s) => s.ptyId === ptyId)
       if (existing) return existing
       const exitCode = pendingExits.get(ptyId)
@@ -153,7 +142,6 @@ export const useTerminalStore = defineStore('terminal', {
         ptyId,
         title: opts.title?.trim() || opts.distro,
         distro: opts.distro,
-        shell: opts.shell ?? '',
         createdAt: Date.now(),
         alive: exitCode === undefined,
       }
@@ -177,7 +165,6 @@ export const useTerminalStore = defineStore('terminal', {
           this.adopt(info.ptyId, {
             title: info.distro,
             distro: info.distro,
-            shell: info.shell,
           })
         }
       } catch {

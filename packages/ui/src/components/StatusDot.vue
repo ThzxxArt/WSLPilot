@@ -67,14 +67,4 @@ const pulsing = computed(() => props.state === 'Running' || props.state === 'Ins
     opacity: 0;
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .status-dot.pulsing::after {
-    animation: none;
-  }
-}
-
-:root[data-reduce-motion='true'] .status-dot.pulsing::after {
-  animation: none;
-}
 </style>

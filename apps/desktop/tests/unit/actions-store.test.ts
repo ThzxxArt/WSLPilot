@@ -51,9 +51,9 @@ describe('useActionsStore', () => {
     const s = useActionsStore()
     await s.load()
     expect(s.items).toHaveLength(2)
-    expect(s.byId('a1')?.label).toBe('动作一')
-    expect(s.byId('nope')).toBeNull()
-    expect(s.all).toHaveLength(2)
+    expect(s.items.find((a) => a.id === 'a1')?.label).toBe('动作一')
+    expect(s.items.some((a) => a.id === 'nope')).toBe(false)
+    expect(s.loaded).toBe(true)
   })
 
   it('load 失败记录 AppError；非数组降级为空', async () => {

@@ -4,7 +4,7 @@ import { assertSafeDistroName } from './errors'
 import { assertSafeActionId } from './actions'
 import { assertSafeRuleId } from './network'
 import { assertSafeBusId } from './usbipd'
-import { FS_WRITE_LIMIT_BYTES, WSL_CONF_MAX_BYTES } from './constants'
+import { DEFAULT_BACKUP_KEEP, FS_WRITE_LIMIT_BYTES, WSL_CONF_MAX_BYTES } from './constants'
 
 /**
  * 各 IPC 通道入参 zod schema（设计书 §8.2）。
@@ -32,6 +32,15 @@ export const nameSchema = z
 
 /** 会话/任务 id：非空 + 长度上限 */
 export const idSchema = z.string().min(1).max(200)
+
+/**
+ * metrics:sample 单发行版名：在 nameSchema 基础上拒绝全局保留键 `*`。
+ * 全局概览语义已拆到独立通道 `metrics:overview`，此处不再放行 `*`，
+ * 否则单通道又会退回「双返回形状」（Metrics | OverviewMetrics）的歧义契约。
+ */
+export const metricsNameSchema = nameSchema.refine((s) => s !== '*', {
+  message: 'metrics:sample 只接受发行版名，全局概览请走 metrics:overview',
+})
 
 /** 端口转发规则 id（network.jsonc 执行白名单的键）— IPC 边界与执行边界同一校验 */
 export const ruleIdSchema = z
@@ -77,13 +86,21 @@ function hasForbiddenKey(value: unknown, depth = 0): boolean {
   return false
 }
 
-/** 嵌套 patch：递归拒绝原型污染键（含数组元素 — review M2） */
+/** configSet patch 序列化后长度上限（防 IPC 撑爆；单点事实源在本模块内） */
+const CONFIG_PATCH_MAX_BYTES = 256 * 1024
+
+/** 嵌套 patch：递归拒绝原型污染键（含数组元素 — review M2），序列化后超上限拒绝 */
 export const patchSchema = z.custom<Record<string, unknown>>(
   (obj) => {
     if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return false
-    return !hasForbiddenKey(obj)
+    if (hasForbiddenKey(obj)) return false
+    try {
+      return utf8Bytes(JSON.stringify(obj)) <= CONFIG_PATCH_MAX_BYTES
+    } catch {
+      return false // 循环引用等不可序列化 → 拒绝
+    }
   },
-  { message: 'patch 包含非法键' },
+  { message: `patch 含非法键或序列化后超过 ${CONFIG_PATCH_MAX_BYTES} 字节上限` },
 )
 
 export const configKeySchema = z.enum([
@@ -112,13 +129,13 @@ export const fileFilterSchema = z.object({
 export const metaPayloadSchema = z.object({
   name: nameSchema,
   alias: z.string().default(''),
-  tags: z.array(z.string()).default([]),
+  tags: z.array(z.string().max(64)).max(20).default([]),
   color: z.string().default(''),
   icon: z.string().default(''),
   note: z.string().default(''),
   startupCwd: z.string().default('~'),
   pinned: z.boolean().default(false),
-  quickActions: z.array(z.string()).default([]),
+  quickActions: z.array(z.string().max(64)).max(20).default([]),
 })
 
 /** 拒绝控制字符的字符串（max 由调用方先约束，refine 后无链式方法） */
@@ -169,8 +186,12 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   }),
   [CH.registryDetail]: nameSchema,
   [CH.metaGet]: nameSchema,
-  // '*' 是全局概览保留键，其余必须是合法发行版名
-  [CH.metricsSample]: z.union([nameSchema, z.literal('*')]),
+  // metrics:sample 只保留单发行版语义：概览键 `*` 已拆到 metrics:overview，此处显式拒绝，
+  // 防止一通道双返回形状（Metrics | OverviewMetrics 联合）回归。发行版名规则仍由
+  // nameSchema / assertSafeDistroName 统一（`*` 作为名字的合法字符不在此处收紧）。
+  [CH.metricsSample]: metricsNameSchema,
+  // 全局概览（OverviewMetrics）：无入参或空对象
+  [CH.metricsOverview]: z.object({}).optional(),
 
   [CH.configGet]: configKeySchema,
   [CH.configSet]: z.object({
@@ -233,7 +254,7 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.ioCleanupBackups]: z
     .object({
       dir: ioPathSchema.optional(),
-      keep: z.number().int().min(1).max(50).default(5),
+      keep: z.number().int().min(1).max(50).default(DEFAULT_BACKUP_KEEP),
     })
     .default({}),
   [CH.taskCancel]: idSchema,
@@ -247,7 +268,7 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.appPickSaveFile]: z
     .object({
       defaultPath: ioPathSchema.optional(),
-      suggestedName: z.string().max(255).optional(),
+      suggestedName: noControl(255).optional(),
       filters: z.array(fileFilterSchema).max(10).optional(),
     })
     .default({}),
@@ -260,7 +281,7 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.appOpenPath]: ioPathSchema,
 
   // 诊断包（M7）：可选默认保存目录，其余由主进程弹保存对话框
-  [CH.appExportDiagnostics]: z
+  [CH.diagnosticsExportPackage]: z
     .object({
       defaultPath: ioPathSchema.optional(),
     })

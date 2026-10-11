@@ -213,6 +213,9 @@ describe('PortForwardTable', () => {
     // udp 规则的「应用」被禁用
     const udpApply = rows[1]!.findAll('button').find((b) => b.text().includes('应用'))
     expect(udpApply!.attributes('disabled')).toBeDefined()
+    // udp-only（canApply=false）行的「从系统移除」同样禁用：netsh 只认 TCP
+    const udpRemove = rows[1]!.findAll('button').find((b) => b.text().includes('从系统移除'))
+    expect(udpRemove!.attributes('disabled')).toBeDefined()
   })
 
   it('启用开关与全部应用', async () => {
@@ -271,7 +274,29 @@ describe('PortForwardForm', () => {
     const emitted = w.emitted('save')
     expect(emitted).toHaveLength(1)
     expect((emitted![0]![0] as PortForwardRule).id).toBe('dev-3000')
+    // 编辑态保存必须交出原 id（upsert 据此重命名，而非静默另插一条）
+    expect(emitted![0]![1]).toBe('dev-3000')
     expect(w.emitted('update:show')![0]).toEqual([false])
+  })
+
+  it('编辑态改 id = 重命名：save 携带原 id 与新 id', async () => {
+    const w = mount(PortForwardForm, {
+      props: { show: true, rule: RULE, rules: [RULE], distros: [distro('Ubuntu')] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const idInput = Array.from(document.body.querySelectorAll('input'))[0]!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(idInput, 'renamed-3000')
+    idInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    const save = findButton('保存修改')
+    save!.click()
+    await flushPromises()
+    const payload = w.emitted('save')![0]!
+    expect((payload[0] as PortForwardRule).id).toBe('renamed-3000')
+    expect(payload[1]).toBe('dev-3000')
   })
 
   it('校验失败时展示原因并禁用保存', async () => {
@@ -348,6 +373,24 @@ describe('ProxyPanel', () => {
     expect(w.text()).toContain('已写入')
   })
 
+  it('跟随 Windows 系统代理时展示 ProxyOverride（no_proxy 回退）摘要', () => {
+    const w = mount(ProxyPanel, {
+      props: {
+        proxy: { useWindowsProxy: true, httpProxy: '', httpsProxy: '', noProxy: '' },
+        distros: [distro('Ubuntu')],
+        windowsProxy: {
+          enabled: true,
+          server: 'p:8080',
+          override: 'localhost;127.0.0.1;<local>',
+        },
+        proxyScript: null,
+      },
+      attachTo: document.body,
+    })
+    expect(w.text()).toContain('Windows 系统代理：http://p:8080')
+    expect(w.text()).toContain('不代理列表（no_proxy 回退）：localhost;127.0.0.1;<local>')
+  })
+
   it('空代理配置 = 显式关闭（可保存，不再逼用户留假地址）', async () => {
     const w = mount(ProxyPanel, {
       props: {
@@ -408,6 +451,44 @@ describe('DevicesView', () => {
     await attachSwitch.vm.$emit('update:value', true)
     await flushPromises()
     expect(wslAPI.devices.attach).toHaveBeenCalled()
+  })
+
+  it('load 失败展示错误态而非「没有发现 USB 设备」', async () => {
+    wslAPI.devices.status.mockResolvedValue({ installed: true, version: '2.4.1' })
+    wslAPI.devices.list.mockRejectedValue(
+      new Error('WSLPILOT:{"code":"TASK_FAILED","message":"usbipd 调用炸了","recoverable":true}'),
+    )
+    const w = mount(DevicesView, { attachTo: document.body })
+    await flushPromises()
+    expect(w.text()).toContain('读取设备列表失败')
+    expect(w.text()).toContain('usbipd 调用炸了')
+    expect(w.text()).not.toContain('没有发现 USB 设备')
+  })
+
+  it('bind 在途时禁用该行开关（防重复提交）', async () => {
+    wslAPI.devices.status.mockResolvedValue({ installed: true, version: '2.4.1' })
+    wslAPI.devices.list.mockResolvedValue([{ ...device, state: 'not-shared' }])
+    let resolveBind!: (v: { taskId: string }) => void
+    wslAPI.devices.bind.mockReturnValueOnce(
+      new Promise<{ taskId: string }>((r) => (resolveBind = r)),
+    )
+    const w = mount(DevicesView, { attachTo: document.body })
+    await flushPromises()
+    const rows = w.findAll('tbody tr')
+    const shareSwitch = rows[0]!.findAllComponents(NSwitch)[0]!
+    expect(shareSwitch.props('disabled')).toBe(false)
+
+    await shareSwitch.vm.$emit('update:value', true)
+    await flushPromises()
+    // 在途：行内开关禁用，重复提交进不来
+    expect(shareSwitch.props('disabled')).toBe(true)
+    await shareSwitch.vm.$emit('update:value', true)
+    await flushPromises()
+    expect(wslAPI.devices.bind).toHaveBeenCalledTimes(1)
+
+    resolveBind({ taskId: 'd' })
+    await flushPromises()
+    expect(shareSwitch.props('disabled')).toBe(false)
   })
 
   it('空设备列表展示空状态', async () => {
@@ -486,6 +567,48 @@ describe('NetworkView', () => {
         content: expect.stringContaining('netsh.exe interface portproxy add'),
       }),
     )
+  })
+
+  it('load 失败展示错误横幅（不静默）', async () => {
+    const boom = new Error(
+      'WSLPILOT:{"code":"IO_ERROR","message":"network.jsonc 读不动","recoverable":true}',
+    )
+    wslAPI.network.listRules.mockRejectedValue(boom)
+    wslAPI.network.getProxy.mockRejectedValue(boom)
+    wslAPI.network.status.mockRejectedValue(boom)
+    wslAPI.distros.list.mockResolvedValue([])
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    const banner = w.find('.error-banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('network.jsonc 读不动')
+  })
+
+  it('头部展示系统已生效规则数（appliedCount 落地）', async () => {
+    wslAPI.network.listRules.mockResolvedValue([RULE])
+    wslAPI.network.getProxy.mockResolvedValue({
+      useWindowsProxy: false,
+      httpProxy: '',
+      httpsProxy: '',
+      noProxy: 'localhost',
+    })
+    wslAPI.network.status.mockResolvedValue(
+      statusOf({
+        portProxy: [
+          {
+            listenAddress: '0.0.0.0',
+            listenPort: 3000,
+            connectAddress: '127.0.0.1',
+            connectPort: 3000,
+            kind: 'v4tov4',
+          },
+        ],
+      }),
+    )
+    wslAPI.distros.list.mockResolvedValue([])
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    expect(w.find('.page-header').text()).toContain('系统已生效 1 条')
   })
 
   it('无启用规则时全部应用给出提示', async () => {

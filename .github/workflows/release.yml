@@ -53,6 +53,11 @@ jobs:
       - name: Build
         run: npm run build --workspace @wslpilot/desktop
 
+      # E2E 硬门禁（review C7）：与 ci.yml e2e job 同跑法 —— 先 build 再 playwright
+      # （e2e 启动 out/main/index.js，故置于 Build 之后）
+      - name: E2E (Playwright, hard gate)
+        run: npm run test:e2e
+
       - name: Product smoke (main/preload module graph)
         run: npm run smoke:product
 

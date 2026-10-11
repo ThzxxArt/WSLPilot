@@ -182,6 +182,27 @@ describe('WslService', () => {
       expect(v.wslVersion).toBe('2.3.26')
       expect(v.kernelVersion).toContain('5.15')
     })
+
+    it('双命令都失败时抛 TASK_FAILED（不装成功返回空串）', async () => {
+      ;(runWsl as any)
+        .mockResolvedValueOnce({ stdout: '', stderr: 'wsl missing', code: 1 })
+        .mockResolvedValueOnce({ stdout: '', stderr: 'wsl missing', code: 1 })
+      await expect(svc.getVersion()).rejects.toMatchObject({
+        code: 'TASK_FAILED',
+        message: '无法获取 WSL 版本',
+        suggestion: expect.stringContaining('wsl --update'),
+      })
+    })
+
+    it('一成功一失败 → 保持现状返回 raw/空串（log warn）', async () => {
+      ;(runWsl as any)
+        .mockResolvedValueOnce({ stdout: '', stderr: 'no --version', code: 1 })
+        .mockResolvedValueOnce(ok('Kernel version: 5.15.153.1'))
+      const v = await svc.getVersion()
+      expect(v.wslVersion).toBe('')
+      expect(v.kernelVersion).toContain('5.15')
+      expect(v.raw).toContain('5.15')
+    })
   })
 
   describe('sampleMetrics', () => {
@@ -213,13 +234,28 @@ describe('WslService', () => {
       expect(m.memTotalKB).toBe(100)
     })
 
-    it('returns zeros when command fails', async () => {
-      ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'no', code: 1 })
+    it('命令失败抛 TASK_FAILED（零值假成功会污染 CPU 分母，禁止）', async () => {
+      ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'boom', code: 1 })
+      await expect(svc.sampleMetrics('Ubuntu')).rejects.toMatchObject({
+        code: 'TASK_FAILED',
+        message: expect.stringContaining('采样'),
+        detail: expect.stringContaining('boom'),
+      })
+    })
+
+    it('命令成功但解析不出可信数据（无 MEM/DISK 行）同样抛错，不静默零值', async () => {
+      ;(runWsl as any).mockResolvedValue(ok('some garbage output'))
+      await expect(svc.sampleMetrics('Ubuntu')).rejects.toMatchObject({
+        code: 'TASK_FAILED',
+        message: expect.stringContaining('无可信数据'),
+      })
+    })
+
+    it('仅缺 DISK（mem 可信）不抛错，部分数据照常返回', async () => {
+      ;(runWsl as any).mockResolvedValue(ok('MEM:100 50\n'))
       const m = await svc.sampleMetrics('Ubuntu')
-      expect(m.memUsedKB).toBe(0)
-      expect(m.diskUsedKB).toBe(0)
+      expect(m.memTotalKB).toBe(100)
       expect(m.diskTotalKB).toBe(0)
-      expect(m.cpuPercent).toBe(0)
     })
 
     it('rejects empty name', async () => {

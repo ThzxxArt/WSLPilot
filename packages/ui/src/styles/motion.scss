@@ -27,17 +27,17 @@
   }
 }
 
-// ── 强调色切换 300ms 平滑过渡（§13.2）──────────────────────────────
+// ── 强调色切换 320ms 平滑过渡（§13.2；须与 ACCENT_TRANSITION_MS=320 一致）──────────
 // applyAccentToDom 切换时短暂挂 data-accent-anim，只在切换窗口内给颜色属性插过渡。
 // 必须让位 reduced-motion 降级（:not + media 双重限定，禁止顶掉全局 kill 规则）
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-reduce-motion='true'])[data-accent-anim='true'] *,
   :root:not([data-reduce-motion='true'])[data-accent-anim='true'] {
     transition:
-      background-color 300ms var(--ease-standard),
-      color 300ms var(--ease-standard),
-      border-color 300ms var(--ease-standard),
-      box-shadow 300ms var(--ease-standard) !important;
+      background-color 320ms var(--ease-standard),
+      color 320ms var(--ease-standard),
+      border-color 320ms var(--ease-standard),
+      box-shadow 320ms var(--ease-standard) !important;
   }
 }
 

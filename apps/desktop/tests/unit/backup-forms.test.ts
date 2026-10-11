@@ -52,7 +52,13 @@ describe('suggestedBackupPath', () => {
     expect(suggestedBackupPath('/home/u/bk/', 'Ubuntu', 'vhd', at)).toBe(
       '/home/u/bk/Ubuntu_20260102-030405.vhdx',
     )
-    expect(suggestedBackupPath('', 'U', 'tar', at)).toMatch(/U_20260102-030405\.tar$/)
+  })
+
+  it('defaultDir 为空时只给文件名（绝不生成根相对 \\文件名）', () => {
+    const at = new Date(2026, 0, 2, 3, 4, 5)
+    expect(suggestedBackupPath('', 'U', 'tar', at)).toBe('U_20260102-030405.tar')
+    expect(suggestedBackupPath('   ', 'U', 'tar', at)).toBe('U_20260102-030405.tar')
+    expect(suggestedBackupPath('', 'U', 'tar', at)).not.toMatch(/^[\\/]/)
   })
 })
 

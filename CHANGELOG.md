@@ -17,6 +17,42 @@
 
 ### Fixed
 
+- **fix: 全量审计根治**（40+ 项，逐条根治并钉回归测试）
+  - **主进程诚实性**：`removeRule` 区分「查询失败」与「确为空」（此前查询失败被误报「已无监听」假成功）；
+    `applyOne` delete-then-add 失败时回滚恢复旧监听（此前 add 失败即毁掉原有可用转发），回滚失败给出手动恢复命令行；
+    `applyAll` 汇总按规则计数（此前按错误消息数，批量取消 1 条消息= N 个规则少报）且进度封顶 99 直到提权批处理落定（此前假满格）；
+    `sampleMetrics` 失败抛错（此前返回全零被当成功样本污染 CPU 均值分母）；`getVersion` 双命令失败如实抛错；
+    备份 `rotateBackups`/`cleanupBackups`/`listBackups` 三方语义统一为规范备份名 + 实际删除数；
+    导出仅在默认备份目录做轮转（此前导出到 Downloads 也会按保留份数静默删文件）；
+    inPlace 导入不再打周期假 0% 进度；`rollbackImport` 大小写归一；meta 读写大小写归一（换大小写不再产生重复条目）
+  - **渲染可用性**：编辑转发规则改 id 改为真重命名（此前静默新建一条、旧规则残留）；「重启并安装」补 await/catch；
+    全局快捷键输入上下文守卫（此前终端内 Ctrl+K/N/R/1-9 被劫持）；`network`/`devices`/备份列表/设置 load 失败
+    补错误态（此前静默或伪装空态）；wsl.conf 脏数据保护（此前切发行版静默丢弃未保存编辑）；
+    命令面板「全部关机」补确认、「查看发行版」真正打开详情弹窗、失败命令不进「最近使用」；
+    终端无会话时清屏/复制/导出禁用；任务抽屉选中项被淘汰时自动回退；XtermPane 主题热更新（此前改主题已开标签不生效）；
+    迁移完成「打开所在目录」修正为打开目标目录本身；UDP 行「从系统移除」禁用；代理 override 摘要展示
+  - **契约清理**：`@shared/*` 深路径导入统一为 `@wslpilot/shared` 单一入口（29 文件，别名配置移除）；
+    `distros.uninstall`→`distros.unregister`、`app:exportDiagnostics/openLogsDir`→`diagnostics:exportPackage/openLogsDir`
+    通道与 API 动词对齐；`metrics:sample` 的 `*` 魔法键拆出 `metrics:overview` 通道；`meta.get` 接线元数据编辑预填；
+    preload 返回类型精度化（PtySessionInfo 含 cwd/createdAt、cleanupBackups keep 可选、save 返回精确类型）；
+    死契约 `ElevationResult` 与死导出清理；uiState 幽灵字段（lastSelectedDistro/activeView/tableSort）移除；
+    Sparkline gradient id 实例化（多实例同值串色）
+  - **配置冲突写保护**：冲突未决期间 `patch/update/replace` 拒绝写（此前静默覆盖外部修改并清除冲突标记）
+  - **渲染层生产壳**：App.vue 补 `n-notification-provider`（此前 NetworkView 真实调用 `useNotification` 即抛、路由页白屏；
+    组件测试把 useNotification 整个 mock 掉导致测试全绿而生产不可用——测试替生产撒谎，已补真 provider 链守卫测试）
+  - **文档一致**：CONTRIBUTING 诊断包说法、husky/commitlint 幽灵工具链、设计令牌唯一事实源（shared/src/tokens.ts）、
+    npm@12/master 分支、工程结构树按实际目录重画、M7 签名/更新接入状态、四标签详情、`advanced.autoUpdate` 契约补全、
+    README 补文档索引/测试/故障排查、testing.md 覆盖率豁免修正（共 27 项）
+  - **测试假信心**：task-runner 恒真断言/settle 后 report 语义、elevation-client 清理断言改真实 fs 观测、
+    infra 占位断言、usbipd 常量自比对、clamp 用例补范围断言、`[{extra:1}]` strip 断言、桥名 `wslAPI` 断言、
+    未 await 的 run(ctl)、tray 硬编码通道字面量（共 10 项）
+  - **CI 门禁**：`.prettierignore` 补齐（format 不再扫 coverage/生成物）；release.yml 补 e2e 门禁；
+    build-arm64 补 lint/format/coverage/smoke；component 覆盖率分母纳入 renderer 全部 .vue（此前 70% 数字不含 UI 层，
+    两档诚实地板：ui 96/88/81、renderer 84/80/47）；`tsconfig.tools.json` 消除根配置 typecheck 盲区；
+    electron.vite 三端 alias 策略统一；`@kit/*` 死路径移除
+  - **视觉回归**：基线按平台分文件（`{arg}-{platform}.png`）随仓库入库（linux/win32 各 4 张），
+    `updateSnapshots: 'none'` 硬门禁（此前 `'missing'`+基线未入库=每次 CI 自动造基线放行、从未真实比对）；
+    CI 补基线 artifact 取证步骤
 - **全量 review 根治（正确性 / 数据安全 / 幽灵配置 / 半成品 / 测试假信心清零）**
   - **数据安全**：备份命名 `%XX` 无碰撞转义（此前 `*`→`_` 会把 `a*b` 的轮转落到 `a_b` 的备份族，错删数据）
   - **数据安全**：`.vhd` 扩展名归一为 `.vhdx`（此前导出的 `.vhd` 备份永远不进列表/轮转，成幽灵文件）
@@ -89,6 +125,13 @@
   - preload 契约测试校验**返回值透传**与 **API 面枚举**（此前删掉 `return` 也能全绿、新增方法无提醒）
   - 覆盖率门禁覆盖面扩大到 `preload/`、`features/network/`、`config-migrations`（此前约 40% 真实逻辑永不参与评分）
   - 导航安全守卫抽成可测模块并补绕过用例（`file:` / `javascript:` / 大小写变体）
+- **回验自查根治 5 处**（`1b9924f`）
+  - 文件浏览器 `goTo` 改「先确认再改状态」：此前先改 path 再弹确认，点「留在此页」后面包屑与列表不一致
+  - 终端标签重命名 `commitRename` 先判 `renamingId` 短路：此前 Enter 提交后输入框卸载的 blur 重复 emit，Esc 也会误改名
+  - 重命名输入框聚焦选择器修正（此前 class 挂在 n-input 包裹层，选择器打不到内层 input）
+  - `registry.listAll` 改单遍 `readAll` + 30s TTL 缓存（此前 `listGuids` 后又全量查询，`distros:list` 5s 轮询会打爆注册表）；安全校验类强制 fresh
+  - 删除 `makeDebouncedSetter` 自管回滚（与 store 回滚叠加会写反），回滚单一来源归 store `persistField`
+  - 新增组件回归测试 8 项锁死上述 bug；补 `distros:list` 注册表补齐 3 项覆盖（此前新逻辑零覆盖）
 
 ### Added
 

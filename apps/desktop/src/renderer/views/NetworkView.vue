@@ -42,9 +42,9 @@ function openEdit(rule: PortForwardRule) {
   editorShow.value = true
 }
 
-async function onSave(rule: PortForwardRule) {
+async function onSave(rule: PortForwardRule, originalId?: string) {
   try {
-    await network.upsert(rule)
+    await network.upsert(rule, originalId)
     message.success(`规则已保存：${rule.id}`)
   } catch (e) {
     message.error(errorLine(e, '保存规则失败'))
@@ -219,11 +219,16 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
       <div>
         <h1>网络</h1>
         <p class="sub">
-          端口转发 · 镜像网络模式 · 代理配置 ·
+          端口转发 · 镜像网络模式 · 代理配置 · 系统已生效 {{ network.appliedCount }} 条 ·
           <code>netsh interface portproxy</code>
         </p>
       </div>
     </header>
+
+    <p v-if="network.lastError" class="error-banner">
+      {{ network.lastError.message }}
+      <span v-if="network.lastError.suggestion"> — {{ network.lastError.suggestion }}</span>
+    </p>
 
     <MirrorModeCard
       :status="network.status"
@@ -325,6 +330,15 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 11px;
+}
+
+.error-banner {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 13px;
 }
 
 .system-card {

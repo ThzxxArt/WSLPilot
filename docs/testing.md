@@ -60,7 +60,22 @@ expect(() => ipcSchema.configSet.parse({ fileKey: 'evil', patch: {} })).toThrow(
 M7 补齐 Skeleton（骨架屏 / rows 形态 / aria-busy）、EmptyState（插画 + CTA 槽语义）、
 vRipple（涟漪生成 / reduced-motion 降级 / 卸载清理）。
 
-组件覆盖率门禁：lines/statements/branches/functions ≥70%（`vitest.component.config.ts`，由 `npm run test:component --coverage` 强制执行）。
+**覆盖分母（review 覆盖率分母瘦身已根治）**：此前 `vitest.component.config.ts` 的
+`coverage.include` 只含 `packages/ui/src/components/**`，renderer 全部 `.vue`
+（约 6800 行 UI 逻辑：SettingsView 906、BackupView 770、DistroDetailModal 660、
+CommandPalette 587、WslConfPanel 496、ActionsPanel 456 等）**不进任何覆盖分母** ——
+70% 数字不含 UI 层，属分母瘦身。现已纳入：
+
+- `packages/ui/src/components/**/*.{vue,ts}`（设计系统组件）
+- `apps/desktop/src/renderer/**/*.vue`（全部 UI 视图/面板/布局壳）
+- `apps/desktop/src/renderer/router/**/*.ts`（路由表 + afterEach 标题，无其他分母）
+
+renderer 的 `.ts`（stores / composables / features 纯逻辑）**不进组件分母**：它们由
+单测门禁（`vitest.config.ts` ≥85%）真实覆盖，重复计入违反「每个源文件恰好在一个门禁
+分母里」。`main.ts`（createApp 装配入口）与 `**/*.d.ts` 有理由豁免。
+
+组件测试按「挂载渲染 + 关键交互走通（按钮触发对应 wslAPI 调用 / 状态变化）+ 错误态
+展示断言」三件套组织；断言观测真实行为（wslAPI mock 调用参数、DOM 状态），禁止恒真。
 
 ### 4. 视觉回归（M7 已落地）
 
@@ -68,29 +83,32 @@ Playwright 截图对比（`npm run test:visual`，`@visual` 标签）：驾驶�
 关键页面浅色主题渲染一致性。
 
 - 动画禁用 + 动态区（指标数字 / 迷你图 / 时钟 / 发行版列表）mask，基线只锁视觉系统（布局、令牌、间距、字号）
-- 基线位于 `apps/desktop/tests/e2e/__screenshots__/`；`updateSnapshots: 'missing'`
-  —— 首次运行生成基线，其后比对（容差 `maxDiffPixelRatio: 0.02`）
-- 需 Windows + 显示环境（CI `e2e` job）
+- 基线位于 `apps/desktop/tests/e2e/__screenshots__/`，按平台分文件（`{arg}-{platform}.png`，linux/win32 各一套）随仓库入库
+- `updateSnapshots: 'none'`——**缺基线直接红**，禁止 CI 自动造基线放行（review 假门禁根治）；
+  新增/更新截图用例在目标平台跑 `npx playwright test --grep @visual --update-snapshots=all` 并提交生成的基线
+- 比对容差 `maxDiffPixelRatio: 0.02`；需显示环境（CI `e2e` job 跑 win32 基线）
 
 ### 5. 端到端（`npm run test:e2e`）
 
-Playwright + Electron（`electron.launch`，Windows）：
+Playwright + Electron（`electron.launch`，Windows）——一次实跑 **smoke + 视觉回归**（`*.e2e.ts` 全量，含 `@visual`）：
 
-- 启动、窗口显示
-- 侧栏导航（驾驶舱 / 终端 / 备份迁移）关键元素可见性
+- smoke：启动、窗口显示、侧栏导航（驾驶舱 / 终端 / 备份迁移 / 设置 / 网络 / 设备）与命令面板关键元素可见性
+- visual：见上节视觉回归（截图比对，基线在 `__screenshots__/`）
 
 ## 运行
 
 ```bash
 npm test               # 单元 + 集成
 npm run test:coverage  # 单元 + 覆盖率（硬门禁 ≥85%）
-npm run test:component # 组件 + 覆盖率（硬门禁 ≥70%）
+npm run test:component # 组件 + 覆盖率（per-glob 两档硬门禁，见下）
 npm run test:e2e       # E2E + 视觉回归（需 Windows）
 npm run test:visual    # 仅视觉回归（@visual，首跑生成基线）
 npm run test:watch     # 监听模式
 ```
 
 ## 覆盖率门禁（硬性）
+
+### 单元门禁（`vitest.config.ts`）
 
 | 指标       | 阈值      | 说明                                              |
 | ---------- | --------- | ------------------------------------------------- |
@@ -101,7 +119,26 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（M6 交付后）**：单测 Lines 95%+ / Branches 87%+ / Functions 95%+；组件 Lines 98%+ / Branches 91%+ / Functions 84%+。
+**当前基线（0.1.0 / M1–M7 交付后）**：单测 Lines 94%+ / Branches 87%+ / Functions 95%+。
+
+### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
+
+UI 层加入分母后全量 functions 实测 50.59%，达不到 70% —— 若强行保持 70 会假红。
+故按 vitest `thresholds` 的 per-glob 拆两档，每档为**实测值减 2 个百分点向下取整**的
+诚实地板（只防回归、不虚高摆拍）：
+
+| 分母                                    | Lines  | Statements | Branches | Functions |
+| --------------------------------------- | ------ | ---------- | -------- | --------- |
+| `packages/ui/src/components/**`（实测） | 98.21% | 98.21%     | 90.35%   | 83.33%    |
+| ↑ 门禁地板                              | **96** | **96**     | **88**   | **81**    |
+| `apps/desktop/src/renderer/**`（实测）  | 86.63% | 86.63%     | 82.44%   | 49.63%    |
+| ↑ 门禁地板                              | **84** | **84**     | **80**   | **47**    |
+
+（实测取自 `npm run test:component` 全量 194 用例；renderer functions 偏低是模板内联
+handler / computed 未逐一驱动所致。）
+
+**承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
+更新为「新实测 −2pp」；renderer functions 47% 是过渡期防线，不是终点。
 
 **覆盖范围**：
 
@@ -113,7 +150,8 @@ npm run test:watch     # 监听模式
 **不在覆盖率门禁内**（有说明）：
 
 - `types.ts`（纯类型，无运行时逻辑）
-- `config-migrations.ts`（迁移链，随 schema 版本演进单独测）
+
+（`config-migrations.ts` 已纳入门禁：`packages/shared/src/**` 全覆盖，由 `config-schema.test.ts` 的 v1→v2 用例守护。）
 
 **M7 新增覆盖**：
 
@@ -136,13 +174,14 @@ npm run test:watch     # 监听模式
 
 `.github/workflows/ci.yml`：
 
-- `lint-typecheck-test`：Node 20/22 矩阵，typecheck + **test:coverage（85% 门禁）** + build
+- `lint-typecheck-test`：Node 20/22 矩阵，lint + format:check + typecheck + **test:coverage（85% 门禁）**
+  - **test:component（per-glob 两档门禁：ui 96/96/88/81、renderer 84/84/80/47）** + build + smoke:product
 - 覆盖率报告以 artifact 形式保留 14 天
-- `e2e`：Windows runner，Playwright 冒烟
+- `e2e`：Windows runner，`npm run test:e2e` 实跑 smoke + 视觉回归（`smoke.e2e.ts` 与 `visual.e2e.ts`）
 
 ## 新增功能的测试要求
 
 1. 纯函数逻辑 → 必须单元测试
 2. 修改解析/schema/IPC → 同步更新用例
-3. UI 改动 → typecheck + 组件测试通过
+3. UI 改动 → typecheck + 组件测试通过（新 `.vue` 进组件分母，须补挂载/交互/错误态三件套）
 4. 破坏性行为 → E2E 或手动测试清单

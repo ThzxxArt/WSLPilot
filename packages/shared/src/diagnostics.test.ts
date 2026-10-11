@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   DIAGNOSTICS_NOTE,
   diagnosticsFileName,
-  homeDirVariants,
   sanitizeDiagnosticsText,
   sanitizeDiagnosticsValue,
 } from './diagnostics'
@@ -43,11 +42,18 @@ describe('诊断脱敏（M7 §15.3）', () => {
     expect(out).toContain('***')
   })
 
-  it('homeDirVariants 覆盖分隔符与大小写', () => {
-    const variants = homeDirVariants('C:/Users/me')
-    expect(variants).toContain('C:/Users/me')
-    expect(variants).toContain('C:\\Users\\me')
-    expect(homeDirVariants('')).toEqual([])
+  it('主目录变体经脱敏可观测：正/反斜杠与 JSON 转义形态全覆盖（模块内 homeDirVariants）', () => {
+    const out = sanitizeDiagnosticsText(
+      ['p: C:/Users/me/a', 'q: C:\\Users\\me\\b', 'j: C:\\\\Users\\\\me/c'].join('\n'),
+      'C:/Users/me',
+    )
+    expect(out).toContain('p: %USERPROFILE%/a')
+    expect(out).toContain('q: %USERPROFILE%\\b')
+    expect(out).toContain('j: %USERPROFILE%/c')
+  })
+
+  it('主目录为空时不做替换（homeDirVariants 空入参返回空）', () => {
+    expect(sanitizeDiagnosticsText('C:\\Users\\me\\x', '')).toBe('C:\\Users\\me\\x')
   })
 
   it('sanitizeDiagnosticsValue 递归处理嵌套对象与数组', () => {

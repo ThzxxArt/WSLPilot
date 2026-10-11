@@ -64,6 +64,10 @@ describe('useNetworkStore', () => {
     vi.clearAllMocks()
   })
 
+  /** byId 幽灵 getter 已删：测试直接观测 rules 数组 */
+  const ruleById = (s: { rules: PortForwardRule[] }, id: string) =>
+    s.rules.find((r) => r.id === id) ?? null
+
   it('load 读取规则与代理', async () => {
     wslAPI.network.listRules.mockResolvedValue([RULE])
     wslAPI.network.getProxy.mockResolvedValue(PROXY)
@@ -71,7 +75,7 @@ describe('useNetworkStore', () => {
     await s.load()
     expect(s.rules).toHaveLength(1)
     expect(s.proxy.httpProxy).toBe('http://127.0.0.1:7890')
-    expect(s.byId('dev-3000')).toBeTruthy()
+    expect(ruleById(s, 'dev-3000')).toBeTruthy()
   })
 
   it('load 失败记录错误且不抛', async () => {
@@ -81,6 +85,35 @@ describe('useNetworkStore', () => {
     await s.load()
     expect(s.lastError).toBeTruthy()
     expect(s.rules).toEqual([])
+  })
+
+  it('getProxy 失败时不留混合态（规则与代理一次提交）', async () => {
+    wslAPI.network.listRules.mockResolvedValue([RULE])
+    wslAPI.network.getProxy.mockRejectedValue(new Error('proxy down'))
+    const s = useNetworkStore()
+    await s.load()
+    // 全部成功才提交：不得出现「规则已刷新、代理还是旧值」的混合态
+    expect(s.rules).toEqual([])
+    expect(s.proxy.httpProxy).not.toBe('http://127.0.0.1:7890')
+    expect(s.lastError).toBeTruthy()
+  })
+
+  it('load 旧响应晚到不覆盖新状态', async () => {
+    let resolveFirst!: (v: PortForwardRule[]) => void
+    const first = new Promise<PortForwardRule[]>((r) => (resolveFirst = r))
+    wslAPI.network.listRules
+      .mockReturnValueOnce(first as never)
+      .mockResolvedValueOnce([{ ...RULE, id: 'dev-9000' }])
+    wslAPI.network.getProxy.mockResolvedValue(PROXY)
+    const s = useNetworkStore()
+    const p1 = s.load()
+    const p2 = s.load()
+    await p2
+    expect(ruleById(s, 'dev-9000')).toBeTruthy()
+    resolveFirst([{ ...RULE, id: 'dev-1000' }])
+    await p1
+    expect(ruleById(s, 'dev-1000')).toBeNull()
+    expect(ruleById(s, 'dev-9000')).toBeTruthy()
   })
 
   it('异常形状的规则清单降级为空', async () => {
@@ -108,7 +141,26 @@ describe('useNetworkStore', () => {
     expect(s.rules).toHaveLength(2)
     await s.upsert({ ...RULE, listenPort: 3001 })
     expect(s.rules).toHaveLength(2)
-    expect(s.byId('dev-3000')!.listenPort).toBe(3001)
+    expect(ruleById(s, 'dev-3000')!.listenPort).toBe(3001)
+  })
+
+  it('upsert 传 originalId = 重命名：总数不变、旧 id 消失', async () => {
+    wslAPI.network.saveRules.mockResolvedValue({})
+    const s = useNetworkStore()
+    s.rules = [RULE, { ...RULE, id: 'other', listenPort: 4000 }]
+    await s.upsert({ ...RULE, id: 'renamed-3000' }, 'dev-3000')
+    expect(s.rules).toHaveLength(2)
+    expect(ruleById(s, 'dev-3000')).toBeNull()
+    expect(ruleById(s, 'renamed-3000')!.listenPort).toBe(3000)
+    expect(ruleById(s, 'other')).toBeTruthy()
+  })
+
+  it('upsert 不传 originalId 时新 id 只新增不误替换', async () => {
+    wslAPI.network.saveRules.mockResolvedValue({})
+    const s = useNetworkStore()
+    s.rules = [RULE]
+    await s.upsert({ ...RULE, id: 'dev-4000', listenPort: 4000 })
+    expect(s.rules.map((r) => r.id).sort()).toEqual(['dev-3000', 'dev-4000'])
   })
 
   it('remove + undoRestore', async () => {
@@ -128,7 +180,7 @@ describe('useNetworkStore', () => {
     const s = useNetworkStore()
     s.rules = [RULE]
     await s.setEnabled('dev-3000', false)
-    expect(s.byId('dev-3000')!.enabled).toBe(false)
+    expect(ruleById(s, 'dev-3000')!.enabled).toBe(false)
     expect(wslAPI.network.saveRules).toHaveBeenCalled()
   })
 

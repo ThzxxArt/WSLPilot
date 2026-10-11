@@ -35,7 +35,7 @@ npm run typecheck    # TypeScript 检查
 npm test             # 单元 / 集成测试
 npm run test:component  # 组件测试（含覆盖率门禁）
 npm run test:e2e     # 端到端测试（需 Windows）
-npm run build        # 构建 + 打包（等价于 npm run package --workspace @wslpilot/desktop）
+npm run build        # 构建全部包 + 打包 desktop
 npm run format:check # Prettier 一致性检查
 npm run tokens       # 重新生成设计令牌 CSS
 ```
@@ -71,6 +71,7 @@ chore: 升级依赖
 - 修改 `parseDistroList`、配置 schema、IPC 通道时，同步更新对应用例。
 - UI 改动需保证 `npm run typecheck` 与组件测试通过。
 - **覆盖率门禁 ≥85%**（lines/statements/branches/functions）。`npm run test:coverage` 不达标即失败，CI 同此标准。新增代码请自带测试，避免拉低整体覆盖率。
+- **组件测试门禁另为 ≥70%**（`vitest.component.config.ts`，由 `npm run test:component` 强制执行）。
 
 ## 报告 Bug
 
@@ -79,7 +80,7 @@ chore: 升级依赖
 - WSLPilot 版本（设置 → 关于）
 - Windows 版本 / WSL 版本
 - 复现步骤
-- 日志（设置 → 配置目录 → `logs/`；「导出诊断包」属 M7，尚未提供）
+- 日志（设置 → 配置目录 → `logs/`；或设置 → 关于 →「导出诊断包」，含近期日志与配置脱敏副本）
 
 ## 许可
 

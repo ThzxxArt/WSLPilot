@@ -64,7 +64,10 @@ test.describe('WSLPilot 启动冒烟', () => {
     await expect(window.locator('input[aria-label="命令面板搜索"]')).toBeVisible({
       timeout: 15_000,
     })
-    await expect(window.getByText('前往：驾驶舱', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // 条目文本含图标节点，按 hasText 定位（exact 全串会把 🛫 算进文本）
+    await expect(window.locator('.palette-label', { hasText: '前往：驾驶舱' })).toBeVisible({
+      timeout: 15_000,
+    })
     await window.keyboard.press('Escape')
     await expect(window.locator('input[aria-label="命令面板搜索"]')).toBeHidden({ timeout: 15_000 })
 

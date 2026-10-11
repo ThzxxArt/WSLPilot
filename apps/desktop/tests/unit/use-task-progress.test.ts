@@ -113,7 +113,9 @@ describe('useTaskProgress', () => {
     expect(view.task.value?.taskId).toBe('plain')
     await view.cancel()
     expect(wslAPI.task.cancel).toHaveBeenCalledWith('plain')
-    await view.cancel() // 空 id 时不抛
+    // 重复 cancel 不抛，且仍透传到 wslAPI（幂等语义，非空 id 分支）
+    await view.cancel()
+    expect(wslAPI.task.cancel).toHaveBeenCalledTimes(2)
   })
 
   it('empty id → null task, cancel no-op', async () => {

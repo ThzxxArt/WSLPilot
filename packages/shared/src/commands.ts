@@ -13,28 +13,85 @@ export function formatCommand(program: string, args: string[]): string {
   return [program, ...args.map(quoteArg)].join(' ')
 }
 
-export function previewExportCommand(req: IoExportRequest): string {
-  const args = ['--export', req.name, req.path]
-  if (req.format === 'vhd') args.push('--vhd')
-  return formatCommand('wsl.exe', args)
+/**
+ * 备份目标文件名归一（唯一事实源）：trim + 扩展名归一。
+ * - vhd：`.vhd`/`.tar` 错配改写为 `.vhdx`，缺失扩展名补齐 `.vhdx`
+ * - tar：`.vhdx`/`.vhd` 错配改写为 `.tar`，缺失扩展名补齐 `.tar`
+ * 纯字符串操作（主/渲染共享，不引 node API）；
+ * 环境变量展开与绝对化**不**在此发生（执行侧 io-service 负责）。
+ * 幂等：对已归一结果再调用无副作用。
+ */
+export function normalizeBackupTarget(input: string, format: BackupFormat): string {
+  const p = String(input ?? '').trim()
+  const want = format === 'vhd' ? '.vhdx' : '.tar'
+  const lower = p.toLowerCase()
+  if (format === 'vhd') {
+    if (lower.endsWith('.tar') || lower.endsWith('.vhd')) {
+      return `${p.replace(/\.(tar|vhd)$/i, '')}${want}`
+    }
+    return lower.endsWith('.vhdx') ? p : `${p}${want}`
+  }
+  if (lower.endsWith('.vhdx') || lower.endsWith('.vhd')) {
+    return p.replace(/\.(vhdx|vhd)$/i, want)
+  }
+  return lower.endsWith('.tar') ? p : `${p}${want}`
 }
 
-export function previewImportCommand(req: IoImportRequest): string {
-  if (req.inPlace) {
-    return formatCommand('wsl.exe', ['--import-in-place', req.name, req.archivePath])
-  }
-  const args = [
+/**
+ * `wsl --export` argv（唯一事实源：preview 与实跑 io-service 共用）。
+ * 目标路径经 `normalizeBackupTarget` 做扩展名归一；
+ * 环境变量展开与绝对化发生在执行侧（io-service resolveTargetFile）。
+ */
+export function buildExportArgs(name: string, path: string, format: BackupFormat): string[] {
+  return [
+    '--export',
+    name,
+    normalizeBackupTarget(path, format),
+    ...(format === 'vhd' ? ['--vhd'] : []),
+  ]
+}
+
+/**
+ * `wsl --import` / `--import-in-place` argv（唯一事实源：preview 与实跑 io-service 共用）。
+ * 归档 / 安装位置是既有文件与目录，不做扩展名归一（执行侧只做环境变量展开与绝对化）。
+ */
+export function buildImportArgs(req: IoImportRequest): string[] {
+  const format: BackupFormat = req.format === 'vhd' ? 'vhd' : 'tar'
+  if (req.inPlace) return ['--import-in-place', req.name, req.archivePath]
+  return [
     '--import',
     req.name,
     req.installPath,
     req.archivePath,
-    ...(req.format === 'vhd' ? ['--vhd'] : ['--version', req.version === 1 ? '1' : '2']),
+    ...(format === 'vhd' ? ['--vhd'] : ['--version', req.version === 1 ? '1' : '2']),
   ]
-  return formatCommand('wsl.exe', args)
 }
 
+/**
+ * `wsl --manage --move` argv（唯一事实源：preview / 实跑 io-service / 提权 elevation 共用）。
+ * 迁移目标是目录，不做扩展名归一（执行侧只做环境变量展开与绝对化）。
+ */
+export function buildMoveArgs(name: string, path: string): string[] {
+  return ['--manage', name, '--move', path]
+}
+
+/**
+ * 等价命令行预览（仅展示，绝不执行 — 设计书 §9.1）。
+ * 与实跑同源（build*Args）：导出目标路径做扩展名归一（`.vhd` → `.vhdx`、补扩展名）；
+ * 环境变量展开与绝对化发生在执行侧（renderer 无 process.env），故预览保留用户书写的路径主体。
+ */
+export function previewExportCommand(req: IoExportRequest): string {
+  return formatCommand('wsl.exe', buildExportArgs(req.name, req.path, req.format))
+}
+
+/** @see previewExportCommand — 与实跑同源（build*Args） */
+export function previewImportCommand(req: IoImportRequest): string {
+  return formatCommand('wsl.exe', buildImportArgs(req))
+}
+
+/** @see previewExportCommand — 与实跑同源（build*Args） */
 export function previewMoveCommand(req: IoMoveRequest): string {
-  return formatCommand('wsl.exe', ['--manage', req.name, '--move', req.path])
+  return formatCommand('wsl.exe', buildMoveArgs(req.name, req.path))
 }
 
 /** 备份文件扩展名（tar / vhd→vhdx） */
@@ -77,15 +134,26 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 轮转匹配：`<sanitized(name)>_<8位日期-6位时间>.(tar|vhdx)` */
+/**
+ * 规范备份名「时间戳 + 扩展名」尾段（命名规范唯一事实源）：
+ * `<name>_<YYYYMMDD-HHmmss>.(tar|vhdx)`
+ * isBackupFileName / backupFileGroup / backupFileRegex 全部由它派生，杜绝第四份拷贝。
+ */
+const BACKUP_STAMP_SUFFIX = '_[0-9]{8}-[0-9]{6}\\.(?:tar|vhdx)$'
+/** 规范备份名全文匹配（name 头不含 \\ / : * ? " < > |） */
+const BACKUP_FILE_RE = new RegExp(`^([^\\\\/:*?"<>|]+)${BACKUP_STAMP_SUFFIX}`, 'i')
+
+/** 轮转匹配：`<sanitized(name)>` + 规范备份名尾段（与命名规范同源） */
 export function backupFileRegex(name: string): RegExp {
-  return new RegExp(
-    `^${escapeRegExp(sanitizeNameForFile(name))}_[0-9]{8}-[0-9]{6}\\.(tar|vhdx)$`,
-    'i',
-  )
+  return new RegExp(`^${escapeRegExp(sanitizeNameForFile(name))}${BACKUP_STAMP_SUFFIX}`, 'i')
 }
 
-/** 文件名是否符合备份命名规范 */
+/** 文件名是否符合备份命名规范（唯一事实源 BACKUP_STAMP_SUFFIX） */
 export function isBackupFileName(fileName: string): boolean {
-  return /^[^\\/:*?"<>|]+_[0-9]{8}-[0-9]{6}\.(tar|vhdx)$/i.test(fileName)
+  return BACKUP_FILE_RE.test(fileName)
+}
+
+/** 文件名 → 备份族名字头（规范化 name）；不符合命名规范返回 null（非规范文件不算备份） */
+export function backupFileGroup(fileName: string): string | null {
+  return BACKUP_FILE_RE.exec(fileName)?.[1] ?? null
 }

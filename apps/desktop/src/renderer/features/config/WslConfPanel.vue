@@ -1,14 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, NInputNumber, NSwitch, NTag, NModal, useMessage } from 'naive-ui'
-import { CodeEditor, Kbd } from '@ui/components'
-import { WSL_CONF_FIELDS, type DiffLine, type WslConfFieldType } from '@shared/wslconf'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
+import {
+  NButton,
+  NInput,
+  NInputNumber,
+  NSwitch,
+  NTag,
+  NModal,
+  useDialog,
+  useMessage,
+} from 'naive-ui'
+import { CodeEditor, Kbd } from '@wslpilot/ui'
+import { WSL_CONF_FIELDS, type DiffLine, type WslConfFieldType } from '@wslpilot/shared'
 import { useWslConf } from '../../composables/useWslConf'
 import { errorLine } from '../../composables/useAppError'
 
 const props = defineProps<{ distroName: string }>()
+const emit = defineEmits<{
+  /** 切发行版被取消时要求父级还原选择（脏编辑保留在原发行版上） */
+  'restore-distro': [name: string]
+}>()
 
 const message = useMessage()
+const dialog = useDialog()
 const conf = useWslConf(() => props.distroName)
 
 const preview = ref(false)
@@ -17,11 +31,53 @@ const previewOpen = computed({
   set: (v: boolean) => (preview.value = v),
 })
 
+/** 当前已载入的发行版（取消切换时据此还原选择） */
+const currentName = ref(props.distroName)
+
+/** 用户已确认丢弃：卸载时不再重复提示 */
+let discardConfirmed = false
+
+/** 未保存修改的丢弃确认（§13.4）：与 FileBrowserPanel 同一确认语义 */
+function confirmDiscard(): Promise<boolean> {
+  if (!conf.isDirty.value) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '放弃未保存的修改？',
+      content: `「${currentName.value}」的 /etc/wsl.conf 有未保存的修改，离开将丢失。`,
+      positiveText: '放弃修改',
+      negativeText: '留在此页',
+      onPositiveClick: () => {
+        discardConfirmed = true
+        resolve(true)
+      },
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
+
 onMounted(() => void conf.load())
 watch(
   () => props.distroName,
-  () => void conf.load(),
+  async (name) => {
+    if (!name || name === currentName.value) return
+    // 先确认再切：点「留在此页」时不重载，并还原发行版选择（绝不静默丢编辑）
+    if (!(await confirmDiscard())) {
+      emit('restore-distro', currentName.value)
+      return
+    }
+    currentName.value = name
+    await conf.load()
+  },
 )
+
+onUnmounted(() => {
+  // 卸载路径无法阻塞（如路由离开），只能如实提示；
+  // 弹窗关闭路径由父级先调 confirmDiscard 守卫，确认丢弃后不再重复提示
+  if (!discardConfirmed && conf.isDirty.value) message.warning('wsl.conf 有未保存的修改已丢弃')
+})
+
+defineExpose({ confirmDiscard })
 
 const sections = computed(() => {
   const map = new Map<string, typeof WSL_CONF_FIELDS>()

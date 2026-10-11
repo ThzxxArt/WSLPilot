@@ -9,6 +9,7 @@ import { decodeToolOutput } from './tool-output'
 
 const execFileAsync = promisify(execFile)
 
+/** 外部命令执行结果（唯一事实源类型）：exec-wsl 的 WslExecResult 是同一类型的兼容名 */
 export interface ToolResult {
   stdout: string
   stderr: string

@@ -1,5 +1,5 @@
 import { onUnmounted, ref, watch, type Ref } from 'vue'
-import { DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
+import { DEFAULT_POLL_INTERVAL_MS } from '@wslpilot/shared'
 
 /**
  * 轮询节流 — 设计书 §19：

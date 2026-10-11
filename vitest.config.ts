@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import { resolve } from 'path'
 import vue from '@vitejs/plugin-vue'
 
@@ -8,6 +8,9 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     include: ['packages/*/src/**/*.test.ts', 'apps/desktop/tests/unit/**/*.test.ts'],
+    // packages/ui 的同居测试只归 vitest.component.config.ts（happy-dom）管：
+    // 根配置是 node 环境，误跑 Vue 测试会假红/假绿 —— 双配置双重包含隐患根治
+    exclude: [...configDefaults.exclude, 'packages/ui/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'json-summary', 'html', 'lcov'],
@@ -52,7 +55,6 @@ export default defineConfig({
       '@wslpilot/shared': resolve(__dirname, 'packages/shared/src/index.ts'),
       '@wslpilot/kit': resolve(__dirname, 'packages/kit/src/index.ts'),
       '@ui': resolve(__dirname, 'packages/ui/src'),
-      '@shared': resolve(__dirname, 'packages/shared/src'),
     },
   },
 })

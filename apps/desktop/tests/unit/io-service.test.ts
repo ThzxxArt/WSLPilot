@@ -15,6 +15,7 @@ vi.mock('@wslpilot/kit', async (importOriginal) => {
 })
 
 import { runWsl } from '@wslpilot/kit'
+import { buildExportArgs, formatCommand, previewExportCommand } from '@wslpilot/shared'
 import {
   createIoService,
   resolveTargetFile,
@@ -236,14 +237,14 @@ describe('IoService.runExport', () => {
     ).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
   })
 
-  it('rotates old backups per keepRecent', async () => {
+  it('rotates old backups per keepRecent（仅默认备份目录）', async () => {
     const calls: string[][] = []
     const spawn = makeSpawnFn(calls, () => ({
       before: async (args) => {
         await fs.writeFile(args[2]!, Buffer.alloc(8))
       },
     }))
-    // 预置 3 份旧备份（命名规范）
+    // 预置 3 份旧备份（命名规范）；导出目标 = 默认备份目录 → 允许轮转
     for (const stamp of ['20260101-000000', '20260102-000000', '20260103-000000']) {
       await fs.writeFile(join(outDir, `Ubuntu_${stamp}.tar`), 'old')
     }
@@ -252,7 +253,7 @@ describe('IoService.runExport', () => {
         distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
         basePath: distroDir,
         spawn,
-        config: makeConfig({ keepRecent: 2 }),
+        config: makeConfig({ defaultDir: outDir, keepRecent: 2 }),
       }),
     )
     await io.runExport(
@@ -262,6 +263,89 @@ describe('IoService.runExport', () => {
     const files = (await fs.readdir(outDir)).filter((f) => f.startsWith('Ubuntu_')).sort()
     expect(files).toHaveLength(2)
     expect(files).toContain('Ubuntu_20260104-000000.tar')
+  })
+
+  it('导出到非默认备份目录不调用 rotateBackups（不静默删用户目录文件 — review 根治）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(8))
+      },
+    }))
+    // 用户目录里的旧备份：keepRecent=1 也不许被导出顺手删掉
+    await fs.writeFile(join(outDir, 'Ubuntu_20260101-000000.tar'), 'old')
+    const defaultDir = await tmp()
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: distroDir,
+        spawn,
+        config: makeConfig({ defaultDir, keepRecent: 1 }),
+      }),
+    )
+    const rotateSpy = vi.spyOn(io, 'rotateBackups')
+    const ctl = makeCtl([])
+    await io.runExport(
+      { name: 'Ubuntu', path: join(outDir, 'Ubuntu_20260102-000000.tar'), format: 'tar' },
+      ctl as never,
+    )
+    // 改坏必红 1：rotate 绝不能被调用（spy 拦截 runExport 经 api 的自调用）
+    expect(rotateSpy).not.toHaveBeenCalled()
+    // 改坏必红 2：行为兜底 — 旧备份必须原样还在
+    const files = (await fs.readdir(outDir)).filter((f) => f.startsWith('Ubuntu_')).sort()
+    expect(files).toEqual(['Ubuntu_20260101-000000.tar', 'Ubuntu_20260102-000000.tar'])
+    expect(ctl.log).toHaveBeenCalledWith('导出目标不是默认备份目录，不做备份轮转')
+    rotateSpy.mockRestore()
+  })
+
+  it('导出到默认备份目录时经 api.rotateBackups 轮转（spy 正对照）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(8))
+      },
+    }))
+    const defaultDir = await tmp()
+    await fs.writeFile(join(defaultDir, 'Ubuntu_20260101-000000.tar'), 'old')
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: distroDir,
+        spawn,
+        config: makeConfig({ defaultDir, keepRecent: 1 }),
+      }),
+    )
+    const rotateSpy = vi.spyOn(io, 'rotateBackups')
+    await io.runExport(
+      { name: 'Ubuntu', path: join(defaultDir, 'Ubuntu_20260102-000000.tar'), format: 'tar' },
+      makeCtl([]) as never,
+    )
+    expect(rotateSpy).toHaveBeenCalledTimes(1)
+    expect(rotateSpy).toHaveBeenCalledWith(defaultDir, 'Ubuntu', 1)
+    rotateSpy.mockRestore()
+  })
+
+  it('preview 与实跑 argv 同源：u.vhd 归一为 u.vhdx（buildExportArgs 唯一事实源）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(8))
+      },
+    }))
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'U', state: 'Stopped', version: 2, isDefault: false }],
+        basePath: distroDir,
+        spawn,
+      }),
+    )
+    const req = { name: 'U', path: join(outDir, 'u.vhd'), format: 'vhd' as const }
+    await io.runExport(req, makeCtl([]) as never)
+    // 用户看到的命令 = 真实执行的 argv（同一 build*Args 输出）
+    const expected = buildExportArgs(req.name, req.path, req.format)
+    expect(expected).toEqual(['--export', 'U', join(outDir, 'u.vhdx'), '--vhd'])
+    expect(calls[0]).toEqual(expected)
+    expect(previewExportCommand(req)).toBe(formatCommand('wsl.exe', calls[0]!))
   })
 
   it('surfaces spawn failure as TASK_FAILED with raw command', async () => {
@@ -461,6 +545,41 @@ describe('IoService.runImport', () => {
     expect(calls[0]).toEqual(['--import-in-place', 'InSitu', vhdx])
   })
 
+  it('inPlace 导入不打假 0% 进度（跳过 watchProgress — review 根治）', async () => {
+    const vhdx = join(srcDir, 'disk.vhdx')
+    await fs.writeFile(vhdx, Buffer.alloc(50))
+    const ctl = makeCtl([])
+    // 慢速 spawn：若 watchProgress 仍被启动，500ms/1000ms 会各打一条假 0%
+    const spawn = ((_args: string[], opts: { onExit: (c: number) => void }) => {
+      setTimeout(() => opts.onExit(0), 1200)
+      return { kill: vi.fn() }
+    }) as unknown as SpawnWslFn
+    const deps = makeDeps({ distros: [], spawn })
+    deps.wsl.list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { name: 'InSitu', state: 'Stopped', version: 2, isDefault: false },
+      ]) as any
+    const io = createIoService(deps)
+    await io.runImport(
+      {
+        name: 'InSitu',
+        installPath: '',
+        archivePath: vhdx,
+        format: 'vhd',
+        version: 2,
+        inPlace: true,
+      },
+      ctl as never,
+    )
+    // 只允许任务起点那一条 0%，不允许 watchProgress 的周期假 0%
+    const zeroReports = (ctl.report as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === 0,
+    )
+    expect(zeroReports).toHaveLength(1)
+  })
+
   it('rejects in-place for tar format', async () => {
     const archive = join(srcDir, 'a.tar')
     await fs.writeFile(archive, Buffer.alloc(10))
@@ -489,6 +608,33 @@ describe('IoService.runImport', () => {
       .fn()
       .mockResolvedValueOnce([])
       .mockResolvedValue([{ name: 'New', state: 'Stopped', version: 2, isDefault: false }]) as any
+    const io = createIoService(deps)
+    await expect(
+      io.runImport(
+        {
+          name: 'New',
+          installPath: installDir,
+          archivePath: archive,
+          format: 'tar',
+          version: 2,
+          inPlace: false,
+        },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    expect(runWsl).toHaveBeenCalledWith(['--unregister', 'New'])
+  })
+
+  it('rollback：残留发行版名大小写不同也注销（与 findDistro 同语义 — review 根治）', async () => {
+    const archive = join(srcDir, 'a.tar')
+    await fs.writeFile(archive, Buffer.alloc(10))
+    const spawn = makeSpawnFn([], () => ({ code: 1, lines: ['导入失败'] }))
+    const deps = makeDeps({ distros: [], spawn })
+    deps.wsl.list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      // 回滚时列表里是全小写残留：与 `New` 大小写不同也必须走注销
+      .mockResolvedValue([{ name: 'new', state: 'Stopped', version: 2, isDefault: false }]) as any
     const io = createIoService(deps)
     await expect(
       io.runImport(
@@ -796,6 +942,38 @@ describe('IoService backups listing & rotation', () => {
     expect(left).toEqual(['Other_20260101-000000.tar', 'Ubuntu_20260103-000000.tar'])
   })
 
+  it('rotateBackups 只计实际删除成功数（unlink 失败不计 — 与 cleanup 同语义）', async () => {
+    const dir = await tmp()
+    for (const stamp of ['20260101-000000', '20260102-000000', '20260103-000000']) {
+      await fs.writeFile(join(dir, `Ubuntu_${stamp}.tar`), 'x')
+    }
+    const io = createIoService(makeDeps({ config: makeConfig() }))
+    // 首个 unlink（Ubuntu_20260102）失败：removed 必须少 1，失败那份必须还在
+    const unlinkSpy = vi.spyOn(fs, 'unlink').mockRejectedValueOnce(new Error('EPERM: locked'))
+    try {
+      const removed = await io.rotateBackups(dir, 'Ubuntu', 1)
+      expect(removed).toBe(1)
+    } finally {
+      unlinkSpy.mockRestore()
+    }
+    const left = (await fs.readdir(dir)).sort()
+    expect(left).toEqual(['Ubuntu_20260102-000000.tar', 'Ubuntu_20260103-000000.tar'])
+  })
+
+  it('listBackups 只列规范备份名（非规范文件不冒充备份 — review 根治）', async () => {
+    const dir = await tmp()
+    await fs.writeFile(join(dir, 'ubuntu_20250101-000000.tar'), 'x')
+    await fs.writeFile(join(dir, 'my.tar'), 'x')
+    await fs.writeFile(join(dir, 'weird.vhdx'), 'x')
+    await fs.writeFile(join(dir, 'Ubuntu_20250102-000000.vhdx'), 'x')
+    const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: dir }) }))
+    const list = await io.listBackups()
+    expect(list.map((f) => f.name).sort()).toEqual([
+      'Ubuntu_20250102-000000.vhdx',
+      'ubuntu_20250101-000000.tar',
+    ])
+  })
+
   it('cleanupBackups 按发行版分组轮转全部备份', async () => {
     const dir = await tmp()
     for (const stamp of ['20260101-000000', '20260102-000000']) {
@@ -818,11 +996,19 @@ describe('IoService backups listing & rotation', () => {
     expect(await io.cleanupBackups(join(tmpdir(), 'no-such-xyz'), 5)).toEqual({ removed: 0 })
   })
 
-  it('resolveBackupDir expands env vars', () => {
-    const io = createIoService(
-      makeDeps({ config: makeConfig({ defaultDir: join(tmpdir(), 'bk') }) }),
-    )
-    expect(io.resolveBackupDir()).toMatch(/bk$/)
+  it('resolveBackupDir 展开环境变量并绝对化', () => {
+    // 注入含环境变量的目录配置：断言展开后不是字面 `%…%`（用例名与断言一致 — review）
+    process.env.WSLPILOT_TEST_BK = join(tmpdir(), 'bk')
+    try {
+      const io = createIoService(
+        makeDeps({ config: makeConfig({ defaultDir: '%WSLPILOT_TEST_BK%' }) }),
+      )
+      const dir = io.resolveBackupDir()
+      expect(dir).toMatch(/bk$/)
+      expect(dir).not.toContain('%')
+    } finally {
+      delete process.env.WSLPILOT_TEST_BK
+    }
   })
 
   it('resolveTargetFile 纠正扩展名错配（review M12）', () => {

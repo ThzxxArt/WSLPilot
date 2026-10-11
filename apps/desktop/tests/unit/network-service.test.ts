@@ -174,7 +174,7 @@ describe('NetworkService.status', () => {
     expect(s.windowsProxy?.server).toBe('p:1')
   })
 
-  it('netsh 失败时转发表降级为空', async () => {
+  it('netsh 查询失败时 status 抛错（不伪装空表）', async () => {
     const tool = makeTool([{ code: 1, stderr: 'oops' }])
     const svc = createNetworkService({
       logger: logger(),
@@ -184,8 +184,9 @@ describe('NetworkService.status', () => {
       runTool: tool.fn,
       readWindowsProxy: async () => null,
     })
-    const s = await svc.status()
-    expect(s.portProxy).toEqual([])
+    // 查询失败 ≠ 确为空：抛错让渲染层如实展示（review 假成功根治）
+    await expect(svc.status()).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    await expect(svc.status()).rejects.toThrow(/无法查询系统端口转发状态/)
   })
 })
 
@@ -238,8 +239,9 @@ describe('NetworkService.applyRule / removeRule', () => {
   })
 
   it('已存在监听时先 delete 再 add（改端口不残留）', async () => {
+    // 旧条目 connect 端口 9999（≠ 规则的 3000）→ 需 delete 后 add
     const tool = makeTool([
-      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 3000' },
+      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 9999' },
       { code: 0 },
       { code: 0 },
     ])
@@ -267,7 +269,11 @@ describe('NetworkService.applyRule / removeRule', () => {
   })
 
   it('提权失败映射 PERMISSION_DENIED 并附等价命令', async () => {
-    const tool = makeTool([{ code: 1, stderr: '请求的操作需要提升(作为管理员运行)' }])
+    // call1: show 空表；call2: add 权限不足
+    const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 1, stderr: '请求的操作需要提升(作为管理员运行)' },
+    ])
     const svc = createNetworkService({
       logger: logger(),
       configService: configReader(),
@@ -279,7 +285,11 @@ describe('NetworkService.applyRule / removeRule', () => {
   })
 
   it('其它 netsh 失败映射 TASK_FAILED', async () => {
-    const tool = makeTool([{ code: 2, stderr: 'The parameter is incorrect' }])
+    // call1: show 空表；call2: add 参数错误
+    const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 2, stderr: 'The parameter is incorrect' },
+    ])
     const svc = createNetworkService({
       logger: logger(),
       configService: configReader(),
@@ -288,6 +298,81 @@ describe('NetworkService.applyRule / removeRule', () => {
     await expect(svc.applyRule('dev-3000', makeCtl())).rejects.toMatchObject({
       code: 'TASK_FAILED',
     })
+  })
+
+  it('add 失败且旧监听已删时回滚恢复旧条目', async () => {
+    // call1: show 有旧条目（connect 端口不同）；call2: delete 成功；call3: add 失败；call4: 回滚 add 旧条目成功
+    const tool = makeTool([
+      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 9999' },
+      { code: 0 },
+      { code: 2, stderr: 'The parameter is incorrect' },
+      { code: 0 },
+    ])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runTool: tool.fn,
+    })
+    const ctl = makeCtl()
+    await expect(svc.applyRule('dev-3000', ctl)).rejects.toMatchObject({
+      message: expect.stringContaining('旧监听已恢复'),
+    })
+    // 回滚用旧条目的 connect 端口（9999），不是规则的（3000）
+    expect(tool.calls[3]!.args).toEqual([
+      'interface',
+      'portproxy',
+      'add',
+      'v4tov4',
+      'listenaddress=0.0.0.0',
+      'listenport=3000',
+      'connectaddress=127.0.0.1',
+      'connectport=9999',
+    ])
+  })
+
+  it('add 失败且回滚失败时给出手动恢复命令行', async () => {
+    const tool = makeTool([
+      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 9999' },
+      { code: 0 },
+      { code: 2, stderr: 'The parameter is incorrect' },
+      { code: 1, stderr: '拒绝访问' },
+    ])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runTool: tool.fn,
+    })
+    await expect(svc.applyRule('dev-3000', makeCtl())).rejects.toMatchObject({
+      message: expect.stringContaining('旧监听已移除且新规则未建立'),
+    })
+  })
+
+  it('已是目标状态时跳过 delete/add（真幂等）', async () => {
+    const tool = makeTool([{ code: 0, stdout: '0.0.0.0 3000 127.0.0.1 3000' }])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runTool: tool.fn,
+    })
+    const ctl = makeCtl()
+    await svc.applyRule('dev-3000', ctl)
+    // 仅 show 一次，无 delete/add（不制造破坏窗口）
+    expect(tool.calls).toHaveLength(1)
+  })
+
+  it('removeRule 查询失败时报错（不误报已无监听）', async () => {
+    const tool = makeTool([{ code: 1, stderr: 'oops' }])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runTool: tool.fn,
+    })
+    const ctl = makeCtl()
+    await expect(svc.removeRule('dev-3000', ctl)).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+    })
+    // 绝不 report 成功
+    expect(ctl.report).not.toHaveBeenCalledWith(100, expect.anything())
   })
 
   it('removeRule 生成 delete 命令（系统有该监听时）', async () => {
@@ -376,6 +461,41 @@ describe('NetworkService.applyAll', () => {
       code: 'TASK_FAILED',
     })
     expect(tool.calls).toHaveLength(4)
+  })
+
+  it('汇总按规则计数且进度封顶 99：成功+跳过+失败=总数', async () => {
+    // 4 条启用 TCP + 1 UDP：1 直败（add 参数错误）、3 成功；UDP 跳过
+    const rules = [
+      { ...RULES[0]!, id: 'ok-1', listenPort: 3000 },
+      { ...RULES[0]!, id: 'bad-1', listenPort: 3001, connectPort: 3001 },
+      { ...RULES[0]!, id: 'ok-2', listenPort: 3002, connectPort: 3002 },
+      { ...RULES[0]!, id: 'ok-3', listenPort: 3003, connectPort: 3003 },
+      RULES[1]!, // udp → skip
+    ]
+    const tool = makeTool([
+      { code: 0, stdout: '' },
+      { code: 0 }, // ok-1
+      { code: 0, stdout: '' },
+      { code: 2, stderr: 'The parameter is incorrect' }, // bad-1 直败
+      { code: 0, stdout: '' },
+      { code: 0 }, // ok-2
+      { code: 0, stdout: '' },
+      { code: 0 }, // ok-3
+    ])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(rules),
+      runTool: tool.fn,
+    })
+    const ctl = makeCtl()
+    await expect(svc.applyAll(ctl)).rejects.toThrow(/成功 3 条，跳过 1 条，失败 1 条/)
+    // 进度：循环内不打 100（假满格），100 只在最终汇总
+    const progressValues = (ctl.report as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .filter((p): p is number => typeof p === 'number')
+    const inLoop = progressValues.filter((p) => p < 100)
+    expect(Math.max(...inLoop)).toBeLessThanOrEqual(99)
+    expect(progressValues[progressValues.length - 1]).toBe(100)
   })
 
   it('取消时中断后续应用', async () => {

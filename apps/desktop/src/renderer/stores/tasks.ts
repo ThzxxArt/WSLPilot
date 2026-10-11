@@ -1,14 +1,15 @@
 import { defineStore } from 'pinia'
-import type {
-  IoExportRequest,
-  IoImportRequest,
-  IoMoveRequest,
-  TaskHandle,
-  TaskProgress,
-  TaskStatus,
-  TaskType,
+import {
+  toAppError,
+  type AppError,
+  type IoExportRequest,
+  type IoImportRequest,
+  type IoMoveRequest,
+  type TaskHandle,
+  type TaskProgress,
+  type TaskStatus,
+  type TaskType,
 } from '@wslpilot/shared'
-import { toAppError, type AppError } from '@shared/errors'
 
 export interface TaskEntry {
   taskId: string
@@ -58,8 +59,6 @@ export const useTasksStore = defineStore('tasks', {
   getters: {
     byId: (s) => (taskId: string) => s.entries.find((t) => t.taskId === taskId) ?? null,
     running: (s) => s.entries.filter((t) => t.status === 'running'),
-    runningCount: (s) => s.entries.filter((t) => t.status === 'running').length,
-    latest: (s) => s.entries[s.entries.length - 1] ?? null,
   },
 
   actions: {

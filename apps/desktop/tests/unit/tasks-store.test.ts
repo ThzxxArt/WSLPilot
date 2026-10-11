@@ -64,7 +64,7 @@ describe('useTasksStore', () => {
       status: 'success',
     })
     expect(s.byId('t1')?.status).toBe('success')
-    expect(s.runningCount).toBe(0)
+    expect(s.running).toHaveLength(0)
   })
 
   it('startImport / startMove track entries', async () => {
@@ -82,7 +82,7 @@ describe('useTasksStore', () => {
     expect(i?.taskId).toBe('i1')
     const m = await s.startMove({ name: 'U', path: 'D:\\U', terminateFirst: true })
     expect(m?.taskId).toBe('m1')
-    expect(s.runningCount).toBe(2)
+    expect(s.running).toHaveLength(2)
   })
 
   it('captures AppError when invoke rejects', async () => {

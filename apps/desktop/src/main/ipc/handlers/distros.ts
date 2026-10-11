@@ -72,14 +72,23 @@ export function registerDistroHandlers(
     return registry.detailFull(assertName(name))
   })
 
-  add(CH.metricsSample, async (c, name: string) => {
-    // '*' 是全局概览保留键，不走发行版名校验
-    if (name === '*') {
-      const { sampleOverview } = await import('../../services/metrics-service')
-      const distros = await wsl.list()
-      return sampleOverview(wsl, distros, c.logger)
+  // metrics:sample — 单发行版语义（OverviewMetrics 已拆到 metrics:overview，禁 `*` 双返回形状）
+  add(CH.metricsSample, async (_c, name: string) => {
+    const n = assertName(name)
+    if (n === '*') {
+      throw createAppError('DISTRO_NOT_FOUND', {
+        message: 'metrics:sample 只接受发行版名',
+        suggestion: '全局概览请走 metrics:overview 通道',
+      })
     }
-    return wsl.sampleMetrics(assertName(name))
+    return wsl.sampleMetrics(n)
+  })
+
+  // metrics:overview — 全局概览（OverviewMetrics），无发行版入参
+  add(CH.metricsOverview, async (c) => {
+    const { sampleOverview } = await import('../../services/metrics-service')
+    const distros = await wsl.list()
+    return sampleOverview(wsl, distros, c.logger)
   })
 
   add(CH.distrosListOnline, async () => {

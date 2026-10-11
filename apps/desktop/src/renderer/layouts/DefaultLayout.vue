@@ -57,6 +57,19 @@ watch(
   },
 )
 
+/**
+ * 设置加载失败的统一提示（review 状态诚实）：
+ * load() 失败降级默认值并记录 loadErrorAt；这里监听它一次性如实提示，
+ * 绝不把「读配置失败」伪装成「配置就是默认值」。
+ */
+watch(
+  () => settings.loadErrorAt,
+  (at, prev) => {
+    if (!at || at === prev) return
+    message.error(errorLine(settings.lastError, '设置加载失败，已使用默认值'))
+  },
+)
+
 const unbindHotkeys = bindGlobalHotkeys({
   openPalette: togglePalette,
   newTerminal: async () => {

@@ -5,9 +5,14 @@ import {
   assertSafeDistroName,
   createAppError,
   exportFileName,
+  backupFileGroup,
   backupFileRegex,
+  buildExportArgs,
+  buildImportArgs,
+  buildMoveArgs,
   isBackupFileName,
   isElevationError,
+  normalizeBackupTarget,
   ELEVATION_OP_LABEL,
   ELEVATION_SUGGESTION,
   formatBytes,
@@ -51,39 +56,36 @@ export interface IoServiceDeps {
 }
 
 export interface IoService {
+  /**
+   * 导出备份（长任务）。返回导出产物信息（文件名/路径/大小等）：
+   * 供测试与内部调用（如迁移前自动备份）使用；IPC 任务链只要求完成信号，
+   * 完成信息已由 ctl.log 报告，handler 侧显式忽略返回值。
+   */
   runExport(req: IoExportRequest, ctl: TaskControl): Promise<BackupFileInfo>
   runImport(req: IoImportRequest, ctl: TaskControl): Promise<void>
   runMove(req: IoMoveRequest, ctl: TaskControl): Promise<void>
   listBackups(dir?: string): Promise<BackupFileInfo[]>
-  /** 按保留份数清理全部旧备份（清理按钮 — 零半成品） */
+  /** 按保留份数清理全部旧备份（清理按钮 — 零半成品）；removed = 实际删除成功数 */
   cleanupBackups(dir: string | undefined, keep: number): Promise<{ removed: number }>
   /** 解析备份默认目录（展开 %USERPROFILE% 等） */
   resolveBackupDir(): string
-  /** 备份文件轮转：按命名规范保留最近 keep 份 */
+  /** 备份文件轮转：按命名规范保留最近 keep 份；返回值 = 实际删除成功数（unlink 失败不计） */
   rotateBackups(dir: string, name: string, keep: number): Promise<number>
 }
 
 // ─────────────────────── 纯函数助手（可单测） ───────────────────────
 
-/** 规范化目标文件路径：展开环境变量 → 绝对路径 → 纠正/补齐扩展名（review M12） */
+/**
+ * 规范化目标文件路径：展开环境变量 → 绝对路径 → 扩展名归一（review M12）。
+ * 扩展名归一委托 shared 的 normalizeBackupTarget（preview 与实跑同源）。
+ */
 export function resolveTargetFile(input: string, format: BackupFormat): string {
-  const expanded = expandEnv(String(input ?? '').trim())
-  let p = resolve(expanded)
-  const want = format === 'vhd' ? '.vhdx' : '.tar'
-  const lower = p.toLowerCase()
-  if (format === 'vhd') {
-    // `.vhd` 一并归一为 `.vhdx`：否则该备份永远不被 listBackups / 轮转识别（幽灵文件 — review 根治）
-    if (lower.endsWith('.tar') || lower.endsWith('.vhd')) {
-      return `${p.replace(/\.(tar|vhd)$/i, '')}${want}`
-    }
-    if (!lower.endsWith('.vhdx')) p = `${p}${want}`
-    return p
-  }
-  if (lower.endsWith('.vhdx') || lower.endsWith('.vhd')) {
-    return p.replace(/\.(vhdx|vhd)$/i, want)
-  }
-  if (!lower.endsWith('.tar')) p = `${p}${want}`
-  return p
+  return normalizeBackupTarget(resolve(expandEnv(String(input ?? '').trim())), format)
+}
+
+/** Windows 路径归一比较：大小写与分隔符归一（review M20） */
+function normPath(s: string): string {
+  return resolve(s).toLowerCase().replace(/\//g, '\\')
 }
 
 /** 字节进度 → 百分比；总量未知返回 null（设计书：无法估算时 percent = null） */
@@ -270,7 +272,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
       ctl.log(`目标已存在，原文件已保留为 ${basename(preserved)}`)
     }
 
-    const args = ['--export', name, finalPath, ...(format === 'vhd' ? ['--vhd'] : [])]
+    const args = buildExportArgs(name, finalPath, format)
     const expected = await sourceSizeBytes(name, target.version)
     ctl.log(`导出 ${name} → ${finalPath}（${format}）`)
     ctl.report(0, `正在导出 ${name}`)
@@ -326,13 +328,19 @@ export function createIoService(deps: IoServiceDeps): IoService {
       ctl.report(100, '导出完成')
       ctl.log(`导出完成：${finalPath}（${formatBytes(st.size)}）`)
 
-      // 备份轮转（设计书 §12.7 保留数量）——保留副本已是规范名，自然进轮转
+      // 备份轮转（设计书 §12.7 保留数量）——保留副本已是规范名，自然进轮转。
+      // 仅当导出目标目录就是默认备份目录才轮转：导出到任意目录不得按 keepRecent
+      // 静默删该目录里 `<name>_<stamp>.*`（那是用户自己的文件 — review 根治）
       const keep = backupSettings().keepRecent
-      try {
-        const removed = await rotateBackups(parent, name, keep)
-        if (removed > 0) ctl.log(`备份轮转：已清理 ${removed} 份旧备份（保留最近 ${keep} 份）`)
-      } catch (e) {
-        logger.warn('rotate backups failed', { error: String(e) })
+      if (normPath(parent) === normPath(resolveBackupDir())) {
+        try {
+          const removed = await api.rotateBackups(parent, name, keep)
+          if (removed > 0) ctl.log(`备份轮转：已清理 ${removed} 份旧备份（保留最近 ${keep} 份）`)
+        } catch (e) {
+          logger.warn('rotate backups failed', { error: String(e) })
+        }
+      } else {
+        ctl.log('导出目标不是默认备份目录，不做备份轮转')
       }
 
       return {
@@ -378,7 +386,6 @@ export function createIoService(deps: IoServiceDeps): IoService {
 
     let installPath = ''
     let createdInstallDir = false
-    let args: string[]
     if (inPlace) {
       if (format !== 'vhd') {
         throw createAppError('TASK_FAILED', {
@@ -386,7 +393,6 @@ export function createIoService(deps: IoServiceDeps): IoService {
           suggestion: 'tar 备份请使用「归档导入」',
         })
       }
-      args = ['--import-in-place', name, archivePath]
       ctl.log(`就地导入 ${name} ← ${archivePath}`)
     } else {
       installPath = assertSafeIoPath(req.installPath, '安装位置')
@@ -399,39 +405,42 @@ export function createIoService(deps: IoServiceDeps): IoService {
           })
         })
       }
-      args = [
-        '--import',
-        name,
-        installPath,
-        archivePath,
-        ...(format === 'vhd' ? ['--vhd'] : []),
-        ...(format === 'tar' ? ['--version', req.version === 1 ? '1' : '2'] : []),
-      ]
       ctl.log(`导入 ${name} ← ${archivePath} → ${installPath}`)
     }
+    // argv 唯一事实源（与 preview 同源）
+    const args = buildImportArgs({
+      name,
+      installPath,
+      archivePath,
+      format,
+      version: req.version === 1 ? 1 : 2,
+      inPlace,
+    })
 
     const rawCommand = getRawCommand('wsl.exe', args)
     // 进度基数（review M19）：vhd 复制导入 1:1 可精确估算；
     // tar 解包大小未知 → 不估算（percent=null，UI 走不确定进度环）
     const expected = format === 'vhd' ? srcStat.size : 0
     ctl.report(0, `正在导入 ${name}`)
-    // 导入进度：目标体量增长 ≈ 已解包体量
-    const watchPath = inPlace ? '' : join(installPath, 'ext4.vhdx')
-    const stop = watchProgress(
-      async () => {
-        if (!watchPath) return 0
-        try {
-          const st = await fs.stat(watchPath)
-          return st.size
-        } catch {
-          // vhd 导入可能直接落 vhdx 以外的名字；用目录统计兜底
-          return dirSizeBytes(installPath)
-        }
-      },
-      expected,
-      ctl,
-      `正在导入 ${name}`,
-    )
+    // 导入进度：目标体量增长 ≈ 已解包体量。
+    // 就地导入没有可观察的落盘体量（源 vhdx 原地注册）→ 不启动进度观察：
+    // 否则 vhd 的 expected>0 会让 tick 每 500ms 打一条假 0%（review 根治）
+    const stop = inPlace
+      ? () => {}
+      : watchProgress(
+          async () => {
+            try {
+              const st = await fs.stat(join(installPath, 'ext4.vhdx'))
+              return st.size
+            } catch {
+              // vhd 导入可能直接落 vhdx 以外的名字；用目录统计兜底
+              return dirSizeBytes(installPath)
+            }
+          },
+          expected,
+          ctl,
+          `正在导入 ${name}`,
+        )
     try {
       await spawnTask(args, ctl)
     } catch (e) {
@@ -457,14 +466,15 @@ export function createIoService(deps: IoServiceDeps): IoService {
     }
     ctl.report(100, '导入完成')
     ctl.log(`导入完成：${name}（WSL${after.version}）`)
-    void rawCommand
   }
 
   /** 归档导入失败回滚：注销不完整发行版 + 清理自建目录 */
   async function rollbackImport(name: string, createdDir: string, ctl: TaskControl): Promise<void> {
     try {
       const list = await wsl.list().catch(() => [])
-      if (list.some((d) => d.name === name)) {
+      // WSL 名称不区分大小写（与 findDistro 同语义 — review 根治）
+      const lower = name.toLowerCase()
+      if (list.some((d) => d.name.toLowerCase() === lower)) {
         ctl.log(`回滚：注销不完整的发行版 ${name}（wsl --unregister）`)
         const r = await runWsl(['--unregister', name])
         if (r.code !== 0) {
@@ -526,9 +536,8 @@ export function createIoService(deps: IoServiceDeps): IoService {
       })
     }
     // Windows 路径比较：大小写与分隔符归一（review M20）
-    const norm = (s: string) => resolve(s).toLowerCase().replace(/\//g, '\\')
-    const from = norm(detail.basePath)
-    const to = norm(newPath)
+    const from = normPath(detail.basePath)
+    const to = normPath(newPath)
     const isSame = from === to
     // 同样拒绝「包含关系」：把发行版移进自己的子目录（或反过来）会毁掉 vhdx
     const isNested = to.startsWith(`${from}\\`) || from.startsWith(`${to}\\`)
@@ -562,7 +571,8 @@ export function createIoService(deps: IoServiceDeps): IoService {
       ctl.report(0, `正在迁移 ${name}`)
     }
 
-    const args = ['--manage', name, '--move', newPath]
+    // argv 唯一事实源（与 preview / 提权 elevation 同源）
+    const args = buildMoveArgs(name, newPath)
     const expected = await sourceSizeBytes(name, target.version)
     ctl.log(`迁移 ${name} → ${newPath}`)
     const stop = watchProgress(
@@ -633,6 +643,10 @@ export function createIoService(deps: IoServiceDeps): IoService {
     return resolve(expandEnv(backupSettings().defaultDir))
   }
 
+  /**
+   * 备份文件轮转：按命名规范保留最近 keep 份。
+   * 返回值 = 实际删除成功数（unlink 失败不计 — 与 cleanupBackups 同语义）。
+   */
   async function rotateBackups(dir: string, name: string, keep: number): Promise<number> {
     const re = backupFileRegex(name)
     let entries: string[]
@@ -647,12 +661,19 @@ export function createIoService(deps: IoServiceDeps): IoService {
       .reverse() // 文件名含时间戳，字典序 = 时间序
     const limit = Math.max(1, Math.floor(keep) || 1)
     const toRemove = matched.slice(limit)
+    let removed = 0
     for (const f of toRemove) {
-      await fs.unlink(join(dir, f)).catch(() => {})
+      try {
+        await fs.unlink(join(dir, f))
+        removed++
+      } catch {
+        /* 单文件失败忽略（不计数） */
+      }
     }
-    return toRemove.length
+    return removed
   }
 
+  /** 备份列表：只认规范备份名（isBackupFileName）；非规范文件不算备份，不冒充 */
   async function listBackups(dir?: string): Promise<BackupFileInfo[]> {
     const targetDir = dir ? assertSafeIoPath(dir, '备份目录') : resolveBackupDir()
     let entries: Array<{ name: string; isFile(): boolean }>
@@ -664,7 +685,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
     const out: BackupFileInfo[] = []
     for (const e of entries) {
       if (!e.isFile()) continue
-      if (!isBackupFileName(e.name) && !/\.(tar|vhdx)$/i.test(e.name)) continue
+      if (!isBackupFileName(e.name)) continue
       const full = join(targetDir, e.name)
       try {
         const st = await fs.stat(full)
@@ -682,6 +703,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
     return out.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1)).slice(0, 50)
   }
 
+  /** 按保留份数清理全部旧备份；removed = 实际删除成功数（unlink 失败不计） */
   async function cleanupBackups(
     dir: string | undefined,
     keep: number,
@@ -693,14 +715,14 @@ export function createIoService(deps: IoServiceDeps): IoService {
     } catch {
       return { removed: 0 }
     }
-    // 按发行版名前缀分组（<name>_<stamp>.<ext>），逐组轮转
+    // 按发行版名分组（规范备份名 → backupFileGroup 唯一命名事实源），逐组轮转
     const groups = new Map<string, string[]>()
     for (const f of entries) {
-      if (!isBackupFileName(f)) continue
-      const name = f.replace(/_[0-9]{8}-[0-9]{6}\.(tar|vhdx)$/i, '')
-      const list = groups.get(name) ?? []
+      const group = backupFileGroup(f)
+      if (group === null) continue
+      const list = groups.get(group) ?? []
       list.push(f)
-      groups.set(name, list)
+      groups.set(group, list)
     }
     let removed = 0
     const limit = Math.max(1, Math.floor(keep) || 1)
@@ -718,7 +740,8 @@ export function createIoService(deps: IoServiceDeps): IoService {
     return { removed }
   }
 
-  return {
+  // 自调用（runExport → rotateBackups）经 api 转发：测试可 spy 拦截轮转行为
+  const api: IoService = {
     runExport,
     runImport,
     runMove,
@@ -727,4 +750,5 @@ export function createIoService(deps: IoServiceDeps): IoService {
     resolveBackupDir,
     rotateBackups,
   }
+  return api
 }

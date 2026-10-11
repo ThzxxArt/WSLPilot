@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
-import type { DistroView, WslState } from '@wslpilot/shared'
-import { toAppError, type AppError } from '@shared/errors'
+import { toAppError, type AppError, type DistroView, type WslState } from '@wslpilot/shared'
 
 export type DistroAction = 'start' | 'terminate' | 'setDefault' | 'shutdown' | 'refresh'
 
@@ -10,27 +9,31 @@ export const useDistrosStore = defineStore('distros', {
     loading: false,
     lastError: null as AppError | null,
     busy: new Set<string>(),
+    /** 代际守卫：并发 refresh 时只认最新一次发起的响应 */
+    loadGen: 0,
   }),
 
   getters: {
     runningCount: (s) => s.items.filter((d) => d.state === 'Running').length,
-    stoppedCount: (s) => s.items.filter((d) => d.state === 'Stopped').length,
     defaultDistro: (s) => s.items.find((d) => d.isDefault) ?? null,
     byName: (s) => (name: string) => s.items.find((d) => d.name === name) ?? null,
   },
 
   actions: {
     async refresh() {
+      const gen = ++this.loadGen
       this.loading = true
       this.lastError = null
       try {
         const list = await window.wslAPI.distros.list()
+        if (gen !== this.loadGen) return
         // meta.pinned = 置顶（设计书 §6.4）：固定排在最前（此前该字段能写不能看 — 幽灵字段根治）
         this.items = [...list].sort((a, b) => Number(!!b.meta?.pinned) - Number(!!a.meta?.pinned))
       } catch (e) {
+        if (gen !== this.loadGen) return
         this.lastError = toAppError(e)
       } finally {
-        this.loading = false
+        if (gen === this.loadGen) this.loading = false
       }
     },
 

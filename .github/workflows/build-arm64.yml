@@ -32,14 +32,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 门禁与 ci.yml 同级同序：lint → format:check → typecheck → test:coverage →
+      # test:component → build → smoke:product → package（review C8）
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit & integration tests
-        run: npm test
+      - name: Unit & integration tests (coverage gate ≥85%)
+        run: npm run test:coverage
+
+      - name: Component tests (coverage gate)
+        run: npm run test:component
 
       - name: Build
         run: npm run build --workspace @wslpilot/desktop
+
+      - name: Product smoke (main/preload module graph)
+        run: npm run smoke:product
 
       # arm runner 原生编译 arm64（node-pty 等原生模块 ABI 正确 — review C8）
       - name: Package arm64

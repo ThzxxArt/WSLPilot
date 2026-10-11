@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { NButton, NInput, NPopover, NSelect } from 'naive-ui'
 import type { TerminalSession } from '../../stores/terminal'
 
@@ -19,7 +19,22 @@ const emit = defineEmits<{
   reorder: [from: number, to: number]
 }>()
 
-const newDistro = ref(props.defaultDistro || '')
+/**
+ * 新建会话的目标发行版：distros 异步到达后必须同步（否则下拉永远空）。
+ * 只在「尚未选择 / 当前选择已不在选项里」时跟随 defaultDistro / 首个选项，
+ * 用户手动选过的值不被覆盖。
+ */
+const newDistro = ref('')
+watch(
+  () => [props.defaultDistro, props.distroOptions] as const,
+  () => {
+    const stillValid =
+      newDistro.value && props.distroOptions.some((o) => o.value === newDistro.value)
+    if (stillValid) return
+    newDistro.value = props.defaultDistro || props.distroOptions[0]?.value || ''
+  },
+  { immediate: true },
+)
 
 const canCreate = computed(() => props.sessions.filter((s) => s.alive).length < props.maxSessions)
 

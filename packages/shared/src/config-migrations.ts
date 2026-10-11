@@ -1,9 +1,10 @@
 import type { ConfigKeyOf } from './config-schema'
 
-/** 配置版本迁移链：旧结构 → 新结构 */
-export type MigrationFn = (old: Record<string, unknown>) => Record<string, unknown>
+/** 配置版本迁移链：旧结构 → 新结构（模块内类型，外部经 migrateConfig 消费） */
+type MigrationFn = (old: Record<string, unknown>) => Record<string, unknown>
 
-export const migrations: Record<string, MigrationFn[]> = {
+/** 迁移链表（模块内常量，外部经 migrateConfig 消费） */
+const migrations: Record<string, MigrationFn[]> = {
   settings: [
     // v1 → v2: 增加 accent / launchAtLogin / reduceMotion
     (v1) => ({

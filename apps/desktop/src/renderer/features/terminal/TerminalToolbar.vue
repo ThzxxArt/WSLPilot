@@ -4,6 +4,8 @@ import { NButton, NInput, NPopover, NTooltip } from 'naive-ui'
 
 defineProps<{
   canZoom: boolean
+  /** 是否存在活动会话：无会话时清屏/复制/导出一律禁用（导出另有兜底提示） */
+  hasSession: boolean
   fontSize: number
 }>()
 
@@ -24,7 +26,9 @@ const query = ref('')
   <div class="terminal-toolbar">
     <n-tooltip trigger="hover">
       <template #trigger>
-        <n-button size="tiny" secondary @click="emit('clear')"> 清屏 </n-button>
+        <n-button size="tiny" secondary :disabled="!hasSession" @click="emit('clear')">
+          清屏
+        </n-button>
       </template>
       清空当前终端
     </n-tooltip>
@@ -56,14 +60,18 @@ const query = ref('')
 
     <n-tooltip trigger="hover">
       <template #trigger>
-        <n-button size="tiny" secondary @click="emit('copy')"> 复制 </n-button>
+        <n-button size="tiny" secondary :disabled="!hasSession" @click="emit('copy')">
+          复制
+        </n-button>
       </template>
       复制选中内容
     </n-tooltip>
 
     <n-tooltip trigger="hover">
       <template #trigger>
-        <n-button size="tiny" secondary @click="emit('export')"> 导出 </n-button>
+        <n-button size="tiny" secondary :disabled="!hasSession" @click="emit('export')">
+          导出
+        </n-button>
       </template>
       导出当前会话缓冲
     </n-tooltip>

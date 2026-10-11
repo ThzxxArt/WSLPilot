@@ -1,12 +1,13 @@
 /**
  * 视觉回归（M7 打磨项，设计书 §16 视觉回归）— 需要 Windows + 显示环境。
- * 运行：npm run test:visual（含 --update-snapshots=missing：首次生成基线，其后比对）
+ * 运行：npm run test:visual（硬门禁比对；新增/更新基线用 --update-snapshots=all 并提交产物）
  *
  * 稳定性策略：
  * - 动画统一禁用（animations: 'disabled'）
  * - 数据依赖区（指标数字 / 迷你图 / 时钟 / 发行版列表）一律 mask
  *   —— 基线只锁「视觉系统」：布局、令牌、间距、字号、动效无关的渲染一致性
- * - 首次运行生成基线（CI 约定：基线随 Windows runner 生成，跨机器差异不进门禁）
+ * - 基线按平台分文件（`{arg}-{platform}.png`）随仓库入库（linux/win32 各一套）；
+ *   缺基线直接红（updateSnapshots: 'none'），CI 不自动造基线放行
  */
 import { test, expect, _electron as electron } from '@playwright/test'
 import { join } from 'path'

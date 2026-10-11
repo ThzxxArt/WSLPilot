@@ -3,7 +3,7 @@
  * IPC `pty:data` 入参上限 256KB（ipc-schema ptyInput）——超过必须由渲染层分片，
  * 否则大段粘贴被 zod 拒绝后**静默丢失**。切分按 UTF-8 字节数且不拆散代理对。
  */
-import { utf8Bytes } from '@shared/ipc-schema'
+import { utf8Bytes } from '@wslpilot/shared'
 
 export const PTY_INPUT_MAX_BYTES = 1024 * 256
 

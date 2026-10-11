@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, useMessage } from 'naive-ui'
-import { EmptyState } from '@ui/components'
+import { EmptyState } from '@wslpilot/ui'
 import { useRoute } from 'vue-router'
 import { useTerminalStore } from '../stores/terminal'
 import { useDistrosStore } from '../stores/distros'
@@ -172,7 +172,11 @@ function onCopy() {
 
 function onExport() {
   const s = terminal.active
-  if (!s) return
+  if (!s) {
+    // 无会话时不再静默 return（按钮虽已禁用，事件路径也要如实提示）
+    message.warning('没有活动的终端会话，无法导出')
+    return
+  }
   const blob = new Blob([terminal.getBuffer(s.ptyId)], { type: 'text/plain;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
@@ -251,6 +255,7 @@ onUnmounted(() => {
     <div class="toolbar-row">
       <TerminalToolbar
         :can-zoom="!!terminal.active"
+        :has-session="!!terminal.active"
         :font-size="prefs.fontSize"
         @clear="onClear"
         @search="onSearch"

@@ -4,13 +4,13 @@ import {
   collectUnknownKeys,
   diffLines,
   emptyWslConfModel,
+  formatErrorLine,
   isSameText,
   parseWslConf,
   type DiffLine,
   type WslConfChange,
   type WslConfModel,
-} from '@shared/wslconf'
-import { formatErrorLine } from '@shared/errors'
+} from '@wslpilot/shared'
 
 export type WslConfMode = 'form' | 'raw'
 
@@ -84,6 +84,8 @@ export function useWslConf(
   const baseline = ref('')
   /** 最近一次从磁盘载入/保存的文本 */
   const diskText = ref('')
+  /** 代际守卫：快速切换发行版时旧响应不得写入（load/save 共用） */
+  let gen = 0
 
   // 快路径精确比较；差异仅换行/结尾时用行级比较兜底（避免无意义写盘）
   const isDirty = computed(() => {
@@ -107,19 +109,23 @@ export function useWslConf(
   async function load(): Promise<void> {
     const name = nameOf()
     if (!name) return
+    const g = ++gen
     loading.value = true
     error.value = ''
     try {
       const text = await api.read(name)
+      // 快速切换发行版：旧响应晚到不得写入
+      if (g !== gen) return
       diskText.value = text
       baseline.value = text
       raw.value = text
       model.value = parseWslConf(text)
       removeKeys.value = []
     } catch (e) {
+      if (g !== gen) return
       error.value = formatErrorLine(e, '读取 wsl.conf 失败')
     } finally {
-      loading.value = false
+      if (g === gen) loading.value = false
     }
   }
 
@@ -171,21 +177,25 @@ export function useWslConf(
   async function save(): Promise<{ terminated: boolean }> {
     const name = nameOf()
     const text = effectiveText()
+    const g = ++gen
     saving.value = true
     error.value = ''
     try {
       const result = await api.write(name, text)
-      diskText.value = text
-      baseline.value = text
-      raw.value = text
-      model.value = parseWslConf(text)
-      removeKeys.value = []
+      // 已有更新的 load/save 在途：旧响应不得覆盖新状态
+      if (g === gen) {
+        diskText.value = text
+        baseline.value = text
+        raw.value = text
+        model.value = parseWslConf(text)
+        removeKeys.value = []
+      }
       return result
     } catch (e) {
-      error.value = formatErrorLine(e, '保存 wsl.conf 失败')
+      if (g === gen) error.value = formatErrorLine(e, '保存 wsl.conf 失败')
       throw e
     } finally {
-      saving.value = false
+      if (g === gen) saving.value = false
     }
   }
 

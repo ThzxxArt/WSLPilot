@@ -1,14 +1,11 @@
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { formatCommand } from '@wslpilot/shared'
+import type { ToolResult } from './run-tool'
 
 const execFileAsync = promisify(execFile)
 
-export interface WslExecResult {
-  stdout: string
-  stderr: string
-  code: number
-}
+/** 执行结果的兼容导出名：与 run-tool 的 ToolResult 是同一类型（禁双名同构） */
+export type WslExecResult = ToolResult
 
 export interface WslExecOptions {
   timeoutMs?: number
@@ -158,10 +155,11 @@ export function parseDistroList(raw: string): ParsedDistro[] {
     .filter((d) => d.name !== '')
 }
 
-/** 生成等价命令行（仅用于界面展示，绝不用于执行） */
-export function getRawCommand(program: string, args: string[]): string {
-  return formatCommand(program, args)
-}
+/**
+ * 生成等价命令行（仅用于界面展示，绝不用于执行）。
+ * 纯转发壳：实现唯一收敛在 shared 的 formatCommand，本名仅作兼容导出（新代码直接用 formatCommand）。
+ */
+export { formatCommand as getRawCommand } from '@wslpilot/shared'
 
 export interface SpawnWslOptions {
   onLine: (line: string) => void

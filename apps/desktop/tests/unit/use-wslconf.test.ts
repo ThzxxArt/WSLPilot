@@ -137,4 +137,48 @@ describe('useWslConf', () => {
     conf.setRaw('[boot]\nsystemd = true\n')
     expect(conf.model.value.boot.systemd).toBe(true)
   })
+
+  it('快速切换发行版：旧 load 响应晚到不得写入', async () => {
+    const { ref } = await import('vue')
+    let resolveFirst!: (v: string) => void
+    const first = new Promise<string>((r) => (resolveFirst = r))
+    const api = {
+      read: vi
+        .fn()
+        .mockReturnValueOnce(first)
+        .mockResolvedValueOnce('[network]\nhostname = newbox\n'),
+      write: vi.fn(async () => ({ terminated: false })),
+    } as unknown as WslConfApi
+    const name = ref('Ubuntu')
+    const conf = useWslConf(name, { api })
+    const p1 = conf.load()
+    name.value = 'Debian'
+    const p2 = conf.load()
+    await p2
+    expect(conf.model.value.network.hostname).toBe('newbox')
+    resolveFirst('[network]\nhostname = oldbox\n')
+    await p1
+    // 旧响应晚到：不得把 Debian 的内容覆盖回 Ubuntu 的
+    expect(conf.model.value.network.hostname).toBe('newbox')
+  })
+
+  it('save 旧响应晚到不得覆盖新载入', async () => {
+    let resolveWrite!: (v: { terminated: boolean }) => void
+    const slowWrite = new Promise<{ terminated: boolean }>((r) => (resolveWrite = r))
+    const api = {
+      read: vi.fn(async () => '[network]\nhostname = disk\n'),
+      write: vi.fn().mockReturnValueOnce(slowWrite),
+    } as unknown as WslConfApi
+    const conf = useWslConf('Ubuntu', { api })
+    await conf.load()
+    conf.setField('network', 'hostname', 'editing')
+    const pSave = conf.save()
+    // 保存在途时重新载入（如切换发行版后返回）：新载入先完成
+    await conf.load()
+    expect(conf.model.value.network.hostname).toBe('disk')
+    resolveWrite({ terminated: false })
+    await pSave
+    // 慢保存晚到：不得把「已保存」的脏文本写回状态
+    expect(conf.model.value.network.hostname).toBe('disk')
+  })
 })

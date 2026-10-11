@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { registerIoHandlers } from '../../src/main/ipc/handlers/io'
-import { CH } from '@wslpilot/shared'
+import { CH, DEFAULT_BACKUP_KEEP } from '@wslpilot/shared'
 import type { TaskControl } from '../../src/main/services/task-runner'
 
 function makeDeps() {
@@ -125,13 +125,33 @@ describe('io IPC handlers (M4)', () => {
     expect(deps.io.listBackups).toHaveBeenCalledTimes(2)
   })
 
-  it('io:cleanupBackups 转发 dir/keep；keep 缺省用 5（review M8 零覆盖根治）', async () => {
+  it('io:cleanupBackups 转发 dir/keep；keep 缺省走 DEFAULT_BACKUP_KEEP（常量单源）', async () => {
     const { handlers, deps } = register()
     expect(await handlers.get(CH.ioCleanupBackups)!({}, { keep: 3 })).toEqual({ removed: 3 })
     expect(deps.io.cleanupBackups).toHaveBeenCalledWith(undefined, 3)
 
-    expect(await handlers.get(CH.ioCleanupBackups)!({}, { dir: 'D:\\bk' })).toEqual({ removed: 5 })
-    expect(deps.io.cleanupBackups).toHaveBeenCalledWith('D:\\bk', 5)
+    expect(await handlers.get(CH.ioCleanupBackups)!({}, { dir: 'D:\\bk' })).toEqual({
+      removed: DEFAULT_BACKUP_KEEP,
+    })
+    expect(deps.io.cleanupBackups).toHaveBeenCalledWith('D:\\bk', DEFAULT_BACKUP_KEEP)
+  })
+
+  it('io:export 的 run 显式忽略 BackupFileInfo 返回值（任务链只要求完成信号）', async () => {
+    const { handlers, deps } = register()
+    await handlers.get(CH.ioExport)!({}, { name: 'Ubuntu', path: 'C:\\b\\u.tar', format: 'tar' })
+    const started = (deps.tasks.start as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      run: (ctl: TaskControl) => Promise<void>
+    }
+    const ctl = {
+      taskId: 't',
+      type: 'export',
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: () => {},
+      onCancel: vi.fn(),
+    } as unknown as TaskControl
+    await expect(started.run(ctl)).resolves.toBeUndefined()
   })
 
   it('task:cancel delegates to runner', () => {

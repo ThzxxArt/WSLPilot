@@ -2,7 +2,7 @@
  * 命令面板纯逻辑（M5 ⌘K — 设计书 §13.3）：
  * 前缀模式 `> ` 命令 / `@ ` 发行版 / `# ` 设置；模糊匹配；分组；最近使用。
  */
-import { filterRanked } from '@shared/fuzzy'
+import { filterRanked } from '@wslpilot/shared'
 
 export type PaletteGroup = '导航' | '发行版' | '动作' | '设置'
 

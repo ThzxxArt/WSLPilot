@@ -8,12 +8,12 @@ import {
   NSelect,
   NSwitch,
   NTag,
+  useDialog,
   useMessage,
   useNotification,
 } from 'naive-ui'
-import { Kbd } from '@ui/components'
-import { previewActionCommandForDistro, assertSafeActionId } from '@shared/actions'
-import type { WslAction } from '@shared/types'
+import { Kbd } from '@wslpilot/ui'
+import { previewActionCommandForDistro, assertSafeActionId, type WslAction } from '@wslpilot/shared'
 import { useActionsStore } from '../../stores/actions'
 import { useDistrosStore } from '../../stores/distros'
 import { errorLine } from '../../composables/useAppError'
@@ -21,9 +21,25 @@ import { errorLine } from '../../composables/useAppError'
 const props = defineProps<{ distroName: string }>()
 
 const message = useMessage()
+const dialog = useDialog()
 const notification = useNotification()
 const actions = useActionsStore()
 const distros = useDistrosStore()
+
+/** 需确认操作统一走 naive dialog（全仓一致，禁止 window.confirm） */
+function confirmDangerous(opts: { title: string; content: string }): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: opts.title,
+      content: opts.content,
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
 
 onMounted(() => {
   if (!actions.loaded) void actions.load()
@@ -44,9 +60,10 @@ function preview(a: WslAction): string {
 async function runAction(a: WslAction) {
   // §13.4 破坏性确认：confirm 动作必须显式确认，且展示等价命令
   if (a.confirm) {
-    const ok = window.confirm(
-      `执行动作「${a.label}」？\n\n将运行：\n${preview(a)}\n\n点「确定」执行，点「取消」放弃。`,
-    )
+    const ok = await confirmDangerous({
+      title: `执行动作「${a.label}」`,
+      content: `将运行：\n${preview(a)}`,
+    })
     if (!ok) return
   }
   try {
@@ -152,7 +169,11 @@ async function saveAction() {
 }
 
 async function removeAction(a: WslAction) {
-  if (!window.confirm(`删除动作「${a.label}」？（可撤销）`)) return
+  const ok = await confirmDangerous({
+    title: '删除动作',
+    content: `删除动作「${a.label}」？（可撤销）`,
+  })
+  if (!ok) return
   try {
     await actions.remove(a.id)
     // §13.4 可撤销：Toast 内提供「撤销」

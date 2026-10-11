@@ -75,7 +75,7 @@ export function isValidDistroName(name: string): boolean {
   }
 }
 
-/** 建议备份文件完整路径（默认目录 + 命名规范） */
+/** 建议备份文件完整路径（默认目录 + 命名规范）；目录为空时只给文件名（绝不生成根相对 `\文件名`） */
 export function suggestedBackupPath(
   defaultDir: string,
   name: string,
@@ -83,8 +83,10 @@ export function suggestedBackupPath(
   at: Date = new Date(),
 ): string {
   const dir = (defaultDir ?? '').trim().replace(/[\\/]+$/, '')
+  const file = exportFileName(name, format, at)
+  if (!dir) return file
   const sep = dir.includes('/') && !dir.includes('\\') ? '/' : '\\'
-  return `${dir}${sep}${exportFileName(name, format, at)}`
+  return `${dir}${sep}${file}`
 }
 
 function requireField(value: string, label: string): string | null {

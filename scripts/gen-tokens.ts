@@ -9,7 +9,6 @@ import {
   PRIMITIVE_GRADIENTS,
   SEMANTIC_LIGHT,
   SEMANTIC_TO_CSS,
-  SPACING,
   RADIUS,
   SHADOW,
   Z_INDEX,
@@ -59,20 +58,19 @@ ${toScssVars(gradients)}
 // ── Semantic (light) ──────────────────────────────────────
 ${toScssVars(semanticCss)}
 
-// ── Spacing / Radius / Shadow / Z / Motion / Type ─────────
-${toScssVars({ ...SPACING, ...RADIUS, ...SHADOW, ...Z_INDEX, ...MOTION, ...TYPOGRAPHY })}
+// ── Radius / Shadow / Z / Motion / Type ───────────────────
+${toScssVars({ ...RADIUS, ...SHADOW, ...Z_INDEX, ...MOTION, ...TYPOGRAPHY })}
 
 // ── CSS custom properties (runtime) ───────────────────────
 @mixin pilot-css-vars {
   :root {
 ${toCssVars(gradients, '    ')}
 ${toCssVars(semanticCss, '    ')}
-${toCssVars({ ...SPACING, ...RADIUS, ...SHADOW, ...Z_INDEX, ...MOTION, ...TYPOGRAPHY }, '    ')}
+${toCssVars({ ...RADIUS, ...SHADOW, ...Z_INDEX, ...MOTION, ...TYPOGRAPHY }, '    ')}
 
     /* glass */
     --glass-bg: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
     --glass-blur: 20px;
-    --glass-border: 1px solid color-mix(in srgb, var(--color-border-default) 60%, transparent);
   }
 
   @media (prefers-reduced-motion: reduce) {

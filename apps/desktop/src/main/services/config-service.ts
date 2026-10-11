@@ -247,6 +247,22 @@ export async function createConfigService(
     conflicts.delete(key)
   }
 
+  /**
+   * 冲突未决写保护（review 静默覆盖根治）：
+   * 外部修改冲突未 resolve 前，patch/update/replace 一律拒绝写——
+   * 否则写回会把外部编辑悄悄冲掉，且 writeContent 顺手清冲突标记，用户毫不知情。
+   * resolveConflict 自身的三条路径不经过本守卫（那正是决断入口）。
+   */
+  function assertNoConflict(key: ConfigKey): void {
+    const c = conflicts.get(key)
+    if (!c) return
+    throw createAppError('CONFIG_INVALID', {
+      message: `${CONFIG_FILE_NAMES[key]} 存在未处理的外部修改冲突，已拒绝写入`,
+      detail: c.detail,
+      suggestion: '请先在冲突提示中选择「以磁盘为准 / 以应用为准 / 暂不处理」，然后再保存',
+    })
+  }
+
   async function parseAndSanitize<K extends ConfigKey>(
     key: K,
     text: string,
@@ -345,6 +361,7 @@ export async function createConfigService(
       patch: DeepPartial<ConfigMap[K]>,
     ): Promise<ConfigMap[K]> {
       return enqueueWrite(async () => {
+        assertNoConflict(key)
         const originalText = await readRaw(key)
         const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
 
@@ -386,6 +403,7 @@ export async function createConfigService(
 
     async replace<K extends ConfigKey>(key: K, value: ConfigMap[K]): Promise<void> {
       return enqueueWrite(async () => {
+        assertNoConflict(key)
         const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]
         const validated = schema.safeParse(value)
         if (!validated.success) {
@@ -411,6 +429,7 @@ export async function createConfigService(
      */
     async update(key, fn) {
       return enqueueWrite(async () => {
+        assertNoConflict(key)
         const current = cache.get(key) as ConfigMap[typeof key]
         const next = await fn(current)
         const schema = CONFIG_SCHEMAS[key as keyof typeof CONFIG_SCHEMAS]

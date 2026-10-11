@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { runWsl, runWslWithStdin, parseDistroList, getRawCommand, spawnWsl } from '../src/exec-wsl'
+import {
+  runWsl,
+  runWslWithStdin,
+  parseDistroList,
+  getRawCommand,
+  spawnWsl,
+  type WslExecResult,
+} from '../src/exec-wsl'
+import { formatCommand } from '@wslpilot/shared'
+import type { ToolResult } from '../src/run-tool'
 
 const { mockExecFile, mockSpawn } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
@@ -144,7 +153,20 @@ describe('parseDistroList', () => {
   })
 })
 
-describe('getRawCommand', () => {
+describe('WslExecResult 与 ToolResult 同一类型（双名同构根治）', () => {
+  it('双向可赋值，是同一类型而非同构拷贝', () => {
+    const t: ToolResult = { stdout: 'a', stderr: 'b', code: 1 }
+    const w: WslExecResult = t
+    const back: ToolResult = w
+    expect(back).toBe(t)
+    expect(w).toEqual({ stdout: 'a', stderr: 'b', code: 1 })
+  })
+})
+
+describe('getRawCommand（formatCommand 转发壳）', () => {
+  it('与 shared 的 formatCommand 是同一函数（兼容导出）', () => {
+    expect(getRawCommand).toBe(formatCommand)
+  })
   it('quotes args with spaces', () => {
     expect(getRawCommand('wsl.exe', ['-d', 'Ubuntu 22.04'])).toBe('wsl.exe -d "Ubuntu 22.04"')
   })

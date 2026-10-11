@@ -10,6 +10,7 @@ import {
   validateElevationRequest,
   type ElevationRequest,
 } from './elevation'
+import { buildMoveArgs } from './commands'
 
 describe('提权操作白名单（M7 §14.3）', () => {
   it('op ↔ program 映射完备（白名单即事实源）', () => {
@@ -144,5 +145,23 @@ describe('提权操作白名单（M7 §14.3）', () => {
     expect(isElevationError('拒绝访问')).toBe(true)
     expect(isElevationError('ok')).toBe(false)
     expect(ELEVATION_SUGGESTION).toContain('管理员')
+  })
+
+  it('wsl.move argv 与 commands.buildMoveArgs 同源（唯一事实源）', () => {
+    const inv = buildElevatedInvocation({
+      op: 'wsl.move',
+      params: { name: 'Ubuntu', path: 'D:\\WSL\\Ubuntu' },
+    })
+    expect(inv.args).toEqual(buildMoveArgs('Ubuntu', 'D:\\WSL\\Ubuntu'))
+  })
+
+  it('ELEVATION_PARAM_SCHEMAS 不导出（内部契约，经 validateElevationRequest 观测）', async () => {
+    const mod = (await import('./elevation')) as unknown as Record<string, unknown>
+    expect('ELEVATION_PARAM_SCHEMAS' in mod).toBe(false)
+    // 行为观测：schema 校验仍经 validateElevationRequest 暴露
+    expect(validateElevationRequest({ op: 'wsl.install', params: {} })).toEqual({
+      op: 'wsl.install',
+      params: {},
+    })
   })
 })

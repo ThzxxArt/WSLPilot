@@ -9,16 +9,18 @@ import {
   NTabPane,
   NTabs,
   NTag,
+  useDialog,
   useMessage,
 } from 'naive-ui'
-import type { Metrics, RegistryDetail } from '@shared/types'
-import { formatKbPair } from '@shared/format'
+import { formatKbPair, type DistroMeta, type Metrics, type RegistryDetail } from '@wslpilot/shared'
 import { useDistrosStore } from '../../stores/distros'
 import { useSettingsStore } from '../../stores/settings'
 import { useTasksStore } from '../../stores/tasks'
 import { useActionsStore } from '../../stores/actions'
+import { useMetricsStore } from '../../stores/metrics'
 import { errorLine } from '../../composables/useAppError'
 import { stateLabel } from '../../composables/state-label'
+import { taskStatusLabel, taskTypeLabel } from '../../composables/useTaskProgress'
 import WslConfPanel from '../config/WslConfPanel.vue'
 import ActionsPanel from '../actions/ActionsPanel.vue'
 import FileBrowserPanel from '../fs/FileBrowserPanel.vue'
@@ -26,13 +28,16 @@ import FileBrowserPanel from '../fs/FileBrowserPanel.vue'
 const props = defineProps<{ show: boolean; distroName: string }>()
 const emit = defineEmits<{
   'update:show': [boolean]
+  'update:distroName': [name: string]
   openTerminal: [name: string]
 }>()
 
 const distros = useDistrosStore()
 const settings = useSettingsStore()
 const tasks = useTasksStore()
+const metricsStore = useMetricsStore()
 const message = useMessage()
+const dialog = useDialog()
 
 const detail = ref<RegistryDetail | null>(null)
 const loading = ref(false)
@@ -41,8 +46,25 @@ const metrics = ref<Metrics | null>(null)
 const lastTask = ref<{ type: string; distro: string; status: string; finishedAt: string } | null>(
   null,
 )
+/** wsl.conf 面板（切发行版 / 关窗的未保存守卫入口） */
+const confPanel = ref<InstanceType<typeof WslConfPanel> | null>(null)
 
 const distro = computed(() => distros.byName(props.distroName))
+
+/** 需确认操作统一走 naive dialog（全仓一致，禁止 window.confirm） */
+function confirmDangerous(opts: { title: string; content: string }): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: opts.title,
+      content: opts.content,
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
 
 async function loadDetail() {
   if (!props.distroName) return
@@ -56,7 +78,7 @@ async function loadDetail() {
   }
   // 资源 Mini 仪表盘（§12.4）：仅运行中采样
   if (distro.value?.state === 'Running') {
-    metrics.value = await window.wslAPI.metrics.sample(props.distroName).catch(() => null)
+    metrics.value = await metricsStore.sampleDistro(props.distroName)
   } else {
     metrics.value = null
   }
@@ -67,6 +89,13 @@ async function loadDetail() {
   } catch {
     lastTask.value = null
   }
+}
+
+/** 关窗守卫：wsl.conf 有未保存修改时先确认（与 FileBrowserPanel 同语义） */
+async function requestClose() {
+  const ok = (await confPanel.value?.confirmDiscard()) ?? true
+  if (!ok) return
+  emit('update:show', false)
 }
 
 watch(
@@ -151,44 +180,50 @@ function onSetDefault() {
   void act(() => distros.setDefault(props.distroName), `已设 ${props.distroName} 为默认`)
 }
 
-/** WSL1 ↔ WSL2 转换（wsl --set-version，长任务；运行中会失败，提示先停止） */
-function onConvert() {
+/** WSL1 ↔ WSL2 转换（wsl --set-version，长任务；运行中必须先停止） */
+async function onConvert() {
   const d = distro.value
   if (!d) return
+  // wsl --set-version 要求发行版处于已停止状态：先拦截，别让用户等长任务失败
+  if (d.state === 'Running') {
+    message.warning(`请先停止 ${props.distroName}，再进行 WSL 版本转换`)
+    return
+  }
   const target: 1 | 2 = d.version === 1 ? 2 : 1
   if (settings.confirmDestructive) {
-    const ok = window.confirm(
-      `将 ${props.distroName} 转换为 WSL${target}？\n\n` +
-        `该操作耗时较长（虚拟磁盘转换），且要求发行版处于已停止状态。\n\n` +
-        `点「确定」开始，点「取消」放弃。`,
-    )
-    if (!ok) return
-  }
-  void (async () => {
-    try {
-      const entry = await tasks.startConvert(props.distroName, target)
-      if (!entry) {
-        message.error(errorLine(tasks.lastError, '转换任务启动失败'))
-        return
-      }
-      message.success(`已开始转换 ${props.distroName} → WSL${target}，进度见底部状态栏`)
-      emit('update:show', false)
-    } catch (e) {
-      message.error(errorLine(e, '启动版本转换失败'))
-    }
-  })()
-}
-
-async function onUnregister() {
-  // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）
-  if (settings.confirmDestructive) {
-    const ok = window.confirm(
-      `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。\n\n点「确定」执行注销，点「取消」放弃。`,
-    )
+    const ok = await confirmDangerous({
+      title: `转换为 WSL${target}`,
+      content:
+        `将 ${props.distroName} 转换为 WSL${target}？\n\n` +
+        `该操作耗时较长（虚拟磁盘转换），且要求发行版处于已停止状态。`,
+    })
     if (!ok) return
   }
   try {
-    await window.wslAPI.distros.uninstall(props.distroName)
+    const entry = await tasks.startConvert(props.distroName, target)
+    if (!entry) {
+      message.error(errorLine(tasks.lastError, '转换任务启动失败'))
+      return
+    }
+    message.success(`已开始转换 ${props.distroName} → WSL${target}，进度见底部状态栏`)
+    emit('update:show', false)
+  } catch (e) {
+    message.error(errorLine(e, '启动版本转换失败'))
+  }
+}
+
+async function onUnregister() {
+  if (!distro.value) return
+  // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）
+  if (settings.confirmDestructive) {
+    const ok = await confirmDangerous({
+      title: '注销发行版',
+      content: `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。`,
+    })
+    if (!ok) return
+  }
+  try {
+    await window.wslAPI.distros.unregister(props.distroName)
     message.success(`已注销 ${props.distroName}`)
     await distros.refresh()
     emit('update:show', false)
@@ -214,8 +249,17 @@ const quickActionOptions = computed(() =>
   actionsStore.items.map((a) => ({ label: a.label, value: a.id })),
 )
 
-function startEdit() {
-  const m = distro.value?.meta
+/** 打开编辑表单：用 meta:get 读回「当前」元数据预填，避免列表快照过期后整表写回覆盖；读失败退回快照并如实提示 */
+async function startEdit() {
+  let m: DistroMeta | null = distro.value?.meta ?? null
+  try {
+    const fresh = await window.wslAPI.meta.get(props.distroName)
+    if (fresh) m = fresh
+  } catch (e) {
+    message.warning(
+      `元数据读取失败，已按列表缓存预填，请核对后再保存 — ${errorLine(e, '读取元数据失败')}`,
+    )
+  }
   editAlias.value = m?.alias ?? ''
   editNote.value = m?.note ?? ''
   editTags.value = (m?.tags ?? []).join(', ')
@@ -259,8 +303,10 @@ async function saveMeta() {
     preset="card"
     :title="`发行版详情 · ${distroName}`"
     class="detail-modal"
-    @update:show="(v: boolean) => emit('update:show', v)"
+    @update:show="(v: boolean) => (v ? emit('update:show', true) : requestClose())"
   >
+    <!-- config pane 的 display-directive=show（naive 按 pane 读取）：
+         切页签不卸载 wsl.conf 面板，否则脏编辑随页签切换静默丢失 -->
     <n-tabs v-model:value="activeTab" type="line" size="small">
       <!-- 概览（含注册表详情） -->
       <n-tab-pane name="overview" tab="概览">
@@ -303,7 +349,8 @@ async function saveMeta() {
 
         <!-- 最近任务（§12.4） -->
         <div v-if="lastTask" class="last-task">
-          最近任务：{{ lastTask.type }} · {{ lastTask.distro || '—' }} · {{ lastTask.status }} ·
+          最近任务：{{ taskTypeLabel(lastTask.type) }} · {{ lastTask.distro || '—' }} ·
+          {{ taskStatusLabel(lastTask.status) }} ·
           {{ lastTask.finishedAt.slice(0, 19).replace('T', ' ') }}
         </div>
 
@@ -380,27 +427,36 @@ async function saveMeta() {
           </div>
         </div>
 
+        <p v-if="!distro" class="empty-distro">该发行版信息不可用（可能已被注销），操作已停用</p>
+
         <div class="actions">
           <n-button secondary @click="emit('openTerminal', distroName)"> 打开终端 </n-button>
           <n-button v-if="distro && distro.state !== 'Running'" secondary @click="onStart">
             启动
           </n-button>
-          <n-button v-else secondary @click="onTerminate"> 停止 </n-button>
-          <n-button secondary :disabled="distro?.isDefault" @click="onSetDefault">
+          <n-button v-else-if="distro" secondary @click="onTerminate"> 停止 </n-button>
+          <n-button secondary :disabled="!distro || distro.isDefault" @click="onSetDefault">
             设为默认
           </n-button>
-          <n-button secondary @click="startEdit"> 编辑元数据 </n-button>
-          <n-button secondary :disabled="!distro" @click="onConvert">
+          <n-button secondary :disabled="!distro" @click="startEdit"> 编辑元数据 </n-button>
+          <!-- wsl --set-version 要求已停止：运行中禁用并在点击路径拦截 -->
+          <n-button secondary :disabled="!distro || distro.state === 'Running'" @click="onConvert">
             转换为 WSL{{ distro && distro.version === 1 ? '2' : '1' }}
           </n-button>
           <!-- 危险操作：图标 + 文字双编码（§11.4 不仅靠颜色区分） -->
-          <n-button quaternary type="error" @click="onUnregister"> ⚠ 注销发行版 </n-button>
+          <n-button quaternary type="error" :disabled="!distro" @click="onUnregister">
+            ⚠ 注销发行版
+          </n-button>
         </div>
       </n-tab-pane>
 
       <!-- 配置（wsl.conf） -->
-      <n-tab-pane name="config" tab="配置">
-        <WslConfPanel :distro-name="distroName" />
+      <n-tab-pane name="config" tab="配置" display-directive="show">
+        <WslConfPanel
+          ref="confPanel"
+          :distro-name="distroName"
+          @restore-distro="(name: string) => emit('update:distroName', name)"
+        />
       </n-tab-pane>
 
       <!-- 动作 -->
@@ -581,6 +637,12 @@ async function saveMeta() {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 16px;
+}
+
+.empty-distro {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--color-warning);
 }
 
 .field-row {

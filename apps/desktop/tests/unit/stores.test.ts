@@ -37,6 +37,7 @@ const wslAPI = {
 const { useDistrosStore } = await import('../../src/renderer/stores/distros')
 const { useMetricsStore } = await import('../../src/renderer/stores/metrics')
 const { createPinia, setActivePinia } = await import('pinia')
+const { defaultConfig } = await import('@wslpilot/shared')
 
 describe('useDistrosStore', () => {
   beforeEach(() => {
@@ -101,6 +102,22 @@ describe('useDistrosStore', () => {
     await s.shutdownAll()
     expect(s.items[0]!.state).toBe('Stopped')
   })
+
+  it('refresh 旧响应晚到不覆盖新状态', async () => {
+    let resolveFirst!: (v: unknown) => void
+    const first = new Promise((r) => (resolveFirst = r))
+    wslAPI.distros.list
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce([{ name: 'B', state: 'Stopped', version: 2, isDefault: false }])
+    const s = useDistrosStore()
+    const p1 = s.refresh()
+    const p2 = s.refresh()
+    await p2
+    expect(s.items.map((d) => d.name)).toEqual(['B'])
+    resolveFirst([{ name: 'A', state: 'Running', version: 2, isDefault: false }])
+    await p1
+    expect(s.items.map((d) => d.name)).toEqual(['B'])
+  })
 })
 
 describe('useSettingsStore', () => {
@@ -111,7 +128,6 @@ describe('useSettingsStore', () => {
 
   it('load fills from settings.jsonc', async () => {
     // 基于 schema 默认值构造完整对象：mock 形状与真实 AppSettings 对齐（review 根治）
-    const { defaultConfig } = await import('@shared/config-schema')
     const base = defaultConfig('settings')
     wslAPI.config.get.mockResolvedValue({
       ...base,
@@ -251,6 +267,69 @@ describe('useSettingsStore', () => {
     expect(s.lastError?.code).toBe('CONFIG_INVALID')
     expect(s.accent).toBe('aurora')
     expect(s.version).toBe('')
+    // 失败态必须可观测：loaded 不置真、loadErrorAt 推进（界面据此一次性提示）
+    expect(s.loaded).toBe(false)
+    expect(s.loadErrorAt).toBeGreaterThan(0)
+  })
+
+  it('load 成功清 lastError 并置 loaded', async () => {
+    wslAPI.config.get.mockRejectedValue(new Error('boom'))
+    const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+    const s = useSettingsStore()
+    await s.load()
+    expect(s.lastError).toBeTruthy()
+
+    wslAPI.config.get.mockResolvedValue(defaultConfig('settings'))
+    wslAPI.app.getVersion.mockResolvedValue('0.1.0')
+    await s.load()
+    expect(s.lastError).toBeNull()
+    expect(s.loaded).toBe(true)
+    expect(s.version).toBe('0.1.0')
+  })
+
+  it('load 旧响应晚到不覆盖新状态', async () => {
+    const base = defaultConfig('settings')
+    let resolveFirst!: (v: unknown) => void
+    const first = new Promise((r) => (resolveFirst = r))
+    wslAPI.config.get.mockReturnValueOnce(first).mockResolvedValueOnce({
+      ...base,
+      general: { ...base.general, accent: 'sunset' },
+    })
+    const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+    const s = useSettingsStore()
+    const p1 = s.load()
+    const p2 = s.load()
+    await p2
+    expect(s.accent).toBe('sunset')
+    resolveFirst({ ...base, general: { ...base.general, accent: 'ocean' } })
+    await p1
+    expect(s.accent).toBe('sunset')
+  })
+
+  it('persistField 旧失败不回滚更新的写入', async () => {
+    let rejectFirst!: (e: unknown) => void
+    const first = new Promise((_r, rej) => (rejectFirst = rej))
+    wslAPI.config.set.mockReturnValueOnce(first).mockResolvedValueOnce({})
+    const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+    const s = useSettingsStore()
+    const p1 = s.setAccent('ocean')
+    const p2 = s.setAccent('sunset')
+    await p2
+    rejectFirst(new Error('disk full'))
+    expect(await p1).toBe(false)
+    // 旧失败只回滚它自己：不得把新值 sunset 写回 aurora
+    expect(s.accent).toBe('sunset')
+  })
+
+  it('persistField 失败回滚 UI 值并推进 persistErrorAt（非过期路径）', async () => {
+    wslAPI.config.set.mockRejectedValue(new Error('disk full'))
+    const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+    const s = useSettingsStore()
+    const before = s.persistErrorAt
+    expect(await s.setAccent('ocean')).toBe(false)
+    expect(s.accent).toBe('aurora')
+    expect(s.persistErrorAt).toBeGreaterThanOrEqual(before)
+    expect(s.lastError).toBeTruthy()
   })
 })
 
@@ -307,6 +386,41 @@ describe('useMetricsStore', () => {
     expect(s.lastError).toBeNull()
   })
 
+  it('sample 旧响应晚到不覆盖新状态', async () => {
+    let resolveFirst!: (v: unknown) => void
+    const first = new Promise((r) => (resolveFirst = r))
+    wslAPI.metrics.sampleOverview.mockReturnValueOnce(first).mockResolvedValueOnce({
+      runningCount: 9,
+      totalCount: 9,
+      memUsedKB: 1,
+      memTotalKB: 2,
+      diskUsedKB: 0,
+      diskTotalKB: 0,
+      cpuPercent: 1,
+      sampledAt: 'new',
+      perDistro: {},
+    })
+    const s = useMetricsStore()
+    const p1 = s.sample()
+    const p2 = s.sample()
+    await p2
+    expect(s.overview.runningCount).toBe(9)
+    resolveFirst({
+      runningCount: 1,
+      totalCount: 1,
+      memUsedKB: 0,
+      memTotalKB: 0,
+      diskUsedKB: 0,
+      diskTotalKB: 0,
+      cpuPercent: 0,
+      sampledAt: 'old',
+      perDistro: {},
+    })
+    await p1
+    expect(s.overview.runningCount).toBe(9)
+    expect(s.overview.sampledAt).toBe('new')
+  })
+
   it('sample records AppError and defaults perDistro', async () => {
     wslAPI.metrics.sampleOverview.mockRejectedValue(
       new Error('WSLPILOT:{"code":"TASK_FAILED","message":"采样失败","recoverable":true}'),
@@ -314,7 +428,6 @@ describe('useMetricsStore', () => {
     const s = useMetricsStore()
     await s.sample()
     expect(s.lastError?.code).toBe('TASK_FAILED')
-    expect(s.loading).toBe(false)
 
     wslAPI.metrics.sampleOverview.mockResolvedValue({
       runningCount: 1,

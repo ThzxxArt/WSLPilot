@@ -141,5 +141,4 @@ try {
 
 console.log('[smoke-product] PASS')
 // require 已验证模块图；退出以免 Electron 生命周期钩子挂住
-setTimeout(() => process.exit(0), 50).unref()
 process.exit(0)

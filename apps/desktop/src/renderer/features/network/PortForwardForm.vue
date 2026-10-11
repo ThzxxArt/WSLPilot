@@ -26,7 +26,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:show': [boolean]
-  save: [PortForwardRule]
+  /** save: [新规则, 原 id（编辑态改名时传，upsert 据此替换旧条目）] */
+  save: [rule: PortForwardRule, originalId?: string]
 }>()
 
 const message = useMessage()
@@ -81,7 +82,8 @@ function save() {
     message.warning(err)
     return
   }
-  emit('save', formToRule(form))
+  // 编辑态改 id = 重命名：随规则一并交出原 id，upsert 据此替换旧条目而不是另插一条
+  emit('save', formToRule(form), form.originalId || undefined)
   close()
 }
 </script>

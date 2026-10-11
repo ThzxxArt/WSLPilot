@@ -20,7 +20,6 @@ import {
   parseWslConfigMode,
   previewNetshCommand,
   PROXY_SCRIPT_PATH,
-  proxySummary,
   resolveEffectiveProxy,
   ruleMatchesEntry,
   ruleSummary,
@@ -253,23 +252,6 @@ describe('代理助手', () => {
   it('shellQuote', () => {
     expect(shellQuote('abc')).toBe("'abc'")
     expect(shellQuote("a'b")).toBe("'a'\\''b'")
-  })
-
-  it('proxySummary', () => {
-    expect(
-      proxySummary({ useWindowsProxy: true, httpProxy: '', httpsProxy: '', noProxy: '' }),
-    ).toBe('跟随系统')
-    expect(
-      proxySummary({
-        useWindowsProxy: false,
-        httpProxy: '127.0.0.1:1',
-        httpsProxy: '',
-        noProxy: '',
-      }),
-    ).toContain('HTTP')
-    expect(
-      proxySummary({ useWindowsProxy: false, httpProxy: '', httpsProxy: '', noProxy: '' }),
-    ).toBe('未配置')
   })
 
   it('PROXY_SCRIPT_PATH 固定为 profile.d', () => {

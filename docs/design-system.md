@@ -9,7 +9,7 @@ Primitive（原始色板/渐变）
     ↓
 Semantic（bg / text / accent / border / status）
     ↓
-Component（button-bg / input-border …）
+Component（Naive `themeOverrides` 组件级覆盖：Button / Card / DataTable …）
 ```
 
 Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变量消费同一套。
@@ -33,8 +33,8 @@ Naive UI 通过 `themeOverrides` 消费语义令牌；业务样式通过 CSS 变
 ## 字体
 
 ```css
---font-sans: 'Inter Variable', 'HarmonyOS Sans SC', 'PingFang SC', system-ui, sans-serif;
---font-mono: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+--font-sans: 'Inter Variable', 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+--font-mono: 'Cascadia Mono', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 ```
 
 字号阶梯（1.25 比例）：32 / 24 / 19 / 16 / 14 / 13 / 12
@@ -64,7 +64,10 @@ M7 动效基座（`packages/ui/src/styles/motion.scss`）：涟漪（`v-ripple` 
 ## 组件策略
 
 - **直接用 Naive UI**：Button / Card / Form / Modal / DataTable …
-- **自研业务组件**（基于 Naive 封装）：DistroCard、MetricCard、StatusDot、CommandPalette、TerminalPane、EmptyState、Skeleton …
+- **`packages/ui` 自研业务组件**（基于 Naive 封装）：DistroCard、MetricCard、StatusDot、ProgressRing、
+  Sparkline、CodeEditor、Kbd、EmptyState、Skeleton
+- **应用层组合**（`apps/desktop` 的 `renderer/features/`，不属 ui 包）：CommandPalette、TerminalTabs、
+  XtermPane、FileBrowserPanel、各业务向导与面板
 
 ## 修改令牌
 

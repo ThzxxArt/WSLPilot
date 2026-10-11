@@ -7,8 +7,8 @@ import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
-import { DEFAULT_POLL_INTERVAL_MS } from '@shared/constants'
-import { DistroCard, EmptyState, StatusDot, Skeleton } from '@ui/components'
+import { DEFAULT_POLL_INTERVAL_MS } from '@wslpilot/shared'
+import { DistroCard, EmptyState, StatusDot, Skeleton } from '@wslpilot/ui'
 import { stateLabel } from '../composables/state-label'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
@@ -71,6 +71,18 @@ watch(
   () => route.query.focus,
   (name) => {
     if (typeof name === 'string' && name) search.value = name
+  },
+  { immediate: true },
+)
+
+/** 命令面板「查看发行版」：跳转后直接打开详情弹窗（配置 / 动作 / 文件） */
+watch(
+  () => route.query.detail,
+  (name) => {
+    if (typeof name === 'string' && name) {
+      detailName.value = name
+      detailOpen.value = true
+    }
   },
   { immediate: true },
 )
@@ -265,6 +277,7 @@ function onDetailTerminal(name: string) {
     <DistroDetailModal
       v-model:show="detailOpen"
       :distro-name="detailName"
+      @update:distro-name="(n: string) => (detailName = n)"
       @open-terminal="onDetailTerminal"
     />
   </div>

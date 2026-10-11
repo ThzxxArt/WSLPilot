@@ -27,7 +27,8 @@ const path = computed(() => {
 })
 
 const area = computed(() => `${path.value} L${props.width},${props.height} L0,${props.height} Z`)
-const gid = computed(() => `spark-${Math.abs(props.values.length * 31 + (props.values[0] ?? 0))}`)
+// 实例级 uid（与 ProgressRing 同模式）：禁止由 values 派生（多实例同值会碰撞，gradient 串染）
+const uid = `spark-${Math.random().toString(36).slice(2, 9)}`
 </script>
 
 <template>
@@ -39,12 +40,12 @@ const gid = computed(() => `spark-${Math.abs(props.values.length * 31 + (props.v
     aria-hidden="true"
   >
     <defs>
-      <linearGradient :id="gid" x1="0" y1="0" x2="0" y2="1">
+      <linearGradient :id="uid" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" :stop-color="stroke" stop-opacity="0.28" />
         <stop offset="100%" :stop-color="stroke" stop-opacity="0" />
       </linearGradient>
     </defs>
-    <path :d="area" :fill="`url(#${gid})`" />
+    <path :d="area" :fill="`url(#${uid})`" />
     <path
       :d="path"
       fill="none"

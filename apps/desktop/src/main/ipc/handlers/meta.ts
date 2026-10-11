@@ -10,7 +10,9 @@ type AddFn = (
 export function registerMetaHandlers(add: AddFn): void {
   add(CH.metaGet, async (c, name: string) => {
     const file = await c.configService.load('distros')
-    return file.distros.find((d) => d.name === name) ?? null
+    // WSL 发行版名不区分大小写：按 toLowerCase 归一比较（否则换大小写查询会 miss）
+    const key = String(name ?? '').toLowerCase()
+    return file.distros.find((d) => d.name.toLowerCase() === key) ?? null
   })
 
   add(CH.metaSet, async (c, meta: DistroMeta) => {
@@ -19,7 +21,10 @@ export function registerMetaHandlers(add: AddFn): void {
     }
     // ★ 读-改-写放进写队列，避免并发 meta:set 丢更新（M2）
     await c.configService.update('distros', (file) => {
-      const idx = file.distros.findIndex((d) => d.name === meta.name)
+      // 大小写归一比较：换大小写写入命中同一条目，不产生重复；
+      // 命中后写回保留 meta.name 原样（显示形态由调用方决定）
+      const key = meta.name.toLowerCase()
+      const idx = file.distros.findIndex((d) => d.name.toLowerCase() === key)
       const next = [...file.distros]
       if (idx >= 0) next[idx] = meta
       else next.push(meta)

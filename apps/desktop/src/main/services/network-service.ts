@@ -20,6 +20,7 @@ import {
   canApplyRule,
   createAppError,
   entryListened,
+  isAppError,
   isElevationError,
   ELEVATION_OP_LABEL,
   ELEVATION_SUGGESTION,
@@ -28,6 +29,7 @@ import {
   previewNetshCommand,
   PROXY_SCRIPT_PATH,
   resolveEffectiveProxy,
+  ruleMatchesEntry,
   ruleSummary,
   type ElevationOpResult,
   type ElevationRequest,
@@ -82,6 +84,7 @@ export interface NetworkServiceDeps {
 export interface NetworkService {
   /** 镜像模式 + 系统转发表 + Windows 代理（M6 面板状态来源） */
   status(): Promise<NetworkStatus>
+  /** 查询系统转发表；**查询失败抛错**（绝不把「查不到」伪装成「确为空」） */
   listPortProxy(): Promise<PortProxyEntry[]>
   /** 从 network.jsonc 解析规则（执行白名单）；不存在抛错 */
   findRule(id: string): PortForwardRule
@@ -254,24 +257,79 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     return run.results
   }
 
+  /**
+   * 查询系统转发表。
+   * 失败**抛错**而不是返回 []：查询失败与「确为空」必须可区分，
+   * 否则 removeRule 会把真实残留条目误报为「已无监听」（review 假成功根治）。
+   */
   async function listPortProxy(): Promise<PortProxyEntry[]> {
     try {
       const r = await tool('netsh.exe', buildPortProxyShowArgs(), { timeoutMs: 15_000 })
       if (r.code !== 0) {
         logger.warn('netsh portproxy show failed', { detail: `${r.stderr}\n${r.stdout}`.trim() })
-        return []
+        throw createAppError('TASK_FAILED', {
+          message: '无法查询系统端口转发状态',
+          detail: `${r.stderr}\n${r.stdout}`.trim(),
+          rawCommand: 'netsh.exe interface portproxy show all',
+          suggestion: '请确认「IP Helper」服务（iphlpsvc）正在运行后重试',
+        })
       }
       return parsePortProxyShow(r.stdout)
     } catch (e) {
+      if (isAppError(e)) throw e
       logger.warn('netsh portproxy show failed', { error: String(e) })
-      return []
+      throw createAppError('TASK_FAILED', {
+        message: '无法查询系统端口转发状态',
+        detail: e instanceof Error ? e.message : String(e),
+        rawCommand: 'netsh.exe interface portproxy show all',
+        suggestion: '请确认「IP Helper」服务（iphlpsvc）正在运行后重试',
+      })
     }
+  }
+
+  /**
+   * 恢复被误删的旧监听（add 回滚）：成功返回 true，失败返回 false（调用方如实上报）。
+   */
+  async function restoreEntry(old: PortProxyEntry, log?: (line: string) => void): Promise<boolean> {
+    try {
+      await netshRule(old, 'add', `恢复旧转发「${old.listenAddress}:${old.listenPort}」失败`, log)
+      return true
+    } catch (e) {
+      logger.warn('restore old portproxy entry failed', { error: String(e) })
+      return false
+    }
+  }
+
+  /** add 失败且旧监听已删时的错误包装：如实告知旧监听命运与可执行恢复命令行 */
+  function addFailureError(
+    e: unknown,
+    rule: PortForwardRule,
+    old: PortProxyEntry,
+    restored: boolean,
+  ): unknown {
+    const base = e instanceof Error ? e.message : String(e)
+    const restoreCommand = previewNetshCommand(old, 'add')
+    if (restored) {
+      return createAppError('TASK_FAILED', {
+        message: `应用转发规则「${rule.id}」失败：新规则未建立，旧监听已恢复`,
+        detail: base,
+        rawCommand: restoreCommand,
+        suggestion: '请修正规则参数后重新应用',
+      })
+    }
+    return createAppError('TASK_FAILED', {
+      message: `应用转发规则「${rule.id}」失败：旧监听已移除且新规则未建立`,
+      detail: `${base}\n请手动执行以下命令恢复原监听：${restoreCommand}`,
+      rawCommand: restoreCommand,
+      suggestion: '在管理员终端执行 rawCommand 中的命令可恢复原监听',
+    })
   }
 
   async function applyOne(
     rule: PortForwardRule,
     ctl: TaskControl,
     deferElevation?: (req: ElevationRequest) => void,
+    onOldEntry?: (old: PortProxyEntry) => void,
   ): Promise<void> {
     ctl.throwIfCanceled()
     const rawCommand = previewNetshCommand(rule, 'add')
@@ -281,24 +339,59 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     // 统一走 delete-then-add，保证"重新应用"幂等、改端口不残留（review M-13）
     const existing = entryListened(await listPortProxy(), rule.listenAddress, rule.listenPort)
     ctl.throwIfCanceled()
+    // 已是目标状态：真幂等跳过，不制造 delete→add 的破坏窗口（review 假成功根治）
+    if (existing && ruleMatchesEntry(rule, existing)) {
+      ctl.log(`已是目标状态，跳过：${ruleSummary(rule)}`)
+      return
+    }
     if (existing) {
+      onOldEntry?.(existing)
       const del = previewNetshCommand(rule, 'delete')
       ctl.log(`$ ${del}`)
+      // 跟踪 delete 是否「已直接落定」：延迟（进批量）时不回滚——批量阶段删除项会被撤销
+      let deleteDeferred = false
       await netshRule(
         rule,
         'delete',
         `清理旧转发「${rule.id}」失败`,
         (l) => ctl.log(l),
+        deferElevation
+          ? (req) => {
+              deleteDeferred = true
+              deferElevation(req)
+            }
+          : undefined,
+      )
+      try {
+        await netshRule(
+          rule,
+          'add',
+          `应用转发规则「${rule.id}」失败`,
+          (l) => ctl.log(l),
+          deferElevation,
+        )
+      } catch (e) {
+        // add 失败且旧监听已被直接删除：立即回滚恢复（review 部分失败毁旧规则根治）
+        if (!deleteDeferred) {
+          const restored = await restoreEntry(existing, (l) => ctl.log(l))
+          ctl.log(
+            restored
+              ? '新规则未建立，旧监听已恢复'
+              : `旧监听恢复失败，请手动执行：${previewNetshCommand(existing, 'add')}`,
+          )
+          throw addFailureError(e, rule, existing, restored)
+        }
+        throw e
+      }
+    } else {
+      await netshRule(
+        rule,
+        'add',
+        `应用转发规则「${rule.id}」失败`,
+        (l) => ctl.log(l),
         deferElevation,
       )
     }
-    await netshRule(
-      rule,
-      'add',
-      `应用转发规则「${rule.id}」失败`,
-      (l) => ctl.log(l),
-      deferElevation,
-    )
     ctl.log(`已应用 ${ruleSummary(rule)}`)
   }
 
@@ -358,6 +451,8 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
       const deferredRuleIds = new Set<string>()
       // 任一环节（直接执行/提权）失败的规则都进此集：成败按规则去重计数（review 回验修复）
       const failedRuleIds = new Set<string>()
+      // 被 delete 的旧条目（回滚用）：key = ruleId
+      const oldEntries = new Map<string, PortProxyEntry>()
 
       for (let i = 0; i < list.length; i++) {
         const rule = list[i]!
@@ -368,19 +463,33 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
           continue
         }
         try {
-          await applyOne(rule, ctl, (req) => {
-            pending.push({ req, ruleId: rule.id })
-            deferredRuleIds.add(rule.id)
-          })
+          await applyOne(
+            rule,
+            ctl,
+            (req) => {
+              pending.push({ req, ruleId: rule.id })
+              deferredRuleIds.add(rule.id)
+            },
+            (old) => {
+              oldEntries.set(rule.id, old)
+            },
+          )
           if (!deferredRuleIds.has(rule.id)) applied++
         } catch (e) {
           failedRuleIds.add(rule.id)
           const msg = e instanceof Error ? e.message : String(e)
           errors.push(`${rule.id}: ${msg}`)
           ctl.log(`应用失败 ${rule.id}：${msg}`)
+          // 该规则已直败：丢弃其未执行的延迟 delete，避免批量阶段删掉旧监听后无人补新
+          for (let j = pending.length - 1; j >= 0; j--) {
+            if (pending[j]!.ruleId === rule.id) pending.splice(j, 1)
+          }
+          deferredRuleIds.delete(rule.id)
+          oldEntries.delete(rule.id)
         }
+        // 进度封顶 99：100% 只在提权批处理全部落定后给出（review 假满格根治）
         ctl.report(
-          Math.round(((i + 1) / list.length) * 100),
+          Math.min(99, Math.round(((i + 1) / list.length) * 99)),
           `应用转发规则 ${i + 1}/${list.length}`,
         )
       }
@@ -392,17 +501,39 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
             pending.map((p) => p.req),
             (l) => ctl.log(l),
           )
+          // 按规则聚合 batch 成败：add 失败但 delete 已成 → 回滚恢复旧监听（review 部分失败根治）
+          const ruleOps = new Map<string, { addOk: boolean; deleteOk: boolean }>()
           results.forEach((res, idx) => {
-            const ruleId = pending[idx]?.ruleId ?? ''
+            const p = pending[idx]
+            if (!p) return
+            const rec = ruleOps.get(p.ruleId) ?? { addOk: true, deleteOk: true }
+            if (p.req.op === 'netsh.portproxy.add') rec.addOk = res.ok
+            else rec.deleteOk = res.ok
+            ruleOps.set(p.ruleId, rec)
             if (res.ok) {
-              ctl.log(`提权执行成功：${ruleId}`)
+              ctl.log(`提权执行成功：${p.ruleId}`)
             } else {
-              failedRuleIds.add(ruleId)
+              failedRuleIds.add(p.ruleId)
               errors.push(
-                `${ruleId}: 提权执行失败${res.stderr || res.stdout ? `（${(res.stderr || res.stdout).trim().slice(0, 200)}）` : ''}`,
+                `${p.ruleId}: 提权执行失败${res.stderr || res.stdout ? `（${(res.stderr || res.stdout).trim().slice(0, 200)}）` : ''}`,
               )
             }
           })
+          for (const [ruleId, rec] of ruleOps) {
+            const old = oldEntries.get(ruleId)
+            if (!old || rec.addOk || !rec.deleteOk) continue
+            const restored = await restoreEntry(old, (l) => ctl.log(l))
+            ctl.log(
+              restored
+                ? `规则 ${ruleId} 新规则未建立，旧监听已恢复`
+                : `规则 ${ruleId} 旧监听已移除且新规则未建立，请手动执行：${previewNetshCommand(old, 'add')}`,
+            )
+            errors.push(
+              restored
+                ? `${ruleId}: 新规则未建立，旧监听已恢复`
+                : `${ruleId}: 旧监听已移除且新规则未建立，请手动执行 ${previewNetshCommand(old, 'add')}`,
+            )
+          }
         } catch (e) {
           // 取消 UAC / 提权助手不可用：全部待执行项记失败（消息含可执行建议）
           const msg = e instanceof Error ? e.message : String(e)
@@ -415,16 +546,16 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
         }
       }
 
-      const summary = `应用完成：成功 ${applied} 条，跳过 ${skipped} 条，失败 ${errors.length} 条`
+      const summary = `应用完成：成功 ${applied} 条，跳过 ${skipped} 条，失败 ${failedRuleIds.size} 条`
       ctl.log(summary)
-      if (errors.length > 0) {
+      ctl.report(100, summary)
+      if (failedRuleIds.size > 0) {
         throw createAppError('TASK_FAILED', {
           message: summary,
           detail: errors.join('\n'),
           suggestion: '失败项多为权限问题：请以管理员身份运行 WSLPilot 后重新应用',
         })
       }
-      ctl.report(100, summary)
     },
 
     async removeRule(id, ctl) {

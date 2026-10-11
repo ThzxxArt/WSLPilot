@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { NButton, NSelect, NSpin, NSwitch, NTag, useMessage } from 'naive-ui'
-import { EmptyState } from '@ui/components'
+import { EmptyState } from '@wslpilot/ui'
 import {
   canAttach,
   canDetach,
@@ -9,8 +9,8 @@ import {
   USBIPD_INSTALL_COMMAND,
   usbipdOpLabel,
   usbipdStateLabel,
-} from '@shared/usbipd'
-import type { UsbDevice } from '@shared/types'
+  type UsbDevice,
+} from '@wslpilot/shared'
 import { useDevicesStore } from '../stores/devices'
 import { useDistrosStore } from '../stores/distros'
 import { errorLine } from '../composables/useAppError'
@@ -41,6 +41,18 @@ const distroOptions = computed(() => [
 const installed = computed(() => devices.status.installed)
 /** 已安装但调用失败（服务异常等）：如实提示，不误导重装 */
 const statusError = computed(() => devices.status.error ?? '')
+/**
+ * bind/attach 进行中的设备（本地 pending）：禁用行内开关，
+ * 防止任务未返回时重复提交（review 半成品交互根治）。
+ */
+const pending = ref<Set<string>>(new Set())
+
+function markPending(busId: string, on: boolean) {
+  const next = new Set(pending.value)
+  if (on) next.add(busId)
+  else next.delete(busId)
+  pending.value = next
+}
 
 function stateType(state: UsbDevice['state']): 'success' | 'info' | 'warning' | 'default' {
   switch (state) {
@@ -67,6 +79,8 @@ async function copyInstall() {
 }
 
 async function onToggleShare(d: UsbDevice, shared: boolean) {
+  if (pending.value.has(d.busId)) return
+  markPending(d.busId, true)
   try {
     if (shared) {
       await devices.bind(d.busId)
@@ -79,10 +93,14 @@ async function onToggleShare(d: UsbDevice, shared: boolean) {
   } catch (e) {
     message.error(errorLine(e, shared ? '绑定设备失败' : '解除绑定失败'))
     void devices.refresh()
+  } finally {
+    markPending(d.busId, false)
   }
 }
 
 async function onToggleAttach(d: UsbDevice, attached: boolean) {
+  if (pending.value.has(d.busId)) return
+  markPending(d.busId, true)
   try {
     if (attached) {
       await devices.attach(d.busId, attachTarget.value || undefined)
@@ -95,6 +113,8 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
   } catch (e) {
     message.error(errorLine(e, attached ? '附加设备失败' : '断开设备失败'))
     void devices.refresh()
+  } finally {
+    markPending(d.busId, false)
   }
 }
 </script>
@@ -175,8 +195,17 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
       </div>
 
       <n-spin :show="devices.loading">
+        <!-- 读取失败与「真的没有设备」是两种状态：绝不共用空态文案 -->
         <EmptyState
-          v-if="devices.items.length === 0"
+          v-if="devices.lastError"
+          :description="`读取设备列表失败：${devices.lastError.message}`"
+          illustration="⚠"
+        >
+          <n-button size="small" secondary @click="() => devices.refresh()">重新检测</n-button>
+        </EmptyState>
+
+        <EmptyState
+          v-else-if="devices.items.length === 0"
           description="没有发现 USB 设备"
           illustration="🔌"
         />
@@ -206,7 +235,9 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
                 <n-switch
                   size="small"
                   :value="d.state === 'shared' || d.state === 'attached'"
-                  :disabled="!canToggleShare(d.state) || d.state === 'attached'"
+                  :disabled="
+                    pending.has(d.busId) || !canToggleShare(d.state) || d.state === 'attached'
+                  "
                   @update:value="(v: boolean) => onToggleShare(d, v)"
                 />
               </td>
@@ -214,7 +245,10 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
                 <n-switch
                   size="small"
                   :value="d.state === 'attached'"
-                  :disabled="d.state === 'attached' ? !canDetach(d.state) : !canAttach(d.state)"
+                  :disabled="
+                    pending.has(d.busId) ||
+                    (d.state === 'attached' ? !canDetach(d.state) : !canAttach(d.state))
+                  "
                   @update:value="(v: boolean) => onToggleAttach(d, v)"
                 />
               </td>

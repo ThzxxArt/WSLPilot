@@ -16,7 +16,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢。技术栈：**TypeS
 - 一键启停、设默认、全部关机；发行版详情（注册表详情 / 元数据编辑 / 注销）
 - 安装发行版向导（`wsl --list --online` + `wsl --install`，带进度与取消）
 - 内置终端（node-pty + xterm.js）多标签工作区
-- 备份与迁移向导：导出 / 导入 / 迁移，环形进度 + 实时日志 + 可取消 + 备份轮转
+- 备份迁移向导：导出 / 导入 / 迁移，环形进度 + 实时日志 + 可取消 + 备份轮转
 - wsl.conf 可视化表单 + 原始文本双模式，写入前 Diff 预览（保留注释）
 - 自定义动作（actions.jsonc 白名单）：变量占位符、等价命令展示、终端 / 无头两种执行
 - 发行版内文件浏览与在线编辑（`\\wsl.localhost` 桥）
@@ -67,14 +67,40 @@ npm run package --workspace @wslpilot/desktop -- --x64    # 指定架构
 
 ## 工程结构
 
+monorepo（npm workspaces）包职责一览见 [CONTRIBUTING.md → 工程结构](./CONTRIBUTING.md#工程结构)。
+
+## 测试
+
+```bash
+npm test                  # 单元 / 集成测试
+npm run test:coverage     # 单元 + 覆盖率硬门禁（≥85%，不达标即失败）
+npm run test:component    # 组件测试 + 覆盖率硬门禁（≥70%）
+npm run test:e2e          # E2E + 视觉回归（需 Windows；先 npm run build --workspace @wslpilot/desktop）
 ```
-WSLPilot/
-├─ packages/shared   # 类型、IPC 通道、zod schema、错误码
-├─ packages/kit      # 主进程工具（exec、原子写、JSONC、日志）
-├─ packages/ui       # 设计令牌、Naive UI 主题、业务组件
-├─ apps/desktop      # Electron 主应用（main / preload / renderer）
-└─ scripts           # 构建与令牌生成脚本
-```
+
+分层策略与门禁细节见 [docs/testing.md](./docs/testing.md)。
+
+## 故障排查
+
+| 现象                                                        | 处理                                                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 安装包首次运行弹出「Windows 已保护你的电脑」（SmartScreen） | 未签名构建的预期行为：点「更多信息 → 仍要运行」即可；正式签名的发布版本不会出现该提示。签名状态见「设置 → 关于 → 代码签名」                                                     |
+| USB 设备页提示未检测到 usbipd                               | 可选能力，不影响其它功能；按页内引导安装：`winget install usbipd --source winget`，完成后回页点「我已安装，重新检测」。若提示「已安装但调用失败」，按错误详情排查，不要反复重装 |
+| 提示「系统未启用 WSL」/「找不到 wsl.exe」                   | 在管理员终端运行 `wsl --install`，完成后重启应用；若已安装仍报找不到 `wsl.exe`，检查 PATH 是否包含 WSL 安装路径                                                                 |
+| 反馈问题 / 排查异常                                         | 设置 → 关于 →「导出诊断包」：打包近期日志 + 配置脱敏副本（主目录替换为 `%USERPROFILE%`、URL 凭据打码）+ 环境信息；也可「打开日志目录」或设置 → 配置目录 → `logs/`               |
+
+## 文档索引
+
+| 文档                                                   | 内容                                                      |
+| ------------------------------------------------------ | --------------------------------------------------------- |
+| [docs/architecture.md](./docs/architecture.md)         | 运行时架构（进程分层 / 配置管理 / 长任务 / 安全）         |
+| [docs/design-system.md](./docs/design-system.md)       | 设计系统（令牌 / 色彩 / 字体 / 动效）                     |
+| [docs/config-reference.md](./docs/config-reference.md) | 配置文件参考（settings / distros / actions / network 等） |
+| [docs/testing.md](./docs/testing.md)                   | 测试策略与覆盖率门禁                                      |
+| [CONTRIBUTING.md](./CONTRIBUTING.md)                   | 贡献指南（环境 / 工程结构 / 提交规范 / 测试要求）         |
+| [CHANGELOG.md](./CHANGELOG.md)                         | 变更日志                                                  |
+
+总体设计见 [WSLPilot-设计书.md](./WSLPilot-设计书.md)。
 
 ## 配置文件
 

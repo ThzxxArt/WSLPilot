@@ -60,6 +60,7 @@ vi.mock('../../src/main/app-state', () => ({
 
 import { createTray, destroyTray } from '../../src/main/tray/tray'
 import { markQuitting } from '../../src/main/app-state'
+import { CH } from '@wslpilot/shared'
 
 function makeLogger() {
   return {
@@ -163,7 +164,7 @@ describe('tray', () => {
     // navigate 走异步重建入口（窗口可能需要重建），等 microtask 清空
     await new Promise((r) => setTimeout(r, 0))
     expect(win.show).toHaveBeenCalled()
-    expect(win.webContents.send).toHaveBeenCalledWith('app:navigate', '/settings')
+    expect(win.webContents.send).toHaveBeenCalledWith(CH.appNavigate, '/settings')
   })
 
   it('窗口被销毁时经 ensureWindow 重建后再导航（review M-12）', async () => {
@@ -194,7 +195,7 @@ describe('tray', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(ensureWindow).toHaveBeenCalled()
     expect(rebuilt.show).toHaveBeenCalled()
-    expect(rebuilt.webContents.send).toHaveBeenCalledWith('app:navigate', '/settings')
+    expect(rebuilt.webContents.send).toHaveBeenCalledWith(CH.appNavigate, '/settings')
   })
 
   it('quit menu item marks quitting and quits', () => {

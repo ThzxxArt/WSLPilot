@@ -100,18 +100,38 @@ describe('update handlers（M7）', () => {
 describe('app 域 M7 通道（诊断 / 签名）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('app:openLogsDir 委托诊断服务；缺失时抛 IO_ERROR', async () => {
+  it('诊断通道名与 API 动词一致（防 app:exportDiagnostics 式命名漂移回归）', () => {
+    const handlers = collect(registerAppHandlers, makeCtx())
+    // 通道尾段动词必须与 preload diagnostics.* API 方法名一致
+    for (const [channel, apiVerb] of [
+      [CH.diagnosticsExportPackage, 'exportPackage'],
+      [CH.diagnosticsOpenLogsDir, 'openLogsDir'],
+    ] as const) {
+      expect(channel.split(':')[1], `${channel} 通道动词应等于 API 方法名 ${apiVerb}`).toBe(apiVerb)
+      expect(handlers.has(channel), `handler 未注册 ${channel}`).toBe(true)
+    }
+    // 旧 app: 域命名不得复活
+    expect([...handlers.keys()]).not.toContain('app:exportDiagnostics')
+    expect([...handlers.keys()]).not.toContain('app:openLogsDir')
+  })
+
+  it('diagnostics:openLogsDir 委托诊断服务；缺失时抛 IO_ERROR', async () => {
     const openLogsDir = vi.fn(async () => undefined)
     const handlers = collect(registerAppHandlers, makeCtx())
-    await handlers.get(CH.appOpenLogsDir)!(makeCtx({ diagnostics: { openLogsDir } }), undefined)
+    await handlers.get(CH.diagnosticsOpenLogsDir)!(
+      makeCtx({ diagnostics: { openLogsDir } }),
+      undefined,
+    )
     expect(openLogsDir).toHaveBeenCalled()
 
-    await expect(handlers.get(CH.appOpenLogsDir)!(makeCtx(), undefined)).rejects.toMatchObject({
+    await expect(
+      handlers.get(CH.diagnosticsOpenLogsDir)!(makeCtx(), undefined),
+    ).rejects.toMatchObject({
       code: 'IO_ERROR',
     })
   })
 
-  it('app:exportDiagnostics：取消保存 → null；确认 → 规范化扩展名并导出', async () => {
+  it('diagnostics:exportPackage：取消保存 → null；确认 → 规范化扩展名并导出', async () => {
     const exportTo = vi.fn(async (p: string) => ({
       path: p,
       entries: ['manifest.json'],
@@ -126,7 +146,9 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
 
     // 取消
     dialogMocks.showSaveDialog.mockResolvedValueOnce({ canceled: true, filePath: '' })
-    expect(await handlers.get(CH.appExportDiagnostics)!(makeCtx({ diagnostics }), {})).toBeNull()
+    expect(
+      await handlers.get(CH.diagnosticsExportPackage)!(makeCtx({ diagnostics }), {}),
+    ).toBeNull()
     expect(exportTo).not.toHaveBeenCalled()
 
     // 确认（用户没写 .zip 扩展名 → 补齐）
@@ -134,12 +156,12 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
       canceled: false,
       filePath: 'C:\\out\\diag',
     })
-    const result = await handlers.get(CH.appExportDiagnostics)!(makeCtx({ diagnostics }), {})
+    const result = await handlers.get(CH.diagnosticsExportPackage)!(makeCtx({ diagnostics }), {})
     expect(exportTo).toHaveBeenCalledWith('C:\\out\\diag.zip')
     expect(result).toMatchObject({ path: 'C:\\out\\diag.zip' })
 
     // 缺失诊断服务
-    await expect(handlers.get(CH.appExportDiagnostics)!(makeCtx(), {})).rejects.toMatchObject({
+    await expect(handlers.get(CH.diagnosticsExportPackage)!(makeCtx(), {})).rejects.toMatchObject({
       code: 'IO_ERROR',
     })
   })
