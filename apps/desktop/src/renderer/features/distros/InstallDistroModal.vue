@@ -159,6 +159,18 @@ function close() {
       <div v-if="task?.error" class="error">
         {{ task.error }}
       </div>
+      <!-- 安装完成后的用户设置指引（review：新装发行版用户名/密码无处可寻根治） -->
+      <div v-if="isDone && task?.status === 'success'" class="user-guide">
+        <div class="guide-title">设置用户名与密码</div>
+        <div class="hint">
+          首次以终端打开该发行版时，多数发行版会直接进入
+          <b>UNIX 用户创建向导</b> ——在终端里按提示输入用户名与密码即可。<br />
+          若直接进入了 root（未见向导）：在终端执行
+          <code>adduser 用户名</code> 创建用户，然后在「详情 → 配置」给
+          <code>/etc/wsl.conf</code> 写入： <code>[user]</code> 段下的 <code>default=用户名</code>
+          ，保存后停止并重新打开终端即以该用户登录。
+        </div>
+      </div>
       <div class="actions">
         <n-button v-if="isRunning" secondary type="error" @click="onCancel"> 取消安装 </n-button>
         <n-button v-if="isDone" type="primary" @click="close"> 完成 </n-button>
@@ -228,6 +240,26 @@ function close() {
 .msg {
   font-size: 13px;
   color: var(--color-text-secondary);
+}
+
+.user-guide {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--color-bg-sunken);
+}
+
+.user-guide .guide-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+}
+
+.user-guide code {
+  background: var(--color-bg-surface);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 .error {

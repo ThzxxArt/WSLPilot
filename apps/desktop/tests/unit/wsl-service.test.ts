@@ -314,6 +314,28 @@ describe('WslService', () => {
       expect((spawnWsl as any).mock.calls[1][0]).toEqual(['--install'])
     })
 
+    it('install 进度诚实：null 起手（不假 0%）+ 输出百分比如实上报（review 根治）', async () => {
+      ;(spawnWsl as any).mockImplementation(
+        (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+          o.onLine('Downloading: 42.5%')
+          o.onLine('没有百分比的普通日志')
+          o.onLine('Downloading: 100%')
+          queueMicrotask(() => o.onExit(0))
+          return { kill: vi.fn() }
+        },
+      )
+      const reports = ctl.report.mock
+      await svc.install('Ubuntu', ctl as never)
+      const calls = reports.calls.map((c: unknown[]) => c[0])
+      // 起手必须是 null（不确定态），绝不报 0 假进度
+      expect(calls[0]).toBeNull()
+      // 输出中的真实百分比被上报
+      expect(calls).toContain(42.5)
+      expect(calls).toContain(100)
+      // 收尾 100 + 完成文案
+      expect(reports.calls[reports.calls.length - 1]).toEqual([100, '安装完成'])
+    })
+
     it('unregister 调用 --unregister', async () => {
       ;(runWsl as any).mockResolvedValue(ok(''))
       await svc.unregister('Ubuntu')

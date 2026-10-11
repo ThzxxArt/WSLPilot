@@ -353,8 +353,23 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
 
     async install(name: string | undefined, ctl: TaskControl): Promise<void> {
       const args = ['--install', ...(name ? ['-d', assertName(name)] : [])]
-      ctl.report(0, name ? `正在安装 ${name}` : '正在安装 WSL')
-      await spawnOrElevate(args, 'wsl.install', name ? { name: assertName(name) } : {}, ctl)
+      // 进度诚实（review 假 0% 根治）：起手报 null（不确定态），wsl 输出带百分比时如实上报；
+      // 绝不挂一个恒 0% 的假进度
+      ctl.report(null, name ? `正在安装 ${name}` : '正在安装 WSL')
+      const reportFromOutput = (line: string) => {
+        const m = /(\d{1,3}(?:\.\d+)?)\s*%/.exec(line)
+        if (!m) return
+        const pct = Number(m[1])
+        if (Number.isFinite(pct) && pct >= 0 && pct <= 100) ctl.report(pct, line.trim())
+      }
+      const hooked: TaskControl = {
+        ...ctl,
+        log: (l: string) => {
+          ctl.log(l)
+          reportFromOutput(l)
+        },
+      }
+      await spawnOrElevate(args, 'wsl.install', name ? { name: assertName(name) } : {}, hooked)
       ctl.report(100, '安装完成')
     },
 
