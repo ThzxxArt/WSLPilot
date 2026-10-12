@@ -27,6 +27,8 @@ const message = {
   info: vi.fn(),
 }
 let dialogResult: 'positive' | 'negative' | 'close' = 'positive'
+/** 每次 dialog.warning 返回的实例（review 0.1.2 审计修复：显式 destroy 行为必须可断言） */
+const dialogInstances: Array<{ destroy: ReturnType<typeof vi.fn> }> = []
 const dialog = {
   warning: vi.fn(
     (opts: {
@@ -34,9 +36,13 @@ const dialog = {
       onNegativeClick?: () => void
       onClose?: () => void
     }) => {
+      // naive 真实契约：warning() 返回实例含 destroy（action slot 路径不会自动 hide，需显式销毁）
+      const inst = { destroy: vi.fn() }
+      dialogInstances.push(inst)
       if (dialogResult === 'positive') opts.onPositiveClick?.()
       else if (dialogResult === 'negative') opts.onNegativeClick?.()
       else opts.onClose?.()
+      return inst
     },
   ),
   error: vi.fn(),
@@ -78,6 +84,7 @@ function captureConflictHandler(): (p: { fileKey: string; detail: string }) => v
 beforeEach(() => {
   vi.clearAllMocks()
   dialogResult = 'positive'
+  dialogInstances.length = 0
   setActivePinia(createPinia())
   useDistrosStore().items = [RUNNING]
   document.body.innerHTML = ''
@@ -133,6 +140,7 @@ describe('ConflictResolver', () => {
     let captured: { onEsc?: () => void; onClose?: () => void } | null = null
     dialog.warning.mockImplementationOnce((opts: unknown) => {
       captured = opts as { onEsc?: () => void; onClose?: () => void }
+      return { destroy: vi.fn() }
     })
     captureConflictHandler()({ fileKey: 'settings', detail: 'diff' })
     await flushPromises()
@@ -160,6 +168,7 @@ describe('ConflictResolver', () => {
     let captured: Record<string, unknown> | null = null
     dialog.warning.mockImplementationOnce((opts: unknown) => {
       captured = opts as Record<string, unknown>
+      return { destroy: vi.fn() }
     })
     captureConflictHandler()({ fileKey: 'settings', detail: '被外部编辑器改过' })
     expect(captured).toBeTruthy()
@@ -173,8 +182,11 @@ describe('ConflictResolver', () => {
   it('「暂不处理」有显式第三按钮（不依赖 Esc/X）', async () => {
     mount(ConflictResolver)
     let captured: Record<string, unknown> | null = null
+    let inst: { destroy: ReturnType<typeof vi.fn> } | null = null
     dialog.warning.mockImplementationOnce((opts: unknown) => {
       captured = opts as Record<string, unknown>
+      inst = { destroy: vi.fn() }
+      return inst as never
     })
     captureConflictHandler()({ fileKey: 'distros', detail: 'diff' })
     await flushPromises()
@@ -187,15 +199,36 @@ describe('ConflictResolver', () => {
     buttons[0]!.props!.onClick!()
     await flushPromises()
     expect(wslAPI.config.resolveConflict).toHaveBeenCalledWith('distros', 'ignore')
+    // 显式按钮路径同样必须销毁对话框（action slot 替换默认按钮，naive 不会自动 hide）
+    expect(inst!.destroy).toHaveBeenCalledTimes(1)
   })
 
-  it('多冲突排队：不叠对话框，前一个处理后弹下一个', async () => {
+  it('「重载」「覆盖」「暂不处理」三条路径 resolve 后 dialog 实例都被 destroy（叠框恶化根治）', async () => {
+    for (const result of ['positive', 'negative', 'close'] as const) {
+      dialogInstances.length = 0
+      wslAPI.config.resolveConflict.mockClear()
+      const w = mount(ConflictResolver)
+      dialogResult = result
+      captureConflictHandler()({ fileKey: 'settings', detail: 'diff' })
+      await flushPromises()
+      expect(wslAPI.config.resolveConflict).toHaveBeenCalledTimes(1)
+      expect(dialogInstances.length, result).toBeGreaterThan(0)
+      expect(dialogInstances[0]!.destroy, result).toHaveBeenCalledTimes(1)
+      w.unmount()
+    }
+  })
+
+  it('多冲突排队：旧框 destroy 后队列项才弹（不叠框）', async () => {
     mount(ConflictResolver)
     const captured: Array<Record<string, unknown>> = []
+    const events: string[] = []
     const original = dialog.warning.getMockImplementation()!
     // 挂起对话框：不由 mock 自动应答，模拟用户还没点击
     dialog.warning.mockImplementation((opts: unknown) => {
       captured.push(opts as Record<string, unknown>)
+      const n = captured.length
+      events.push(`open${n}`)
+      return { destroy: vi.fn(() => events.push(`destroy${n}`)) }
     })
     try {
       const handler = captureConflictHandler()
@@ -208,11 +241,13 @@ describe('ConflictResolver', () => {
       ;(captured[0]!.onPositiveClick as () => void)()
       await flushPromises()
       expect(wslAPI.config.resolveConflict).toHaveBeenCalledWith('settings', 'reload')
-      expect(captured).toHaveLength(2)
+      // destroy 必须先于下一个弹框：这正是「旧框悬挂 + 队列继续弹」叠框恶化的顺序契约
+      expect(events).toEqual(['open1', 'destroy1', 'open2'])
 
       ;(captured[1]!.onClose as () => void)()
       await flushPromises()
       expect(wslAPI.config.resolveConflict).toHaveBeenCalledWith('network', 'ignore')
+      expect(events).toEqual(['open1', 'destroy1', 'open2', 'destroy2'])
     } finally {
       dialog.warning.mockImplementation(original)
     }
@@ -399,5 +434,46 @@ describe('WslConfPanel 保存与错误面', () => {
     message.warning.mockClear()
     w.unmount()
     expect(message.warning).toHaveBeenCalledWith('wsl.conf 有未保存的修改已丢弃')
+  })
+
+  it('等待确认期间父级回切：旧目标的续体不得执行加载（review 0.1.2 审计修复）', async () => {
+    useDistrosStore().items = [
+      RUNNING,
+      { name: 'Debian', state: 'Running', version: 2, isDefault: false, meta: null } as never,
+    ]
+    const w = mount(WslConfPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await makeDirty()
+    const reads = wslAPI.wslconf.read.mock.calls.length
+
+    // 挂起确认框：模拟用户还未点击（await confirmDiscard 在途）
+    const captured: Array<Record<string, unknown>> = []
+    const original = dialog.warning.getMockImplementation()!
+    dialog.warning.mockImplementation((opts: unknown) => {
+      captured.push(opts as Record<string, unknown>)
+      return { destroy: vi.fn() }
+    })
+    try {
+      await w.setProps({ distroName: 'Debian' })
+      await flushPromises()
+      expect(captured).toHaveLength(1)
+
+      // 等待期间另一面板 restore-distro 把父级拉回 Ubuntu
+      await w.setProps({ distroName: 'Ubuntu' })
+      await flushPromises()
+
+      // 用户此刻才点「放弃修改」：Debian 的旧续体必须复验 props 后失效
+      ;(captured[0]!.onPositiveClick as () => void)()
+      await flushPromises()
+      expect(wslAPI.wslconf.read.mock.calls.length).toBe(reads)
+      expect(wslAPI.wslconf.read).not.toHaveBeenCalledWith('Debian')
+      // 未误发 restore-distro（父级已在 Ubuntu，无需回退）
+      expect(w.emitted('restore-distro')).toBeUndefined()
+    } finally {
+      dialog.warning.mockImplementation(original)
+    }
   })
 })

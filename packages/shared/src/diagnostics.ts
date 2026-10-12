@@ -44,11 +44,11 @@ export const DIAGNOSTICS_NOTE =
  * GitHub PAT / 预签名 URL 的常见形态）完全不脱敏 — 与「可安全提交」承诺不符（review 0.1.2 根治）。
  */
 const URL_CREDENTIALS_RE = /([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+)(?::[^/\s@]*)?@/gi
-/** 鉴权头（`Authorization: Bearer …` / `Proxy-Authorization: Basic …`） */
+/** 鉴权头（`Authorization: Bearer …` / `Proxy-Authorization: Basic …`；`:` 后允许无空格 — review 0.1.2 审计修复） */
 const AUTH_HEADER_RE =
-  /\b((?:proxy-)?authorization\s*[:=]\s*(?:bearer|basic|token|digest)\s+)[^\s"'\\]+/gi
+  /\b((?:proxy-)?authorization\s*[:=]\s*(?:bearer|basic|token|digest)\s*)[^\s"'\\]+/gi
 const SECRET_ASSIGN_RE =
-  /((?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|private[-_]?key|client[-_]?secret)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^"'\s,;}]+)/gi
+  /((?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|private[-_]?key|client[-_]?secret)["']?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^"'\s,;}]+)/gi
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

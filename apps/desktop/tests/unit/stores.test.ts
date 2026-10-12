@@ -416,6 +416,54 @@ describe('useMetricsStore', () => {
     expect(s.lastError).toBeTruthy()
   })
 
+  it('sampleDistro 失败后成功采样清除 lastError（状态栏自愈 — review 0.1.2 审计修复）', async () => {
+    const s = useMetricsStore()
+    // 根因回归：失败写全局 lastError 后无清除路径 → StatusBar「服务异常」永久驻留
+    wslAPI.metrics.sample.mockRejectedValueOnce(new Error('采样超时'))
+    await s.sampleDistro('A')
+    expect(s.lastError).toBeTruthy()
+
+    wslAPI.metrics.sample.mockResolvedValueOnce({
+      memUsedKB: 1,
+      memTotalKB: 2,
+      diskUsedKB: 3,
+      diskTotalKB: 4,
+      cpuPercent: 5,
+      sampledAt: 'T',
+    })
+    await expect(s.sampleDistro('A')).resolves.toMatchObject({ cpuPercent: 5 })
+    expect(s.lastError).toBeNull()
+  })
+
+  it('sample 成功路径清除并发失败留下的 lastError（review 0.1.2 审计修复）', async () => {
+    const s = useMetricsStore()
+    let resolveOverview!: (v: unknown) => void
+    wslAPI.metrics.sampleOverview.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveOverview = r
+      }),
+    )
+    const p = s.sample()
+    // 概览采样在途时单发行版采样失败写入 lastError
+    wslAPI.metrics.sample.mockRejectedValueOnce(new Error('单发行版采样失败'))
+    await s.sampleDistro('A')
+    expect(s.lastError).toBeTruthy()
+
+    resolveOverview({
+      runningCount: 1,
+      totalCount: 1,
+      memUsedKB: 1,
+      memTotalKB: 2,
+      diskUsedKB: 0,
+      diskTotalKB: 0,
+      cpuPercent: 3,
+      sampledAt: 't',
+      perDistro: {},
+    })
+    await p
+    expect(s.lastError).toBeNull()
+  })
+
   it('无 Running 发行版时不 push 0 假数据点（history 冻结 — review 0.1.2）', async () => {
     wslAPI.metrics.sampleOverview.mockResolvedValue({
       runningCount: 0,

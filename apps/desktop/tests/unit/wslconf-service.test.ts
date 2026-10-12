@@ -186,6 +186,75 @@ describe('createWslConfService.write', () => {
     expect(runIn).toHaveBeenCalledTimes(2)
     expect(runIn.mock.calls[1]![1]).toContain('B = 1')
   })
+
+  it('写+终止同队列：并发保存严格 写1→terminate1→写2→terminate2（review 0.1.2 审计修复）', async () => {
+    const order: string[] = []
+    const runIn = vi.fn(async (_args: string[], input: string) => {
+      order.push(input.includes('A = 1') ? 'write:A' : 'write:B')
+      return { code: 0, stdout: '', stderr: '' }
+    })
+    const terminate = vi.fn(async () => {
+      order.push('terminate')
+    })
+    const svc = createWslConfService({
+      logger: logger(),
+      runWslWithStdin: runIn,
+      terminate,
+    })
+    const p1 = svc.writeAndMaybeTerminate('Ubuntu', '[a]\nA = 1\n', true)
+    const p2 = svc.writeAndMaybeTerminate('Ubuntu', '[a]\nB = 1\n', true)
+    expect(await p1).toEqual({ terminated: true })
+    expect(await p2).toEqual({ terminated: true })
+    // terminate 在写队列之外时可能落在写2 期间；同队列后必须严格交替有序
+    expect(order).toEqual(['write:A', 'terminate', 'write:B', 'terminate'])
+  })
+
+  it('terminate=false 不调用终止，仅写（队列内行为不变）', async () => {
+    const runIn = makeRun({ code: 0 })
+    const terminate = vi.fn(async () => {})
+    const svc = createWslConfService({
+      logger: logger(),
+      runWslWithStdin: runIn,
+      terminate,
+    })
+    expect(await svc.writeAndMaybeTerminate('Ubuntu', '[a]\n', false)).toEqual({
+      terminated: false,
+    })
+    expect(runIn).toHaveBeenCalledTimes(1)
+    expect(terminate).not.toHaveBeenCalled()
+  })
+
+  it('terminate 失败不回滚写入：返回 terminateError（review 0.1.2 语义保持）', async () => {
+    const runIn = makeRun({ code: 0 })
+    const terminate = vi.fn(async () => {
+      throw new Error('wsl --terminate 失败')
+    })
+    const svc = createWslConfService({
+      logger: logger(),
+      runWslWithStdin: runIn,
+      terminate,
+    })
+    const out = await svc.writeAndMaybeTerminate('Ubuntu', '[a]\n', true)
+    expect(out).toEqual({
+      terminated: false,
+      terminateError: expect.stringContaining('terminate 失败'),
+    })
+    expect(runIn).toHaveBeenCalledTimes(1)
+  })
+
+  it('写失败时不得执行 terminate（失败短路，同队列单位）', async () => {
+    const runIn = makeRun({ code: 1, stderr: 'disk full' })
+    const terminate = vi.fn(async () => {})
+    const svc = createWslConfService({
+      logger: logger(),
+      runWslWithStdin: runIn,
+      terminate,
+    })
+    await expect(svc.writeAndMaybeTerminate('Ubuntu', '[a]\n', true)).rejects.toMatchObject({
+      code: 'IO_ERROR',
+    })
+    expect(terminate).not.toHaveBeenCalled()
+  })
 })
 
 describe('summarizeWslConfChanges', () => {

@@ -73,9 +73,12 @@ describe('useUpdateStore（M7 自动更新）', () => {
     wslAPI.update.check.mockResolvedValue(state({ status: 'not-available' }))
     wslAPI.update.download.mockResolvedValue(state({ status: 'downloaded', percent: 100 }))
     const s = useUpdateStore()
+    // 聚合 busy 已删除（review 0.1.2 审计修复：无消费方且并发互踩）
+    expect(s).not.toHaveProperty('busy')
     expect((await s.check()).status).toBe('not-available')
-    expect(s.busy).toBe(false)
+    expect(s.checkBusy).toBe(false)
     expect((await s.download()).status).toBe('downloaded')
+    expect(s.downloadBusy).toBe(false)
     expect(s.percent).toBe(100)
     // 主进程返回的 error 状态经 applyState 同步到镜像
     wslAPI.update.check.mockResolvedValue(state({ status: 'error', error: 'boom' }))
@@ -89,9 +92,9 @@ describe('useUpdateStore（M7 自动更新）', () => {
     wslAPI.update.download.mockRejectedValue(new Error('disk full'))
     const s = useUpdateStore()
     await expect(s.check()).rejects.toThrow('network down')
-    expect(s.busy).toBe(false)
+    expect(s.checkBusy).toBe(false)
     await expect(s.download()).rejects.toThrow('disk full')
-    expect(s.busy).toBe(false)
+    expect(s.downloadBusy).toBe(false)
   })
 
   it('check / download / install 的 reject 错误落地为 error 状态（不静默 — review 0.1.2）', async () => {

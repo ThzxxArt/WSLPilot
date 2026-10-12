@@ -1265,3 +1265,57 @@ describe('IoService + TaskRunner integration (cancel)', () => {
     expect(rec.status).toBe('canceled')
   })
 })
+
+describe('IoService lockKey 与 runExclusive 严格互斥（review 0.1.2 审计修复）', () => {
+  it('注销排他段（lockKey=name.toLowerCase）排在同发行版导出任务之后', async () => {
+    const runner: TaskRunner = createTaskRunner({ logger: logger(), onProgress: () => {} })
+    const distroDir = await tmp()
+    await fs.writeFile(join(distroDir, 'ext4.vhdx'), Buffer.alloc(64))
+    const outDir = await tmp()
+    let exitFn: ((code: number) => void) | null = null
+    const spawn = ((
+      args: string[],
+      opts: {
+        onLine: (l: string) => void
+        onExit: (c: number) => void
+        onError: (e: Error) => void
+      },
+    ) => {
+      void fs.writeFile(args[2]!, Buffer.alloc(16))
+      exitFn = opts.onExit
+      return { kill: () => opts.onExit(1) }
+    }) as unknown as SpawnWslFn
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: distroDir,
+        spawn,
+      }),
+    )
+    const order: string[] = []
+    const handle = runner.start({
+      type: 'export',
+      distro: 'Ubuntu',
+      message: '导出 Ubuntu',
+      lockKey: 'ubuntu',
+      run: async (ctl) => {
+        order.push('export:start')
+        await io.runExport({ name: 'Ubuntu', path: join(outDir, 'x.tar'), format: 'tar' }, ctl)
+        order.push('export:end')
+      },
+    })
+    await vi.waitFor(() => expect(exitFn).not.toBeNull())
+    // 与 handler 注销同构：runExclusive(name.toLowerCase(), fn)
+    const exclusive = runner.runExclusive('ubuntu', async () => {
+      order.push('unregister')
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    // 导出未结束：注销必须被锁排队，绝不并发
+    expect(order).toEqual(['export:start'])
+    exitFn!(0)
+    await exclusive
+    const rec = await runner.waitFor(handle.taskId)
+    expect(rec.status).toBe('success')
+    expect(order).toEqual(['export:start', 'export:end', 'unregister'])
+  })
+})

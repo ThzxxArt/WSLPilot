@@ -85,6 +85,28 @@ describe('atomicWrite', () => {
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600)
   })
 
+  it('保留 mode 只取权限位 & 0o777，不复刻 setuid/setgid/sticky — review 0.1.2 审计修复', async () => {
+    const file = join(dir, 'suid.jsonc')
+    await atomicWrite(file, 'v1')
+    await fs.chmod(file, 0o4755)
+    const realOpen = fs.open.bind(fs)
+    const spy = vi.spyOn(fs, 'open').mockImplementation(realOpen as never)
+    try {
+      await atomicWrite(file, 'v2')
+      // 旧实现把完整 stat.mode（0o104755，含文件类型位与 setuid）传给 fs.open；
+      // 新实现必须只传权限位 0o755 —— 此断言在旧代码必失败
+      const openCall = spy.mock.calls.find((c) => String(c[0]).includes('.tmp'))
+      expect(openCall).toBeTruthy()
+      expect(openCall![2]).toBe(0o755)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await fs.readFile(file, 'utf8')).toBe('v2')
+    const st = await fs.stat(file)
+    expect(st.mode & 0o777).toBe(0o755)
+    expect(st.mode & 0o7000).toBe(0)
+  })
+
   it('EBUSY 指数退避重试 3 次后成功（50/150/450ms — review 0.1.2 根治）', async () => {
     const file = join(dir, 'busy.jsonc')
     const realRename = fs.rename.bind(fs)

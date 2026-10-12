@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace @wslpilot/desktop",
-    "build": "npm run build --workspaces --if-present && npm run package --workspace @wslpilot/desktop",
+    "build": "npm run tokens && npm run build --workspaces --if-present && npm run package --workspace @wslpilot/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tsconfig.tools.json --noEmit",
     "lint": "eslint . --ext .ts,.vue,.mjs && stylelint \"**/*.{scss,css,vue}\"",
     "format": "prettier --write .",

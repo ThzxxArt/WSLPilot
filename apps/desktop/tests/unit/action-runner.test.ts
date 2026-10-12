@@ -4,6 +4,7 @@ import {
   findAction,
   actionTaskHandle,
   type ActionConfigReader,
+  type ActionRunnerDeps,
 } from '../../src/main/services/action-runner'
 import { createAppError, type WslAction, type DistroMeta } from '@wslpilot/shared'
 import type { TaskControl } from '../../src/main/services/task-runner'
@@ -102,6 +103,8 @@ function makeDeps(over: Record<string, unknown> = {}) {
       waitExit: vi.fn(async () => 0),
       kill: vi.fn(),
     },
+    // assertRunning 为必需注入（review 0.1.2 审计修复：消灭 `assertRunning?` 静默旁路）
+    assertRunning: vi.fn(async () => {}),
     runWsl: vi.fn(async () => ({ stdout: '/home/me\nme\n', stderr: '', code: 0 })),
     spawnFn: vi.fn(() => ({
       kill: vi.fn(),
@@ -361,5 +364,16 @@ describe('actionTaskHandle', () => {
     expect(actionTaskHandle('t')).toEqual({ taskId: 't' })
     expect(actionTaskHandle('t', { ptyId: 'p' })).toEqual({ taskId: 't', ptyId: 'p' })
     expect(actionTaskHandle('t', null)).toEqual({ taskId: 't' })
+  })
+})
+
+describe('ActionRunnerDeps 类型契约', () => {
+  it('assertRunning 为必需注入：缺失时类型层不可构造（编译期保证 — review 0.1.2 审计修复）', () => {
+    // 探测型动作的运行门禁不得再是可选注入：缺省即静默旁路（探索 `wsl -d X -e` 会隐式启动发行版）。
+    // 本用例靠 @ts-expect-error 钉死「必需」契约——若有人把字段改回可选，指令变成未使用，
+    // typecheck 直接报 TS2578。
+    const withoutGate: Omit<ActionRunnerDeps, 'assertRunning'> = { ...makeDeps() }
+    // @ts-expect-error 缺少必需属性 assertRunning 时 createActionRunner 不可调用
+    expect(typeof createActionRunner(withoutGate)).toBe('object')
   })
 })

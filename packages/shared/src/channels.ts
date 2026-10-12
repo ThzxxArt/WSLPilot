@@ -92,6 +92,8 @@ export const CH = {
   appPickSaveFile: 'app:pickSaveFile',
   appPickOpenFile: 'app:pickOpenFile',
   appOpenPath: 'app:openPath',
+  // 外链专用通道（review 0.1.2 审计修复）：openPath 只允许目录，官网/文档链接必须有独立出口
+  appOpenExternal: 'app:openExternal',
   appSignatureStatus: 'app:signatureStatus',
 
   // diagnostics（M7 诊断包 / 日志目录 — 动词与 preload diagnostics.* API 对齐，禁止 app: 域命名漂移）
@@ -168,6 +170,7 @@ export const INVOKE_CHANNELS = [
   CH.appPickSaveFile,
   CH.appPickOpenFile,
   CH.appOpenPath,
+  CH.appOpenExternal,
   CH.diagnosticsOpenLogsDir,
   CH.diagnosticsExportPackage,
   CH.appSignatureStatus,

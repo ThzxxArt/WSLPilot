@@ -187,6 +187,7 @@ describe('preload 契约', () => {
         'minimize',
         'onNavigate',
         'openConfigDir',
+        'openExternal',
         'openPath',
         'pickDirectory',
         'pickOpenFile',
@@ -487,6 +488,13 @@ describe('preload 契约', () => {
     callAndCheck('app.getVersion', () => exposed.app.getVersion(), CH.appGetVersion)
     callAndCheck('app.openConfigDir', () => exposed.app.openConfigDir(), CH.appOpenConfigDir)
     callAndCheck('app.openPath', () => exposed.app.openPath('C:\\x'), CH.appOpenPath, 'C:\\x')
+    // 外链专用通道（review 0.1.2 审计修复）：参数过 http/https schema
+    callAndCheck(
+      'app.openExternal',
+      () => exposed.app.openExternal('https://github.com/dorssel/usbipd-win'),
+      CH.appOpenExternal,
+      'https://github.com/dorssel/usbipd-win',
+    )
     callAndCheck(
       'app.pickDirectory',
       () => exposed.app.pickDirectory('C:\\x'),

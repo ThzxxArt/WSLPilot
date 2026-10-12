@@ -60,6 +60,23 @@ describe('诊断脱敏（M7 §15.3）', () => {
     expect(out).toContain('***')
   })
 
+  it('Authorization 鉴权头无空格形态仍整体打码 — review 0.1.2 审计修复', () => {
+    // 冒号后无空格
+    expect(sanitizeDiagnosticsText('Authorization:Bearer tok-12345', 'C:\\nope')).toBe(
+      'Authorization:Bearer ***',
+    )
+    // scheme 与凭据之间也无空格：旧 `\s+` 完全不命中，会残留明文（真实可失败断言）
+    const compact = sanitizeDiagnosticsText('Authorization:Bearerx-secret', 'C:\\nope')
+    expect(compact).not.toContain('x-secret')
+    expect(compact).toBe('Authorization:Bearer***')
+  })
+
+  it('带转义引号的密钥值整体打码（不残留半段明文）— review 0.1.2 审计修复', () => {
+    const out = sanitizeDiagnosticsText('{"password": "a\\"b\\"c"}', 'C:\\nope')
+    expect(out).toBe('{"password": ***}')
+    expect(out).not.toContain('a\\"b')
+  })
+
   it('私钥 / 客户端密钥打码（含空格形态的值整体打码）', () => {
     const out = sanitizeDiagnosticsText(
       '{"private_key": "-----BEGIN KEY-----abc", "client_secret": "shh-99"}',

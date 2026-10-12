@@ -20,8 +20,11 @@ interface DirEntry {
 let dialogResult = true
 const dialog = {
   warning: vi.fn((opts: { onPositiveClick?: () => void; onNegativeClick?: () => void }) => {
+    // 与真实契约同形：返回实例含 destroy（用例可挂起/覆写实现）
+    const inst = { destroy: vi.fn() }
     if (dialogResult) opts.onPositiveClick?.()
     else opts.onNegativeClick?.()
+    return inst
   }),
 }
 const message = { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }
@@ -403,5 +406,94 @@ describe('文件浏览器确认语义（自查回归）', () => {
     expect(message.success).not.toHaveBeenCalled()
     // 失败后 dirty 必须保留：绝不把「未保存」误标成已保存
     expect(w.text()).toContain('未保存')
+  })
+
+  it('等待确认期间父级回切：旧续体不得载入新发行版（review 0.1.2 审计修复）', async () => {
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+    const loads = fsApi.readDir.mock.calls.length
+
+    // 挂起确认框：模拟用户还未点击（await confirmDiscard 在途）
+    const captured: Array<Record<string, unknown>> = []
+    const original = dialog.warning.getMockImplementation()!
+    dialog.warning.mockImplementation((opts: unknown) => {
+      captured.push(opts as Record<string, unknown>)
+      return { destroy: vi.fn() }
+    })
+    try {
+      await w.setProps({ distroName: 'Debian' })
+      await flushPromises()
+      expect(captured).toHaveLength(1)
+
+      // 等待期间另一面板 restore-distro 把父级拉回 Ubuntu
+      await w.setProps({ distroName: 'Ubuntu' })
+      await flushPromises()
+
+      // 用户此刻才点「放弃修改」：Debian 的旧续体必须复验 props 后失效
+      ;(captured[0]!.onPositiveClick as () => void)()
+      await flushPromises()
+      expect(fsApi.readDir.mock.calls.length).toBe(loads)
+      expect(fsApi.readDir).not.toHaveBeenCalledWith('Debian', expect.anything())
+      // 脏编辑仍在原发行版上（未静默丢）
+      expect(w.text()).toContain('未保存')
+    } finally {
+      dialog.warning.mockImplementation(original)
+    }
+  })
+
+  it('保存期间编辑器只读；保存成功仅当文本未再变化才清 dirty（假干净根治）', async () => {
+    let resolveWrite!: () => void
+    fsApi.write.mockImplementationOnce(() => new Promise<void>((r) => (resolveWrite = r)))
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+
+    const save = w.findAll('button').find((b) => b.text().includes('保存'))!
+    await save.trigger('click')
+    await flushPromises()
+
+    // 写盘在途：编辑器只读，用户无法继续输入制造「假干净」
+    const ta = w.find('textarea')
+    expect(ta.element.hasAttribute('readonly')).toBe(true)
+    // 写盘参数 = 点击时快照
+    expect(fsApi.write).toHaveBeenCalledWith('Ubuntu', '/hosts', 'dirty content')
+
+    // 模拟保存期间文本被再次改动（程序化路径）：成功后 dirty 不得被误清
+    await ta.setValue('changed during save')
+    await flushPromises()
+    resolveWrite()
+    await flushPromises()
+
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('已保存'))
+    expect(w.text()).toContain('未保存')
+  })
+
+  it('大小写归一：仅大小写不同的发行版名不误拦写回（review 0.1.2 审计修复）', async () => {
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+
+    // 父级把名字规范成 'Ubuntu'（同一发行版）且用户选择留在此页：文件保留
+    dialogResult = false
+    await w.setProps({ distroName: 'Ubuntu' })
+    await flushPromises()
+    expect(w.emitted('restore-distro')).toBeTruthy()
+
+    const save = w.findAll('button').find((b) => b.text().includes('保存'))!
+    await save.trigger('click')
+    await flushPromises()
+    // WSL 名不区分大小写：不得报「跨发行版写回」被拦
+    expect(fsApi.write).toHaveBeenCalledWith('ubuntu', '/hosts', 'dirty content')
+    expect(message.warning).not.toHaveBeenCalledWith(expect.stringContaining('阻止跨发行版写回'))
   })
 })

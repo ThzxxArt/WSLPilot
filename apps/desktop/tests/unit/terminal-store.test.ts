@@ -150,6 +150,26 @@ describe('useTerminalStore', () => {
     expect(await s.open('A')).toBe('id-b')
   })
 
+  it('同发行版大小写变体并发去重：Ubuntu/ubuntu 同一发行版（review 0.1.2 审计修复）', async () => {
+    let releaseCreate!: (v: unknown) => void
+    wslAPI.terminal.create.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseCreate = r
+      }) as never,
+    )
+    const s = useTerminalStore()
+    await s.loadLimits()
+    const p1 = s.open('Ubuntu')
+    const p2 = s.open('ubuntu')
+    expect(await p2).toBeNull()
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+    releaseCreate({ ptyId: 'id-u', distro: 'Ubuntu', createdAt: 1 })
+    expect(await p1).toBe('id-u')
+    expect(s.sessions).toHaveLength(1)
+    // 名额正常释放（大小写归一的清理不误留）
+    expect(s.creatingDistros).toEqual([])
+  })
+
   it('kill removes session and reassigns active', async () => {
     const s = useTerminalStore()
     await s.loadLimits()

@@ -11,15 +11,16 @@ const deflateRawAsync = promisify(deflateRaw) as (buf: Buffer) => Promise<Buffer
 
 /** ZIP 格式硬上限（review 0.1.2：超限必须可读报错，不得静默溢出 16/32 位字段） */
 export const ZIP_MAX_ENTRIES = 0xffff
-export const ZIP_MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+/** uint32 offset/尺寸字段溢出边界（review 0.1.2 审计修复：守卫由 > 4GiB 收紧为 >= 0xffffffff） */
+export const ZIP_MAX_TOTAL_BYTES = 0xffffffff
 
-/** 容量守卫（独立导出便于真实单测）：条目数 / 合计字节超 ZIP 格式上限即抛可读错误 */
+/** 容量守卫（独立导出便于真实单测）：条目数 / 合计字节达 ZIP 格式上限即抛可读错误 */
 export function assertZipCapacity(entryCount: number, totalBytes: number): void {
   if (entryCount > ZIP_MAX_ENTRIES) {
     throw new Error(`zip 条目数超上限（${entryCount} > ${ZIP_MAX_ENTRIES}）`)
   }
-  if (totalBytes > ZIP_MAX_TOTAL_BYTES) {
-    throw new Error('zip 合计体积超 4GB 上限，无法生成')
+  if (totalBytes >= ZIP_MAX_TOTAL_BYTES) {
+    throw new Error('zip 合计体积达到 4GB（uint32 字段溢出边界）上限，无法生成')
   }
 }
 

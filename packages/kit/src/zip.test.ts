@@ -83,10 +83,14 @@ describe('zip 写入器（M7 诊断包）', () => {
     await expect(createZip([{ name: '../x', content: 'y' }])).rejects.toThrow()
   })
 
-  it('容量守卫：条目数 / 合计字节超 ZIP 上限时抛可读错误（不静默溢出）', async () => {
+  it('容量守卫：条目数 / 合计字节达 ZIP 上限时抛可读错误（不静默溢出）', async () => {
     expect(() => assertZipCapacity(ZIP_MAX_ENTRIES + 1, 0)).toThrow(/条目数超上限/)
+    // uint32 溢出边界：>= 0xffffffff 即拒绝（review 0.1.2 审计修复收紧）
+    expect(ZIP_MAX_TOTAL_BYTES).toBe(0xffffffff)
+    expect(() => assertZipCapacity(1, ZIP_MAX_TOTAL_BYTES)).toThrow(/4GB/)
     expect(() => assertZipCapacity(1, ZIP_MAX_TOTAL_BYTES + 1)).toThrow(/4GB/)
-    expect(() => assertZipCapacity(ZIP_MAX_ENTRIES, ZIP_MAX_TOTAL_BYTES)).not.toThrow()
+    expect(() => assertZipCapacity(1, ZIP_MAX_TOTAL_BYTES - 1)).not.toThrow()
+    expect(() => assertZipCapacity(ZIP_MAX_ENTRIES, 0)).not.toThrow()
     // createZip 入口即拦（不进入压缩循环）
     const tooMany = Array.from({ length: ZIP_MAX_ENTRIES + 1 }, (_, i) => ({
       name: `f${i}.txt`,

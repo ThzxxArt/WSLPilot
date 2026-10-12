@@ -8,8 +8,6 @@ function initialState() {
     releaseNotes: '',
     percent: 0,
     error: '',
-    /** 聚合 busys（兼容旧调用方：任一更新操作在途） */
-    busy: false,
     /** 检查更新在途（与下载拆分 — review 0.1.2 根治：两个按钮互不闪 loading） */
     checkBusy: false,
     /** 下载更新在途 */
@@ -58,9 +56,12 @@ export const useUpdateStore = defineStore('update', {
       }
     },
 
+    /**
+     * 检查更新。busy 只用 checkBusy：聚合 busy 已删除
+     * （review 0.1.2 审计修复：全仓无消费方且 check/download 并发时两个 finally 互踩）。
+     */
     async check() {
       this.checkBusy = true
-      this.busy = true
       try {
         const s = await window.wslAPI.update.check()
         this.applyState(s)
@@ -71,13 +72,11 @@ export const useUpdateStore = defineStore('update', {
         throw e
       } finally {
         this.checkBusy = false
-        this.busy = false
       }
     },
 
     async download() {
       this.downloadBusy = true
-      this.busy = true
       try {
         const s = await window.wslAPI.update.download()
         this.applyState(s)
@@ -87,7 +86,6 @@ export const useUpdateStore = defineStore('update', {
         throw e
       } finally {
         this.downloadBusy = false
-        this.busy = false
       }
     },
 

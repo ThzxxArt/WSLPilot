@@ -50,6 +50,8 @@ export const useNetworkStore = defineStore('network', {
     proxyStateGen: 0,
     rulesSaveGen: 0,
     proxySaveGen: 0,
+    /** 非 silent 请求的发起序号（loading owner 记账，silent 不参与 — review 0.1.2 审计修复） */
+    loadingSeq: 0,
   }),
 
   getters: {
@@ -84,7 +86,14 @@ export const useNetworkStore = defineStore('network', {
     /** silent：轮询等后台刷新不点亮 statusLoading，避免按钮反复闪 loading */
     async loadStatus(opts: { silent?: boolean } = {}) {
       const gen = ++this.statusGen
-      if (!opts.silent) this.statusLoading = true
+      /**
+       * review 0.1.2 审计修复：loading 用「发起序号 owner」记账，silent 不参与。
+       * 根因：此前 finally 以 statusGen 判定，12s silent 轮询会自增 statusGen，
+       * 使在途的非 silent 请求（刷新按钮）永远清不掉 statusLoading；silent 自身又不清。
+       * 现在只有最新一次非 silent 请求能复位 loading，silent 仍照常参与数据代际。
+       */
+      const loadingOwner = opts.silent ? 0 : ++this.loadingSeq
+      if (loadingOwner !== 0) this.statusLoading = true
       try {
         const status = await window.wslAPI.network.status()
         if (gen !== this.statusGen) return
@@ -93,7 +102,7 @@ export const useNetworkStore = defineStore('network', {
         if (gen !== this.statusGen) return
         this.lastError = toAppError(e)
       } finally {
-        if (gen === this.statusGen && !opts.silent) this.statusLoading = false
+        if (loadingOwner !== 0 && loadingOwner === this.loadingSeq) this.statusLoading = false
       }
     },
 

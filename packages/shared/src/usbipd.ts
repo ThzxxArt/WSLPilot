@@ -76,7 +76,8 @@ export function parseUsbipdList(raw: string): UsbDevice[] {
       state: normalizeUsbipdState(m[5]!),
     }
     // 同 busid 多次出现（真实输出含 Connected / Persisted 等分段时状态可能不同）：
-    // 后出现者覆盖先出现者（后者携带更新状态；旧实现「首次出现胜」会展示过期状态 — review 0.1.2）
+    // 后出现者覆盖先出现者（后者携带更新状态；旧实现「首次出现胜」会展示过期状态 — review 0.1.2）。
+    // 注意：该行为基于「输出分段按顺序、后者为更新状态」的假设，暂无真实样本佐证，保留本行为。
     const at = index.get(busId)
     if (at !== undefined) {
       out[at] = device

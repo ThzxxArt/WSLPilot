@@ -516,4 +516,21 @@ describe('SettingsView 编辑安全与恢复默认（review 0.1.2）', () => {
     })
     expect(message.success).toHaveBeenCalledWith('已恢复默认设置')
   })
+
+  it('恢复默认设置：写盘成功但 reload 失败降级为 warning，不谎报成功（review 0.1.2 审计修复）', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    findButton(w, '恢复默认设置')!.element.click()
+    await flushPromises()
+    const opts = dialog.warning.mock.calls.at(-1)![0] as {
+      onPositiveClick: () => Promise<void>
+    }
+    // 根因回归：config.set 成功而 settings.load() 失败时，此前仍提示「已恢复默认设置」
+    wslAPI.config.get.mockRejectedValueOnce(new Error('配置文件损坏'))
+    await opts.onPositiveClick()
+    await flushPromises()
+    expect(wslAPI.config.set).toHaveBeenCalled()
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith('已恢复默认设置，界面刷新失败，请重启应用')
+  })
 })

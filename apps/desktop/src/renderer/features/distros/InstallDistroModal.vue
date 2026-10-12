@@ -34,6 +34,8 @@ const onlineOptions = computed(() => online.value.map((n) => ({ label: n, value:
 const logTail = computed(() => (task.value?.logs ?? []).slice(-8))
 const failed = computed(() => task.value?.status === 'failed')
 const succeeded = computed(() => task.value?.status === 'success')
+// review 0.1.2 审计修复：canceled 不在 actions 覆盖内 → 取消终态无「关闭/重新开始」按钮死路
+const canceled = computed(() => task.value?.status === 'canceled')
 /** 任务记录已被 trim 淘汰（task 为 null 但 activeTaskId 还在）：不能成死路（review 0.1.2 根治） */
 const taskLost = computed(() => !!activeTaskId.value && !task.value)
 /** 步骤指示：0 选择 → 1 安装中 → 2 结果 */
@@ -204,7 +206,8 @@ function resetAndPick() {
     </div>
 
     <div v-else class="progress">
-      <div class="progress-line">
+      <!-- taskLost（任务记录被 trim 淘汰）：不再伪装「进行中」— review 0.1.2 审计修复 -->
+      <div v-if="!taskLost" class="progress-line">
         <NTag
           size="small"
           :bordered="false"
@@ -218,6 +221,7 @@ function resetAndPick() {
 
       <!-- 不确定态进度条（真实百分比出现后转实心） -->
       <NProgress
+        v-if="!taskLost"
         type="line"
         :percentage="typeof task?.percent === 'number' ? task.percent : 100"
         :indeterminate="typeof task?.percent !== 'number'"
@@ -225,7 +229,7 @@ function resetAndPick() {
         :show-indicator="false"
       />
 
-      <div class="msg">
+      <div v-if="!taskLost" class="msg">
         {{ task?.message || '准备中…' }}
       </div>
 
@@ -267,6 +271,11 @@ function resetAndPick() {
           <n-button type="primary" @click="openTerminal">打开终端</n-button>
         </template>
         <template v-else-if="failed">
+          <n-button @click="close"> 关闭 </n-button>
+          <n-button type="primary" @click="resetAndPick">重新开始</n-button>
+        </template>
+        <!-- 取消终态：同样给「关闭 / 重新开始」，绝不留无按钮死路（review 0.1.2 审计修复） -->
+        <template v-else-if="canceled">
           <n-button @click="close"> 关闭 </n-button>
           <n-button type="primary" @click="resetAndPick">重新开始</n-button>
         </template>
@@ -373,9 +382,10 @@ function resetAndPick() {
   word-break: break-all;
 }
 
+/* review 0.1.2 审计修复：硬编码 10px 与 ui 包 radius-md 令牌（12px）不一致，统一令牌化 */
 .user-guide {
   border: 1px solid var(--color-border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md, 12px);
   padding: 12px 14px;
   background: var(--color-bg-sunken);
 }
@@ -395,7 +405,7 @@ function resetAndPick() {
 
 .error {
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 12px);
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
   color: var(--color-danger);
   font-size: 12.5px;

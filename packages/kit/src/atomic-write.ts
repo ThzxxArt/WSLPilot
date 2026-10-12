@@ -14,9 +14,10 @@ export async function atomicWrite(filePath: string, content: string | Buffer): P
   const tmp = join(dir, `.${randomUUID()}.tmp`)
   // review 0.1.2 根治：覆盖已有文件时保留其权限 mode（临时文件按默认 0o666&umask
   // 会把受限/可执行权限冲掉；stat 失败=新文件，走默认）
+  // review 0.1.2 审计修复：只取权限位 & 0o777，不复刻 setuid/setgid/sticky（copy 它们会放大权限）
   let mode: number | undefined
   try {
-    mode = (await fs.stat(filePath)).mode
+    mode = (await fs.stat(filePath)).mode & 0o777
   } catch {
     mode = undefined
   }

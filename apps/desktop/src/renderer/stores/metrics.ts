@@ -40,6 +40,8 @@ export const useMetricsStore = defineStore('metrics', {
         if (raw && typeof raw === 'object' && 'runningCount' in raw) {
           this.overview = { ...raw, perDistro: raw.perDistro ?? {} }
           this.pushHistory(this.overview)
+          // review 0.1.2 审计修复：成功路径清除错误态，让采样失败可自愈（并发失败穿插也不例外）
+          this.lastError = null
         }
       } catch (e) {
         if (gen !== this.sampleGen) return
@@ -50,11 +52,15 @@ export const useMetricsStore = defineStore('metrics', {
     /**
      * 单发行版采样（review 0.1.2 根治）：
      * - 未运行（DISTRO_NOT_RUNNING）是预期状态而非故障：静默返回 null，不污染 lastError；
-     * - 其他失败（采样失败）必须落 lastError，不再一律静默 null 让错误无出口。
+     * - 其他失败（采样失败）必须落 lastError，不再一律静默 null 让错误无出口；
+     * - 成功清除 lastError（review 0.1.2 审计修复）：否则一次失败写全局状态后无自愈出口，
+     *   StatusBar/Dashboard 会永久显示「服务异常」。
      */
     async sampleDistro(name: string): Promise<Metrics | null> {
       try {
-        return (await window.wslAPI.metrics.sample(name)) as Metrics
+        const metrics = (await window.wslAPI.metrics.sample(name)) as Metrics
+        this.lastError = null
+        return metrics
       } catch (e) {
         const err = toAppError(e)
         if (err.code !== 'DISTRO_NOT_RUNNING') this.lastError = err

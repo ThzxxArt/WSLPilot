@@ -450,7 +450,18 @@ export function diffLines(oldText: string, newText: string): DiffLine[] {
   return out
 }
 
-/** 差异是否为空（保存前判断是否需要写盘）——直接文本比较，不为此跑全量 diff（review 0.1.2） */
+/**
+ * 差异是否为空（保存前判断是否需要写盘）。
+ * 行级等价（review 0.1.2 审计修复回归）：消费方依赖「仅换行风格差异不算 dirty」，
+ * 先走 `a === b` 快速路径，否则按行分割逐行比较（O(n) 直接比较，不跑 LCS）。
+ */
 export function isSameText(a: string, b: string): boolean {
-  return a === b
+  if (a === b) return true
+  const la = a.split(/\r?\n/)
+  const lb = b.split(/\r?\n/)
+  if (la.length !== lb.length) return false
+  for (let i = 0; i < la.length; i++) {
+    if (la[i] !== lb[i]) return false
+  }
+  return true
 }

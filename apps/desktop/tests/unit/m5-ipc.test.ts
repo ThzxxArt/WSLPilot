@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { registerWslConfHandlers } from '../../src/main/ipc/handlers/wslconf'
 import { registerActionHandlers } from '../../src/main/ipc/handlers/actions'
 import { registerFsHandlers } from '../../src/main/ipc/handlers/fs'
-import { CH } from '@wslpilot/shared'
+import { CH, createAppError } from '@wslpilot/shared'
 import type { TaskControl } from '../../src/main/services/task-runner'
 
 function makeCtx(over: Record<string, unknown> = {}) {
@@ -61,26 +61,33 @@ describe('wslconf handlers（M5）', () => {
   })
 
   it('wslconf:write 默认不终止发行版', async () => {
-    const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
-    const terminate = vi.fn(async () => {})
+    const wslconf = {
+      read: vi.fn(),
+      write: vi.fn(async () => {}),
+      writeAndMaybeTerminate: vi.fn(async () => ({ terminated: false })),
+    }
     const handlers = collect(registerWslConfHandlers, {
       wslconf,
-      wsl: { terminate, assertRunning: vi.fn(async () => {}) },
+      wsl: { assertRunning: vi.fn(async () => {}) },
     })
     const out = await handlers.get(CH.wslconfWrite)!(makeCtx(), {
       name: 'Ubuntu',
       content: '[a]\nb = 1\n',
     })
     expect(out).toEqual({ terminated: false })
-    expect(terminate).not.toHaveBeenCalled()
+    // 写与 terminate 交给服务在同一 per-distro 队列内执行（review 0.1.2 审计修复）
+    expect(wslconf.writeAndMaybeTerminate).toHaveBeenCalledWith('Ubuntu', '[a]\nb = 1\n', false)
   })
 
-  it('autoShutdownAfterConfigChange 开启时写入后 terminate（8 秒规则）', async () => {
-    const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
-    const terminate = vi.fn(async () => {})
+  it('autoShutdownAfterConfigChange 开启时以 terminate=true 委托服务（8 秒规则，写→终止同队列）', async () => {
+    const wslconf = {
+      read: vi.fn(),
+      write: vi.fn(async () => {}),
+      writeAndMaybeTerminate: vi.fn(async () => ({ terminated: true })),
+    }
     const handlers = collect(registerWslConfHandlers, {
       wslconf,
-      wsl: { terminate, assertRunning: vi.fn(async () => {}) },
+      wsl: { assertRunning: vi.fn(async () => {}) },
     })
     const ctx = makeCtx()
     ctx.configService.loadSync = vi.fn(() => ({
@@ -88,34 +95,42 @@ describe('wslconf handlers（M5）', () => {
     }))
     const out = await handlers.get(CH.wslconfWrite)!(ctx, { name: 'Ubuntu', content: '' })
     expect(out).toEqual({ terminated: true })
-    expect(terminate).toHaveBeenCalledWith('Ubuntu')
+    expect(wslconf.writeAndMaybeTerminate).toHaveBeenCalledWith('Ubuntu', '', true)
   })
 
   it('硬门禁：未运行发行版拒绝读/写（wsl -d X -e 会隐式启动 — review 根治）', async () => {
-    const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
+    const wslconf = {
+      read: vi.fn(),
+      write: vi.fn(async () => {}),
+      writeAndMaybeTerminate: vi.fn(async () => ({ terminated: false })),
+    }
     const assertRunning = vi.fn(async () => {
       throw new Error('发行版 Ubuntu 未运行')
     })
     const handlers = collect(registerWslConfHandlers, {
       wslconf,
-      wsl: { terminate: vi.fn(), assertRunning },
+      wsl: { assertRunning },
     })
     await expect(handlers.get(CH.wslconfRead)!(makeCtx(), 'Ubuntu')).rejects.toThrow('未运行')
     await expect(
       handlers.get(CH.wslconfWrite)!(makeCtx(), { name: 'Ubuntu', content: '' }),
     ).rejects.toThrow('未运行')
     expect(wslconf.read).not.toHaveBeenCalled()
-    expect(wslconf.write).not.toHaveBeenCalled()
+    expect(wslconf.writeAndMaybeTerminate).not.toHaveBeenCalled()
   })
 
-  it('terminate 失败不判整次写入失败：返回 terminated:false + terminateError（review 0.1.2 根治）', async () => {
-    const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
-    const terminate = vi.fn(async () => {
-      throw new Error('wsl --terminate 失败')
-    })
+  it('terminate 失败不判整次写入失败：透传 terminated:false + terminateError（review 0.1.2 根治）', async () => {
+    const wslconf = {
+      read: vi.fn(),
+      write: vi.fn(async () => {}),
+      writeAndMaybeTerminate: vi.fn(async () => ({
+        terminated: false,
+        terminateError: 'wsl --terminate 失败',
+      })),
+    }
     const handlers = collect(registerWslConfHandlers, {
       wslconf,
-      wsl: { terminate, assertRunning: vi.fn(async () => {}) },
+      wsl: { assertRunning: vi.fn(async () => {}) },
     })
     const ctx = makeCtx()
     ctx.configService.loadSync = vi.fn(() => ({ wsl: { autoShutdownAfterConfigChange: true } }))
@@ -124,8 +139,8 @@ describe('wslconf handlers（M5）', () => {
       terminated: false,
       terminateError: expect.stringContaining('terminate 失败'),
     })
-    // 文件已写入成功，绝不回滚/判失败
-    expect(wslconf.write).toHaveBeenCalledWith('Ubuntu', '[a]\n')
+    // 文件写入成功：服务内部已完成写入，Handler 不得把 terminate 失败升级为整次失败
+    expect(wslconf.writeAndMaybeTerminate).toHaveBeenCalledWith('Ubuntu', '[a]\n', true)
   })
 })
 
@@ -191,6 +206,44 @@ describe('action handlers（M5）', () => {
     ).rejects.toThrow('未运行')
     expect(tasks.start).not.toHaveBeenCalled()
     expect(assertRunning).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('terminal:true 动作门禁先于 spawnTerminal：未运行抛 DISTRO_NOT_RUNNING 且不建 PTY（review 0.1.2 审计修复）', async () => {
+    const tasks = makeTasks()
+    const runner = {
+      prepare: vi.fn(async () => ({
+        action: {
+          id: 'a2',
+          label: '终端',
+          scope: 'distro',
+          program: '/bin/bash',
+          args: [],
+          terminal: true,
+          confirm: false,
+        },
+        distro: 'Ubuntu',
+        program: '/bin/bash',
+        args: [],
+        rawCommand: 'x',
+      })),
+      spawnTerminal: vi.fn(() => ({ ptyId: 'pty-9' })),
+      run: vi.fn(async () => {}),
+      killSession: vi.fn(),
+    }
+    const assertRunning = vi.fn(async () => {
+      throw createAppError('DISTRO_NOT_RUNNING', { message: '发行版 Ubuntu 未运行' })
+    })
+    const handlers = collect(registerActionHandlers, {
+      runner,
+      tasks,
+      wsl: { assertRunning },
+    })
+    await expect(
+      handlers.get(CH.actionRun)!(makeCtx(), { actionId: 'a2', distro: 'Ubuntu' }),
+    ).rejects.toMatchObject({ code: 'DISTRO_NOT_RUNNING' })
+    expect(runner.spawnTerminal).not.toHaveBeenCalled()
+    expect(tasks.start).not.toHaveBeenCalled()
+    expect(runner.killSession).not.toHaveBeenCalled()
   })
 
   it('headless 动作返回 TaskHandle（无 ptyId）并按发行版加锁', async () => {

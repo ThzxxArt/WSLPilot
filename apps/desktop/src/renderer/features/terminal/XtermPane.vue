@@ -82,16 +82,17 @@ function desiredSize() {
  * 尺寸同步（必达 + 自愈）：PTY 停留在创建默认 80×24 而显示更宽时，
  * ConPTY 会按 80 列折行/填充重绘 → 行截断、碎片错位（review 用户实测根治）。
  * 失败重试 3 次；未同步成功不记账，输出流间隙会再次自愈。
+ * 返回本轮是否成功落地（尾沿补偿据此决定是否续飞）。
  */
-async function doSyncPtySize(): Promise<void> {
+async function doSyncPtySize(): Promise<boolean> {
   const want = desiredSize()
-  if (want.cols === lastSent.cols && want.rows === lastSent.rows) return
+  if (want.cols === lastSent.cols && want.rows === lastSent.rows) return true
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await window.wslAPI.terminal.resize(props.ptyId, want.cols, want.rows)
       lastSent = want
       sizeErrorShown = false
-      return
+      return true
     } catch (e) {
       if (attempt === 2) {
         // 同一失败只提示一次：输出流间隙会反复触发自愈，绝不刷屏（review 0.1.2 根治）
@@ -99,21 +100,36 @@ async function doSyncPtySize(): Promise<void> {
           sizeErrorShown = true
           message.error(errorLine(e, '终端尺寸同步失败'))
         }
-        return
+        return false
       }
       await new Promise((r) => setTimeout(r, 150))
     }
   }
+  return false
 }
 
-/** 单飞入口：在途同步未完成时直接复用，不再发重复 IPC */
-async function syncPtySize(): Promise<void> {
-  if (!term) return
+/**
+ * 单飞入口：在途同步未完成时直接复用，避免重复 resize（review 0.1.2 根治）。
+ * review 0.1.2 审计修复：飞行中到达的新尺寸只复用旧 promise、落地后不复查 drifted，
+ * 此后无输出/无 resize 则 PTY 停留旧尺寸（丢尾沿）。根因：单飞缺少尾沿补偿。
+ * 修复：成功落地后若仍漂移则再补发一轮（链式收敛于尺寸稳定）；失败轮不补发，
+ * 避免 PTY 持续不可用时无限空转（自愈仍由输出间隙兜底）。
+ */
+function syncPtySize(): Promise<void> {
+  if (!term) return Promise.resolve()
   if (syncInFlight) return syncInFlight
-  syncInFlight = doSyncPtySize().finally(() => {
-    syncInFlight = null
-  })
-  return syncInFlight
+  const flight: Promise<void> = doSyncPtySize()
+    .then((ok) => {
+      syncInFlight = null
+      if (ok && !disposed && drifted()) return syncPtySize()
+      return undefined
+    })
+    .catch(() => {
+      // 理论不可达（doSyncPtySize 自吞异常）：兜底清空单飞，绝不锁死后续同步
+      syncInFlight = null
+    })
+  syncInFlight = flight
+  return flight
 }
 
 /** 尺寸漂移检测（输出到达时的零成本校验） */

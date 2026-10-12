@@ -29,7 +29,7 @@ function makeCtl(): TaskControl {
   }
 }
 
-type ToolResult = { code?: number; stdout?: string; stderr?: string }
+type ToolResult = { code?: number; stdout?: string; stderr?: string; truncated?: boolean }
 
 function makeTool(results: ToolResult[] | ToolResult) {
   const list = Array.isArray(results) ? results : [results]
@@ -39,7 +39,12 @@ function makeTool(results: ToolResult[] | ToolResult) {
     calls.push({ program, args })
     const r = list[Math.min(i, list.length - 1)] ?? { code: 0 }
     i++
-    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.code ?? 0 }
+    return {
+      stdout: r.stdout ?? '',
+      stderr: r.stderr ?? '',
+      code: r.code ?? 0,
+      ...(r.truncated ? { truncated: true } : {}),
+    }
   })
   return { fn, calls }
 }
@@ -93,6 +98,15 @@ describe('UsbipdService.status', () => {
     const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
     expect((await svc.status()).version).toBe('2.5.0')
   })
+
+  it('输出截断不得当完整结果解析：status 报 TASK_FAILED（review 0.1.2 审计修复）', async () => {
+    const tool = makeTool({ code: -1, stdout: 'usbipd-win 2.4', truncated: true })
+    const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
+    await expect(svc.status()).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+      message: expect.stringContaining('输出超限，无法可靠解析'),
+    })
+  })
 })
 
 describe('UsbipdService.list', () => {
@@ -119,6 +133,15 @@ describe('UsbipdService.list', () => {
     const tool = makeTool({ code: 2, stderr: 'driver error' })
     const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
     await expect(svc.list()).rejects.toMatchObject({ code: 'TASK_FAILED' })
+  })
+
+  it('输出截断不得当完整清单解析：list 报 TASK_FAILED（review 0.1.2 审计修复）', async () => {
+    const tool = makeTool({ code: -1, stdout: LIST, truncated: true })
+    const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
+    await expect(svc.list()).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+      message: expect.stringContaining('输出超限，无法可靠解析'),
+    })
   })
 })
 
@@ -237,6 +260,20 @@ describe('UsbipdService 操作', () => {
     canceled = true
     holder.fn?.()
     await expect(p).rejects.toMatchObject({ code: 'TASK_CANCELED' })
+  })
+
+  it('取消信号在成功收尾窗口到达 → 仍成功（成功优先 — review 0.1.2 审计修复）', async () => {
+    let canceled = false
+    const tool = vi.fn(async () => {
+      // 模拟：usbipd 已以 code 0 成功退出，随后才观察到取消请求
+      canceled = true
+      return { stdout: '', stderr: '', code: 0 }
+    })
+    const svc = createUsbipdService({ logger: logger(), runTool: tool as never })
+    const ctl = makeCtl()
+    ctl.isCanceled = () => canceled
+    await expect(svc.bind('1-4', ctl)).resolves.toBeUndefined()
+    expect(ctl.report).toHaveBeenCalledWith(100, expect.stringContaining('已绑定'))
   })
 
   it('bind/unbind/attach/detach 走同一串行队列：并发不重叠（review 0.1.2 根治）', async () => {

@@ -33,7 +33,9 @@ onMounted(() => {
 })
 
 function openUsbipdSite() {
-  void window.wslAPI.app.openPath(USBIPD_WIN_URL).catch((e: unknown) => {
+  // review 0.1.2 审计修复：此前走 app.openPath（只允许打开目录）→ 官网按钮 100% 失败；
+  // 根因：外链与本地路径混用同一通道。改用专用 app.openExternal（http/https 白名单）。
+  void window.wslAPI.app.openExternal(USBIPD_WIN_URL).catch((e: unknown) => {
     message.error(errorLine(e, '打开 usbipd-win 官网失败'))
   })
 }

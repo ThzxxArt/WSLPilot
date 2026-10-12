@@ -251,6 +251,15 @@ describe('diffLines / isSameText', () => {
     expect(isSameText('', '')).toBe(true)
   })
 
+  it('isSameText 行级等价：仅换行风格差异不算 dirty（review 0.1.2 审计修复回归）', () => {
+    expect(isSameText('a\r\nb', 'a\nb')).toBe(true)
+    expect(isSameText('a\r\nb\r\n', 'a\nb\n')).toBe(true)
+    // 内容不同 / 行数不同仍为 false
+    expect(isSameText('a\r\nb', 'a\nc')).toBe(false)
+    expect(isSameText('a\nb', 'a\nb\nc')).toBe(false)
+    expect(isSameText('a\nb\nc', 'a\nb')).toBe(false)
+  })
+
   it('超大规模输入退化为整段增删（杜绝 O(n·m) OOM — review 0.1.2 根治）', () => {
     const a = Array.from({ length: 2100 }, (_, i) => `a${i}`).join('\n')
     const b = Array.from({ length: 2100 }, (_, i) => `b${i}`).join('\n')

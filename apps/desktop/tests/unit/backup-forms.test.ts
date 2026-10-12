@@ -134,6 +134,22 @@ describe('import form', () => {
     ).toBeNull()
   })
 
+  it('重名硬拦截大小写不敏感：WSL 名不区分大小写（review 0.1.2 审计修复）', () => {
+    const form = {
+      name: 'ubuntu',
+      archivePath: 'a.tar',
+      installPath: 'D:\\N',
+      format: 'tar' as const,
+      version: 2 as const,
+      inPlace: false,
+    }
+    expect(validateImportForm(form, ['Ubuntu'])).toContain('已存在')
+    expect(validateImportForm(form, ['UBUNTU'])).toContain('已存在')
+    expect(validateImportForm({ ...form, name: 'Ubuntu' }, ['ubuntu'])).toContain('已存在')
+    // 不同名不受影响
+    expect(validateImportForm(form, ['Debian'])).toBeNull()
+  })
+
   it('路径含控制字符被拦截（归档 / 安装位置 — review 0.1.2 根治）', () => {
     expect(
       validateImportForm({

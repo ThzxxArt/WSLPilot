@@ -147,7 +147,10 @@ export function validateImportForm(
   if (!isValidDistroName(form.name))
     return '请填写合法的新发行版名称（不能包含 \\ / : * ? " < > |）'
   const n = form.name.trim()
-  if (existingNames.some((d) => d === n)) {
+  // 大小写归一（review 0.1.2 审计修复）：WSL 发行版名不区分大小写，
+  // Ubuntu/ubuntu 视为重名，否则拖到 wsl --import 长任务才炸同名冲突
+  const lower = n.toLowerCase()
+  if (existingNames.some((d) => d.toLowerCase() === lower)) {
     return `发行版「${n}」已存在，请换一个名称，或先注销原有发行版`
   }
   const err = validatePathField(form.archivePath, '备份文件路径')

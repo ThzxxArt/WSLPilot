@@ -388,6 +388,43 @@ describe('InstallDistroModal', () => {
     expect(steps()[1]!.getAttribute('aria-current')).toBe('step')
     expect(steps()[0]!.getAttribute('aria-current')).toBeNull()
   })
+
+  it('取消终态给出「关闭 / 重新开始」按钮（不再是无按钮死路 — review 0.1.2 审计修复）', async () => {
+    await openModal()
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    useTasksStore().applyProgress({
+      taskId: 'ins',
+      type: 'install',
+      distro: 'Ubuntu',
+      percent: 40,
+      message: '已取消',
+      status: 'canceled',
+    })
+    await flushPromises()
+    expect(bodyText()).toContain('已取消')
+    expect(findBodyButton('关闭')).toBeTruthy()
+    const restart = findBodyButton('重新开始')
+    expect(restart).toBeTruthy()
+    restart!.click()
+    await flushPromises()
+    // 回到选择步骤（可重新发起安装）
+    expect(bodyText()).toContain('选择发行版')
+  })
+
+  it('taskLost 不再伪装进行中：隐藏状态标签与进度条，只留兜底提示与出口（review 0.1.2 审计修复）', async () => {
+    await openModal()
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    // 模拟任务记录被 trim 淘汰（activeTaskId 还在、task 为 null）
+    useTasksStore().entries = []
+    await flushPromises()
+    expect(bodyText()).toContain('任务记录已滚动清理')
+    expect(document.body.querySelector('.install-modal .progress-line')).toBeNull()
+    expect(document.body.querySelector('.install-modal .n-progress')).toBeNull()
+    expect(findBodyButton('关闭')).toBeTruthy()
+    expect(findBodyButton('重新开始')).toBeTruthy()
+  })
 })
 
 describe('TerminalView 会话错误面', () => {

@@ -44,14 +44,16 @@ const ready = ref(false)
 const bridgeMissing = ref(typeof window === 'undefined' || !window.wslAPI)
 
 /**
- * 子组件未捕获异常：onErrorCaptured 渲染降级错误面板（重载按钮），
- * 与 main.ts 的 app.config.errorHandler（console.error + wslAPI 探测）形成两级兜底。
+ * 子组件未捕获异常：onErrorCaptured 渲染降级错误面板（返回应用/重新加载）。
+ * review 0.1.2 审计修复：不再 `return false` 阻断传播——此前注释宣称与 main.ts
+ * errorHandler 两级兜底，但阻断后全局 handler 永不执行（名不副实）。
+ * 现让错误继续上报，职责收敛为一处记录 + 一处降级：main.ts errorHandler 负责
+ * console.error + wslAPI 可用性诊断，本组件负责面向用户的降级面板。
  */
 const fatalError = ref<unknown>(null)
 onErrorCaptured((err, _instance, info) => {
   console.error('[WSLPilot] 组件错误已捕获:', err, info)
   fatalError.value = err
-  return false
 })
 
 const fatalMessage = computed(() => {
@@ -63,6 +65,14 @@ const fatalMessage = computed(() => {
   if (typeof e === 'string' && e) return e
   return '界面渲染发生未知错误'
 })
+
+/**
+ * 返回应用（review 0.1.2 审计修复）：清除降级态复位重渲染，
+ * 瞬时异常不再只能整壳重载；若子树再次抛出会重新进入降级面板。
+ */
+function dismissFatal() {
+  fatalError.value = null
+}
 
 function reload() {
   try {
@@ -159,7 +169,18 @@ onUnmounted(() => {
               <div class="fatal-badge" aria-hidden="true">!</div>
               <h1 class="fatal-title">WSLPilot 初始化失败</h1>
               <p class="fatal-message">{{ fatalMessage }}</p>
-              <button class="fatal-reload" type="button" @click="reload">重新加载</button>
+              <div class="fatal-actions">
+                <!-- 桥接缺失时无应用可回：只保留重载（review 0.1.2 审计修复） -->
+                <button
+                  v-if="!bridgeMissing"
+                  class="fatal-back"
+                  type="button"
+                  @click="dismissFatal"
+                >
+                  返回应用
+                </button>
+                <button class="fatal-reload" type="button" @click="reload">重新加载</button>
+              </div>
             </div>
           </div>
           <template v-else>
@@ -234,18 +255,37 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-.fatal-reload {
+.fatal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.fatal-reload,
+.fatal-back {
   height: 34px;
   padding: 0 18px;
   border-radius: 9px;
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
   font-size: 13px;
   font-weight: 600;
   transition: background var(--dur-fast) var(--ease-standard);
 }
 
+.fatal-reload {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.fatal-back {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
 .fatal-reload:hover {
   background: var(--color-accent-hover);
+}
+
+.fatal-back:hover {
+  background: var(--color-border-subtle);
 }
 </style>

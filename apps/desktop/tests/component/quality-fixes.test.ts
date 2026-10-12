@@ -715,6 +715,57 @@ describe('A9 DistroDetailModal', () => {
     expect(w.emitted('update:show')!.at(-1)).toEqual([false])
   })
 
+  it('文件页签常驻：切走再切回编辑内容与脏标记保留（组件不卸载 — review 0.1.2 审计修复）', async () => {
+    wslAPI.fs.readDir.mockResolvedValue([
+      { name: 'a.txt', path: '/a.txt', isDirectory: false, size: 3, modifiedAt: 't' },
+    ])
+    wslAPI.fs.read.mockResolvedValue({
+      text: 'abc',
+      sizeBytes: 3,
+      truncated: false,
+      binary: false,
+    })
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs: { ActionsPanel: true } },
+    })
+    await flushPromises()
+
+    const tabOf = (label: string) =>
+      Array.from(document.body.querySelectorAll<HTMLElement>('.n-tabs-tab')).find((el) =>
+        (el.textContent ?? '').includes(label),
+      )
+    tabOf('文件')!.click()
+    await flushPromises()
+    const entry = document.body.querySelector<HTMLButtonElement>('.entry')
+    expect(entry).toBeTruthy()
+    entry!.click()
+    await flushPromises()
+
+    const ta = document.body.querySelector<HTMLTextAreaElement>('.editor-textarea')
+    expect(ta).toBeTruthy()
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setter.call(ta!, 'abcd')
+    ta!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(bodyText()).toContain('未保存')
+    const reads = wslAPI.fs.read.mock.calls.length
+
+    // 切去其他页签再切回：display-directive=show 使文件面板常驻，本地 dirty 不得被卸载销毁
+    tabOf('配置')!.click()
+    await flushPromises()
+    tabOf('文件')!.click()
+    await flushPromises()
+
+    const ta2 = document.body.querySelector<HTMLTextAreaElement>('.editor-textarea')
+    expect(ta2, '文件面板不得因切页签被卸载').toBeTruthy()
+    expect(ta2!.value).toBe('abcd')
+    expect(bodyText()).toContain('未保存')
+    // 组件未重新挂载：不重复读取文件
+    expect(wslAPI.fs.read.mock.calls.length).toBe(reads)
+  })
+
   it('编辑元数据：打开表单调用 meta.get 读「当前」元数据预填（不用列表快照旧数据）', async () => {
     useDistrosStore().items = [
       distro({ meta: { ...distro().meta!, alias: '快照别名', note: '快照备注' } }),

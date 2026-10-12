@@ -78,6 +78,14 @@ test.describe('WSLPilot 启动冒烟', () => {
       // 样式崩坏（而截图恰好被掩码）时在此处红
       await expect(window.locator('.mirror-card')).toBeVisible({ timeout: 15_000 })
       await expect(window.locator('.system-card')).toBeVisible({ timeout: 15_000 })
+      // review 0.1.2 审计修复：仅 toBeVisible 对高度塌陷不敏感（容器在 DOM 高度 0 也通过）；
+      // 根因：补偿断言没测布局盒。补 boundingBox 高度下限，样式崩坏塌陷时在此处红。
+      const mirrorBox = await window.locator('.mirror-card').boundingBox()
+      const systemBox = await window.locator('.system-card').boundingBox()
+      expect(mirrorBox, '.mirror-card 应有布局盒').toBeTruthy()
+      expect(systemBox, '.system-card 应有布局盒').toBeTruthy()
+      expect(mirrorBox!.height, '.mirror-card 高度塌陷').toBeGreaterThan(80)
+      expect(systemBox!.height, '.system-card 高度塌陷').toBeGreaterThan(80)
 
       // USB 设备页（M6 usbipd）：安装引导或设备表二者必有其一（静态文案，不依赖是否装了 usbipd）
       await nav.getByRole('button', { name: 'USB 设备', exact: true }).click()

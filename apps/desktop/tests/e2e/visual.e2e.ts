@@ -53,14 +53,13 @@ function dynamicMasks(window: import('@playwright/test').Page) {
     window.locator('.table-card .sub'),
     // 网络页：.wslconfig 真实路径（含用户名）
     window.locator('.mirror-card .sub code'),
-    // 网络页：镜像模式卡（状态随运行机器 .wslconfig 变化：CI runner 预配 mirrored、
-    // 本机为 NAT 引导卡）——review 0.1.2：整卡掩码收窄为具体动态元素：
-    // ① 状态徽章（模式标签）② 路径行（含条件「文件不存在」标签）③ 状态相关正文
-    // （推荐引导卡 / 已开启说明两种形态）。卡片标题、边框、背景为固定视觉系统，参与比对；
-    // 整卡定高（visual-stability.css 360px）保证两种形态下下方版式不位移。
-    window.locator('.mirror-card .head > .n-tag'),
-    window.locator('.mirror-card .sub'),
-    window.locator('.mirror-card .body'),
+    // 网络页：镜像模式卡（状态随运行机器 .wslconfig 变化：mirrored 说明卡 / NAT 推荐卡，
+    // 两种形态的 .body 高度差约 250px）。
+    // review 0.1.2 审计修复：曾把整卡掩码收窄为「状态徽章/路径行/正文」三个具体元素，
+    // 但收窄后 mask 矩形（相对定高卡片的位置与尺寸）仍随状态变化——两平台基线曾因此
+    // 记录不同状态（win32=mirrored、linux=NAT），环境一换即假红。现回退为**整卡掩码**：
+    // 卡片已被 visual-stability.css 定高 360px，整卡 mask 矩形恒定，两种形态在截图中等价。
+    window.locator('.mirror-card'),
     // 网络页：页头摘要行（含「系统已生效 N 条」动态计数）
     window.locator('.page-header .sub'),
     // 网络页：Windows 系统代理状态（随机器变化）

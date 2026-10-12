@@ -12,6 +12,7 @@ vi.mock('electron', () => ({
 
 import { registerIpcHandlers } from '../../src/main/ipc/router'
 import { CH, CONFIG_FILE_NAMES } from '@wslpilot/shared'
+import { createTaskRunner } from '../../src/main/services/task-runner'
 
 function makeCtx() {
   const load = vi.fn(async (key: string) => {
@@ -152,6 +153,7 @@ function makeDeps() {
       get: vi.fn(() => null),
       list: vi.fn(() => []),
       waitFor: vi.fn(async () => ({})),
+      runExclusive: vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn()),
       dispose: vi.fn(),
     } as any,
     wslconf: {
@@ -490,40 +492,57 @@ describe('distros + meta IPC handlers', () => {
     await expect(wrapped.get(CH.distrosUnregister)({}, 'a/b')).rejects.toThrow()
   })
 
-  it('unregister 互斥：同发行版（大小写归一）有 running 任务时拒绝（review 0.1.2 根治）', async () => {
+  it('unregister 走 TaskRunner 排他锁且大小写归一到同键（review 0.1.2 审计修复）', async () => {
     const ctx = makeCtx()
-    const { wrapped, deps } = register(ctx)
-    deps.tasks.list = vi.fn(() => [
-      {
-        taskId: 't9',
-        type: 'convert',
-        distro: 'ubuntu',
-        status: 'running',
-        percent: null,
-        message: '转换中',
-        logs: [],
-        startedAt: 1,
+    const deps = makeDeps()
+    const runExclusive = vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn())
+    deps.tasks.runExclusive = runExclusive
+    const { wrapped } = register(ctx, deps)
+    await wrapped.get(CH.distrosUnregister)({}, 'UBUNTU')
+    // 与 io 任务同一 lockKey（name.toLowerCase()）：注销绝不与同发行版任务并发
+    expect(runExclusive).toHaveBeenCalledWith('ubuntu', expect.any(Function))
+    expect(deps.wsl.unregister).toHaveBeenCalledWith('UBUNTU')
+    // 成功后不再走旧的 check-then-act 列表检查
+    expect(deps.tasks.list).not.toHaveBeenCalled()
+  })
+
+  it('unregister 与同发行版长任务严格互斥：排在运行中任务之后而非并发（review 0.1.2 审计修复）', async () => {
+    const ctx = makeCtx()
+    const deps = makeDeps()
+    const tasks = createTaskRunner({ logger: ctx.logger, onProgress: () => {} })
+    deps.tasks = tasks as any
+    const order: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    deps.wsl.unregister = vi.fn(async () => {
+      order.push('unregister')
+    })
+    const { wrapped } = register(ctx, deps)
+
+    const exportTask = tasks.start({
+      type: 'export',
+      distro: 'Ubuntu',
+      message: '导出 Ubuntu',
+      lockKey: 'ubuntu',
+      run: async () => {
+        order.push('task:start')
+        await gate
+        order.push('task:end')
       },
-    ])
-    await expect(wrapped.get(CH.distrosUnregister)({}, 'UBUNTU')).rejects.toThrow(
-      /TASK_FAILED.*仍有 1 个任务/,
-    )
+    })
+    await vi.waitFor(() => expect(order).toContain('task:start'))
+
+    const p = wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')
+    await new Promise((r) => setTimeout(r, 10))
+    // 长任务未结束：注销必须排队等待（不得并发砸中执行中任务）
+    expect(order).toEqual(['task:start'])
     expect(deps.wsl.unregister).not.toHaveBeenCalled()
 
-    // 已终态任务不拦截
-    deps.tasks.list = vi.fn(() => [
-      {
-        taskId: 't9',
-        type: 'convert',
-        distro: 'ubuntu',
-        status: 'success',
-        percent: 100,
-        message: '完成',
-        logs: [],
-        startedAt: 1,
-      },
-    ])
-    await wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')
-    expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
+    release()
+    await p
+    await tasks.waitFor(exportTask.taskId)
+    expect(order).toEqual(['task:start', 'task:end', 'unregister'])
   })
 })

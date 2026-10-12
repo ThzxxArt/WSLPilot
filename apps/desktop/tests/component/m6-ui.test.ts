@@ -79,7 +79,7 @@ const wslAPI = {
   },
   distros: { list: vi.fn(async (): Promise<DistroView[]> => []) },
   task: { cancel: vi.fn(async () => true), onProgress: vi.fn(() => () => {}) },
-  app: { openPath: vi.fn(async () => {}) },
+  app: { openPath: vi.fn(async () => {}), openExternal: vi.fn(async () => {}) },
   config: { get: vi.fn(async () => ({})), set: vi.fn(async () => ({})) },
 }
 ;(globalThis as any).window.wslAPI = wslAPI
@@ -714,6 +714,26 @@ describe('DevicesView', () => {
     await shareSwitch.vm.$emit('update:value', true)
     await flushPromises()
     expect(message.error).toHaveBeenCalled()
+  })
+
+  it('「访问官网」走 app.openExternal（openPath 只允许目录必失败 — review 0.1.2 审计修复）', async () => {
+    wslAPI.devices.status.mockResolvedValue({ installed: false, version: '' })
+    const w = mount(DevicesView, { attachTo: document.body })
+    await flushPromises()
+
+    const site = w.findAll('button').find((b) => b.text().includes('访问 usbipd-win 官网'))
+    expect(site).toBeTruthy()
+    await site!.trigger('click')
+    await flushPromises()
+    expect(wslAPI.app.openExternal).toHaveBeenCalledWith('https://github.com/dorssel/usbipd-win')
+    // 关键回归：绝不再误用只允许目录的 openPath
+    expect(wslAPI.app.openPath).not.toHaveBeenCalled()
+
+    // 失败路径必须有提示（不静默）
+    wslAPI.app.openExternal.mockRejectedValueOnce(new Error('没有默认浏览器'))
+    await site!.trigger('click')
+    await flushPromises()
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('没有默认浏览器'))
   })
 })
 

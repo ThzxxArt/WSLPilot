@@ -18,22 +18,30 @@ const shortcutLabel = computed(() =>
 /**
  * 窗口控制失败不再产生 unhandled rejection（review 0.1.2 根治）：
  * 最小化/最大化/关闭任一 IPC 失败时记录诊断，绝不静默吞掉也不炸控制台。
+ * review 0.1.2 审计修复：先取 app 子命名空间再调用——`window.wslAPI?.app.minimize()`
+ * 在 wslAPI 存在但 app 缺失时同步 TypeError，.catch 兜不住（此前的假防御）。
  */
 function reportWindowError(action: string) {
   return (e: unknown) => console.error(`[WSLPilot] 窗口操作失败（${action}）:`, e)
 }
 
 function minimize() {
-  void window.wslAPI?.app.minimize().catch(reportWindowError('最小化'))
+  const api = window.wslAPI?.app
+  if (!api) return
+  void api.minimize().catch(reportWindowError('最小化'))
 }
 
 function toggleMaximize() {
-  void window.wslAPI?.app.maximize().catch(reportWindowError('最大化'))
+  const api = window.wslAPI?.app
+  if (!api) return
+  void api.maximize().catch(reportWindowError('最大化'))
 }
 
 function close() {
   // 主进程按 closeBehavior 决定：最小化到托盘或退出
-  void window.wslAPI?.app.close().catch(reportWindowError('关闭'))
+  const api = window.wslAPI?.app
+  if (!api) return
+  void api.close().catch(reportWindowError('关闭'))
 }
 </script>
 

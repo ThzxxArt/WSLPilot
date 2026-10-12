@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
 }))
 
 import { registerAppHandlers } from '../../src/main/ipc/handlers/app'
-import { CH } from '@wslpilot/shared'
+import { CH, parseIpcArgs } from '@wslpilot/shared'
 import { shell } from 'electron'
 
 function register(withWindow = true) {
@@ -154,5 +154,67 @@ describe('app dialog handlers (M4 路径选择)', () => {
     await expect(call(handlers, ctx, CH.appOpenPath, dir)).rejects.toMatchObject({
       code: 'IO_ERROR',
     })
+  })
+})
+
+describe('app:openExternal（review 0.1.2 审计修复：外链专用通道 + 协议白名单）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('ipc-schema 契约：仅 http/https 前缀可过，危险协议（含大小写变体）拒绝', () => {
+    // 通过：http/https（协议名大小写不敏感，URL 规范允许）
+    expect(parseIpcArgs(CH.appOpenExternal, ['https://github.com/dorssel/usbipd-win'])).toBe(
+      'https://github.com/dorssel/usbipd-win',
+    )
+    expect(parseIpcArgs(CH.appOpenExternal, ['http://example.com'])).toBe('http://example.com')
+    expect(parseIpcArgs(CH.appOpenExternal, ['HTTP://EXAMPLE.COM'])).toBe('HTTP://EXAMPLE.COM')
+
+    // 拒绝：javascript/file/data 及其大小写变体、无协议串、空串
+    for (const bad of [
+      'javascript:alert(1)',
+      'JaVaScRiPt:alert(1)',
+      'file:///C:/Windows/System32/calc.exe',
+      'FILE:///etc/passwd',
+      'data:text/html,<script>1</script>',
+      'github.com/dorssel/usbipd-win',
+      '',
+    ]) {
+      expect(() => parseIpcArgs(CH.appOpenExternal, [bad]), bad).toThrow()
+    }
+    // 长度上限（防 IPC 撑爆）
+    expect(() => parseIpcArgs(CH.appOpenExternal, [`https://x.com/${'a'.repeat(2100)}`])).toThrow()
+  })
+
+  it('handler 二次协议校验：危险协议直达 handler 也被拒绝（纵深防御）', async () => {
+    const { handlers, ctx } = register()
+    for (const bad of [
+      'javascript:alert(1)',
+      'JaVaScRiPt:alert(1)',
+      'file:///C:/Windows/System32/calc.exe',
+    ]) {
+      await expect(call(handlers, ctx, CH.appOpenExternal, bad), bad).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+      })
+    }
+    // 非法 URL（无法解析）→ CONFIG_INVALID
+    await expect(call(handlers, ctx, CH.appOpenExternal, 'not a url')).rejects.toMatchObject({
+      code: 'CONFIG_INVALID',
+    })
+    expect(shell.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('http/https 透传 shell.openExternal；shell 失败映射为 IO_ERROR（不裸抛）', async () => {
+    const { handlers, ctx } = register()
+    vi.mocked(shell.openExternal).mockResolvedValueOnce(undefined)
+    await expect(
+      call(handlers, ctx, CH.appOpenExternal, 'https://github.com/dorssel/usbipd-win'),
+    ).resolves.toBeUndefined()
+    expect(shell.openExternal).toHaveBeenCalledWith('https://github.com/dorssel/usbipd-win')
+
+    vi.mocked(shell.openExternal).mockRejectedValueOnce(new Error('no default browser'))
+    await expect(
+      call(handlers, ctx, CH.appOpenExternal, 'https://example.com'),
+    ).rejects.toMatchObject({ code: 'IO_ERROR' })
   })
 })

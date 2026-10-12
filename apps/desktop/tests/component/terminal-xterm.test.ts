@@ -353,6 +353,41 @@ describe('XtermPane', () => {
     await flushPromises()
   })
 
+  it('飞行中尺寸再次变化：settle 后补发一轮，PTY 最终收到最后一次尺寸（尾沿补偿 — review 0.1.2 审计修复）', async () => {
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    // 先建立记账（80×24），避免把初始化同步误算成尾沿漂移
+    t.handlers.resize!({})
+    await flushPromises()
+    ;(wslAPI.terminal.resize as ReturnType<typeof vi.fn>).mockClear()
+
+    let releaseFirst!: () => void
+    wslAPI.terminal.resize.mockReturnValueOnce(
+      new Promise<void>((r) => {
+        releaseFirst = r
+      }),
+    )
+    t.cols = 100
+    t.rows = 30
+    t.handlers.resize!({})
+    await flushPromises()
+    expect(wslAPI.terminal.resize).toHaveBeenCalledTimes(1)
+
+    // 飞行中尺寸再次变化：单飞复用旧 promise（不重复 IPC）
+    t.cols = 120
+    t.rows = 40
+    t.handlers.resize!({})
+    await flushPromises()
+    expect(wslAPI.terminal.resize).toHaveBeenCalledTimes(1)
+
+    // 放行首轮：settle 后必须复查 drifted 并补发一轮（否则此后无输出/无 resize 就停留旧尺寸）
+    releaseFirst()
+    await flushPromises()
+    expect(wslAPI.terminal.resize).toHaveBeenCalledTimes(2)
+    expect(wslAPI.terminal.resize).toHaveBeenLastCalledWith('p1', 120, 40)
+  })
+
   it('尺寸同步失败节流：同一失败只提示一次，成功后重置（review 0.1.2 根治）', async () => {
     mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
     await flushPromises()

@@ -260,7 +260,7 @@ describe('自动更新服务（M7 §17）', () => {
     }
   })
 
-  it('install：quitAndInstall 抛错时异常原样抛给调用方、状态不被篡改（按实现如实锁定）', async () => {
+  it('install：quitAndInstall 抛错映射 TASK_FAILED 可行动错误 + 状态落 error（review 0.1.2 审计修复）', async () => {
     const updater = makeUpdater()
     const svc = createUpdateService({
       logger,
@@ -279,17 +279,24 @@ describe('自动更新服务（M7 §17）', () => {
     })
     await svc.download()
 
-    // 实现无 try/catch：quitAndInstall 的异常同步冒泡给调用方（不吞错），状态保持 downloaded
     updater.quitAndInstall.mockImplementationOnce(() => {
       throw new Error('elevation denied')
     })
-    expect(() => svc.install()).toThrow('elevation denied')
-    expect(svc.getState().status).toBe('downloaded')
-    expect(svc.getState().error).toBeUndefined()
-
-    // 失败未破坏状态机：重试仍会再次调用（由用户/调用方决定，不静默重试也不锁死）
-    svc.install()
-    expect(updater.quitAndInstall).toHaveBeenCalledTimes(2)
+    // 原实现让异常以 UNKNOWN 冒泡、状态停在 downloaded；现必须映射为可行动 TASK_FAILED 并落 error
+    let thrown: unknown
+    try {
+      svc.install()
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toMatchObject({
+      code: 'TASK_FAILED',
+      message: '启动更新安装失败',
+      detail: 'elevation denied',
+    })
+    expect(svc.getState().status).toBe('error')
+    expect(svc.getState().error).toBe('elevation denied')
+    expect(logger.warn).toHaveBeenCalledWith('quitAndInstall failed', { error: 'elevation denied' })
   })
 
   it('初始状态可查询（update:status 用）；feedUrl 从 getFeedURL 回填（非幽灵字段）', async () => {

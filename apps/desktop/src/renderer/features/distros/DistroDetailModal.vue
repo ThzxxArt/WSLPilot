@@ -614,7 +614,10 @@ async function saveMeta() {
       </n-tab-pane>
 
       <!-- 文件 -->
-      <n-tab-pane name="files" tab="文件">
+      <!-- display-directive=show（review 0.1.2 审计修复）：
+           根因：默认 'if' 在切页签时卸载 FileBrowserPanel，本地 dirty 无提示销毁；
+           与 config 页签同策略常驻后，watch props 的切换/关窗确认仍生效 -->
+      <n-tab-pane name="files" tab="文件" display-directive="show">
         <FileBrowserPanel
           ref="filePanel"
           :distro-name="distroName"

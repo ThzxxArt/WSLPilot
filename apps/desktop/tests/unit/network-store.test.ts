@@ -133,6 +133,56 @@ describe('useNetworkStore', () => {
     expect(s.appliedCount).toBe(1)
   })
 
+  it('非 silent 在途期间 silent 轮询完成，不吞掉 loading 复位（review 0.1.2 审计修复）', async () => {
+    // 根因回归：非 silent 请求挂起 → silent 轮询自增 statusGen → 旧 finally 因世代不符
+    // 永远清不掉 statusLoading，silent 又不清 → 刷新按钮永久转圈
+    let resolveNonSilent!: (v: NetworkStatus) => void
+    wslAPI.network.status
+      .mockReturnValueOnce(
+        new Promise<NetworkStatus>((r) => {
+          resolveNonSilent = r
+        }) as never,
+      )
+      .mockResolvedValueOnce(STATUS)
+    const s = useNetworkStore()
+    const p = s.loadStatus()
+    expect(s.statusLoading).toBe(true)
+
+    await s.loadStatus({ silent: true })
+    // silent 不参与 loading 记账：非 silent 仍在途，按钮保持 loading
+    expect(s.statusLoading).toBe(true)
+
+    resolveNonSilent(STATUS)
+    await p
+    expect(s.statusLoading).toBe(false)
+  })
+
+  it('后发起的非 silent 请求接管 loading，旧请求完成不复位新 loading（review 0.1.2 审计修复）', async () => {
+    let resolveFirst!: (v: NetworkStatus) => void
+    let resolveSecond!: (v: NetworkStatus) => void
+    wslAPI.network.status
+      .mockReturnValueOnce(
+        new Promise<NetworkStatus>((r) => {
+          resolveFirst = r
+        }) as never,
+      )
+      .mockReturnValueOnce(
+        new Promise<NetworkStatus>((r) => {
+          resolveSecond = r
+        }) as never,
+      )
+    const s = useNetworkStore()
+    const p1 = s.loadStatus()
+    const p2 = s.loadStatus()
+    resolveFirst(STATUS)
+    await p1
+    // 旧 owner 不得清掉后发起请求点亮的 loading
+    expect(s.statusLoading).toBe(true)
+    resolveSecond(STATUS)
+    await p2
+    expect(s.statusLoading).toBe(false)
+  })
+
   it('upsert 新增与更新', async () => {
     wslAPI.network.saveRules.mockResolvedValue({})
     const s = useNetworkStore()

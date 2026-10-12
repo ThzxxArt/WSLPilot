@@ -8,7 +8,7 @@
  * - 开发/未打包环境：check 明确报「开发模式不检查更新」，不产生假状态
  */
 import type { Logger } from '@wslpilot/kit'
-import type { UpdateState } from '@wslpilot/shared'
+import { createAppError, type UpdateState } from '@wslpilot/shared'
 
 /** electron-updater 的最小接口（测试注入；与 AppUpdater 对齐） */
 export interface UpdaterLike {
@@ -202,7 +202,16 @@ export function createUpdateService(deps: UpdateServiceDeps): UpdateService {
       return
     }
     logger.info('quit and install update', { version: state.version })
-    u.quitAndInstall(false, true)
+    try {
+      u.quitAndInstall(false, true)
+    } catch (e) {
+      // review 0.1.2 审计修复：quitAndInstall 同步抛错此前以 UNKNOWN 冒泡、状态停在 downloaded；
+      // 现映射为可行动 TASK_FAILED 并落 error 状态，UI 与调用方都能读到原因。
+      const msg = errorMessage(e)
+      logger.warn('quitAndInstall failed', { error: msg })
+      emit({ status: 'error', error: msg })
+      throw createAppError('TASK_FAILED', { message: '启动更新安装失败', detail: msg })
+    }
   }
 
   return {

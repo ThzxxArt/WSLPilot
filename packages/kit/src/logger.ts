@@ -129,16 +129,28 @@ export function createLogger(userDataDir: string, level: LogLevel = 'info'): Log
 /**
  * 保留清理（review 0.1.2）：
  * 1. 按**文件名日期**（本地时区日键）删除超过 LOG_RETENTION_DAYS 的日志；
- * 2. 删除后总量仍超 LOG_RETENTION_MAX_BYTES 时，从最旧开始删到不超为止。
+ * 2. 删除后总量仍超 LOG_RETENTION_MAX_BYTES 时，从最旧开始删到不超为止；
+ *    今日文件（可能在写）与保留集中最新一天永不参与总量删除（review 0.1.2 审计修复：
+ *    此前今日大文件会被当「最旧可删」清掉，含正在写的数据）。
  * 失败静默（日志维护不阻断主流程）。
  */
 async function cleanupOldLogs(dir: string): Promise<void> {
   try {
     const names = (await fs.readdir(dir)).filter((f) => /^app-\d{8}\.log$/.test(f)).sort()
     if (names.length === 0) return
+    const todayName = `app-${formatDayKey(new Date())}.log`
     const cutoffMs = Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
     const kept: Array<{ name: string; size: number }> = []
     for (const name of names) {
+      if (name === todayName) {
+        // 今日文件不参与年龄删除（防时钟回拨等极端场景把正在写的文件当过期删）
+        try {
+          kept.push({ name, size: (await fs.stat(join(dir, name))).size })
+        } catch {
+          /* 读不到则忽略 */
+        }
+        continue
+      }
       const key = name.slice(4, 12)
       // 本地时区零点（与 dayKey 的本地日界一致）
       const at = new Date(
@@ -158,9 +170,12 @@ async function cleanupOldLogs(dir: string): Promise<void> {
       }
       kept.push({ name, size })
     }
+    // 保留集中最后一项即最新一天：总量删除必须至少留下它（review 0.1.2 审计修复）
+    const newestKept = kept.length > 0 ? kept[kept.length - 1]!.name : undefined
     let total = kept.reduce((s, f) => s + f.size, 0)
     for (const f of kept) {
       if (total <= LOG_RETENTION_MAX_BYTES) break
+      if (f.name === todayName || f.name === newestKept) continue
       await fs.rm(join(dir, f.name), { force: true })
       total -= f.size
     }

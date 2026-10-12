@@ -66,6 +66,12 @@ export interface TaskRunner {
   list(): TaskRecord[]
   /** 等待任务进入终态（测试与编排用） */
   waitFor(taskId: string): Promise<TaskRecord>
+  /**
+   * 与同 lockKey 任务严格互斥地执行一段逻辑（不建 TaskRecord）。
+   * review 0.1.2 审计修复：handler 级「检查后操作」需要原子性（如注销前查重），
+   * 复用 tasks 的串行锁排队；fn 的异常照常抛给调用方。
+   */
+  runExclusive<T>(lockKey: string, fn: () => Promise<T>): Promise<T>
   /** 取消全部任务并清空锁（退出时调用） */
   dispose(): void
 }
@@ -255,6 +261,23 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
     )
   }
 
+  /**
+   * 与 enqueue 同一把 locks：排在队尾，且后续任务/排他段都排在它之后。
+   * 返回链保留拒绝（异常照常抛给调用方）；存入 Map 的副本吞掉拒绝，防毒化后续排队。
+   */
+  function runExclusive<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+    const prev = locks.get(lockKey) ?? Promise.resolve()
+    const next = prev.then(fn, fn)
+    locks.set(
+      lockKey,
+      next.then(
+        () => {},
+        () => {},
+      ),
+    )
+    return next
+  }
+
   return {
     start(opts): TaskHandle {
       if (disposed) {
@@ -324,6 +347,8 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
         set.add(resolve)
       })
     },
+
+    runExclusive,
 
     dispose() {
       disposed = true

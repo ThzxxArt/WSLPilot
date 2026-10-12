@@ -95,7 +95,11 @@ watch(
   async (name) => {
     if (!name || name === currentName.value) return
     // 先确认再切：点「留在此页」时不重载，并还原发行版选择（绝不静默丢编辑）
-    if (!(await confirmDiscard())) {
+    const ok = await confirmDiscard()
+    // review 0.1.2 审计修复：等待确认期间父级可能被另一面板 restore-distro 拉回或再次切换；
+    // 根因：await 后未复验 props，旧续体仍按旧目标重载/回退 → 视图串台。
+    if (props.distroName !== name) return
+    if (!ok) {
       emit('restore-distro', currentName.value)
       return
     }

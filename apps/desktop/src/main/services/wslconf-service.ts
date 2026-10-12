@@ -10,6 +10,7 @@ import {
   parseIniLines,
   WSL_CONF_MAX_BYTES,
   type WslConfChange,
+  type WslConfWriteResult,
 } from '@wslpilot/shared'
 import { runWsl, runWslWithStdin, type Logger } from '@wslpilot/kit'
 
@@ -22,6 +23,17 @@ export interface WslConfService {
   read(name: string): Promise<string>
   /** 写入原文（root tee）；内容必须可按 INI 解析 */
   write(name: string, content: string): Promise<void>
+  /**
+   * 写入（root tee）后按需 `wsl --terminate`，两步在同一 per-distro 队列内执行。
+   * review 0.1.2 审计修复：terminate 此前在写队列之外，并发保存会落在
+   * 另一次写的 terminate 窗口内；同队列保证 写1→terminate1→写2 严格有序。
+   * terminate 失败不回滚已完成的写入（返回 terminateError 供 UI 提示手动重启）。
+   */
+  writeAndMaybeTerminate(
+    name: string,
+    content: string,
+    terminate: boolean,
+  ): Promise<WslConfWriteResult>
 }
 
 export type RunWslFn = (
@@ -42,6 +54,8 @@ export interface WslConfServiceDeps {
   logger: Logger
   runWsl?: RunWslFn
   runWslWithStdin?: RunWslStdinFn
+  /** 发行版终止（8 秒规则）；由装配处注入 wsl.terminate，纳入写队列内调用 */
+  terminate?: (name: string) => Promise<void>
 }
 
 /**
@@ -109,6 +123,33 @@ export function createWslConfService(deps: WslConfServiceDeps): WslConfService {
     return p
   }
 
+  /** 队列内的实际写入体（root tee + stdin）；校验在入队前完成 */
+  async function writeBody(distro: string, body: string): Promise<void> {
+    deps.logger.info('wsl.conf write', { distro, bytes: Buffer.byteLength(body, 'utf8') })
+    const r = await runIn(['-d', distro, '-u', 'root', '-e', 'tee', WSL_CONF_PATH], body, {
+      timeoutMs: 20_000,
+    })
+    if (r.code !== 0) {
+      const text = `${r.stderr}\n${r.stdout}`
+      const denied = PERMISSION_RE.test(text)
+      throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
+        message: `写入 ${distro} 的 wsl.conf 失败`,
+        detail: text.trim(),
+        rawCommand: `wsl.exe -d ${distro} -u root -e tee ${WSL_CONF_PATH}`,
+        suggestion: denied
+          ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
+          : '请查看原始输出并重试',
+      })
+    }
+  }
+
+  function parseWriteArgs(name: string, content: string): { distro: string; body: string } {
+    const distro = assertSafeDistroName(name)
+    const body = String(content ?? '')
+    assertParsableWslConf(body)
+    return { distro, body }
+  }
+
   return {
     async read(name) {
       const distro = assertSafeDistroName(name)
@@ -130,25 +171,30 @@ export function createWslConfService(deps: WslConfServiceDeps): WslConfService {
     },
 
     async write(name, content) {
-      const distro = assertSafeDistroName(name)
-      const body = String(content ?? '')
-      assertParsableWslConf(body)
+      const { distro, body } = parseWriteArgs(name, content)
+      return enqueue(distro.toLowerCase(), () => writeBody(distro, body))
+    },
+
+    async writeAndMaybeTerminate(name, content, terminate) {
+      const { distro, body } = parseWriteArgs(name, content)
       return enqueue(distro.toLowerCase(), async () => {
-        deps.logger.info('wsl.conf write', { distro, bytes: Buffer.byteLength(body, 'utf8') })
-        const r = await runIn(['-d', distro, '-u', 'root', '-e', 'tee', WSL_CONF_PATH], body, {
-          timeoutMs: 20_000,
-        })
-        if (r.code !== 0) {
-          const text = `${r.stderr}\n${r.stdout}`
-          const denied = PERMISSION_RE.test(text)
-          throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
-            message: `写入 ${distro} 的 wsl.conf 失败`,
-            detail: text.trim(),
-            rawCommand: `wsl.exe -d ${distro} -u root -e tee ${WSL_CONF_PATH}`,
-            suggestion: denied
-              ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
-              : '请查看原始输出并重试',
-          })
+        await writeBody(distro, body)
+        if (!terminate) return { terminated: false }
+        const stop = deps.terminate
+        if (!stop) {
+          // 装配缺失不得静默假装已终止（消灭静默旁路）
+          deps.logger.warn('wslconf terminate requested but not wired', { distro })
+          return { terminated: false, terminateError: 'terminate 未装配，配置将在下次启动时生效' }
+        }
+        try {
+          await stop(distro)
+          return { terminated: true }
+        } catch (e) {
+          // 文件已写成功 —— terminate 失败只影响「8 秒规则是否立即生效」，
+          // 不得把整次写入当作失败（返回可读原因，由 UI 提示手动重启）
+          const msg = e instanceof Error ? e.message : String(e)
+          deps.logger.warn('wslconf written but terminate failed', { distro, error: msg })
+          return { terminated: false, terminateError: msg }
         }
       })
     },

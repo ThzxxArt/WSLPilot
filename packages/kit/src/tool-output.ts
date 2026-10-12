@@ -33,8 +33,39 @@ function decodeUtf16BE(buf: Buffer): string {
 }
 
 /**
+ * UTF-32 解码（review 0.1.2 审计修复）。
+ * TextDecoder('utf-32le'/'utf-32be') 不在 Node 标准编码集内（Node 20 实测抛 RangeError），
+ * 先尝试（可用运行时即用原生），失败降级为按 4 字节代码点手动解码。
+ */
+function decodeUtf32LE(buf: Buffer): string {
+  const decoded = tryDecode('utf-32le', buf)
+  if (decoded !== null) return decoded
+  let out = ''
+  const end = buf.length - (buf.length % 4)
+  for (let i = 0; i < end; i += 4) {
+    const cp = buf.readUInt32LE(i)
+    out += cp <= 0x10ffff ? String.fromCodePoint(cp) : '\ufffd'
+  }
+  return out
+}
+
+function decodeUtf32BE(buf: Buffer): string {
+  const decoded = tryDecode('utf-32be', buf)
+  if (decoded !== null) return decoded
+  let out = ''
+  const end = buf.length - (buf.length % 4)
+  for (let i = 0; i < end; i += 4) {
+    const cp = buf.readUInt32BE(i)
+    out += cp <= 0x10ffff ? String.fromCodePoint(cp) : '\ufffd'
+  }
+  return out
+}
+
+/**
  * 解码 Windows 控制台工具输出：
  * 1. BOM 优先（review 0.1.2 根治：BOM 是最强编码信号）：
+ *    FF FE 00 00 → UTF-32LE；00 00 FE FF → UTF-32BE（必须先于 UTF-16 判定，
+ *    否则 FF FE 会被 UTF-16LE 抢先误判 — review 0.1.2 审计修复）；
  *    FF FE → UTF-16LE；FE FF → UTF-16BE；EF BB BF → UTF-8
  * 2. UTF-16LE 启发式（出现 NUL 且奇数位 NUL 不少于偶数位）→ utf16le，兼容 wsl.exe 形态
  * 3. 严格 UTF-8；失败则按 GBK（cp936）回退，再退 windows-1252 / latin1 保证不抛错
@@ -46,7 +77,13 @@ export function decodeToolOutput(buf: Buffer | Uint8Array | null | undefined): s
   if (!buf || buf.length === 0) return ''
   let b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf)
 
-  // ── 1. BOM 优先 ──
+  // ── 1. BOM 优先（UTF-32 先于 UTF-16：FF FE 00 00 与 UTF-16LE BOM 前两字节相同）──
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xfe && b[2] === 0x00 && b[3] === 0x00) {
+    return stripBom(decodeUtf32LE(b.subarray(4)))
+  }
+  if (b.length >= 4 && b[0] === 0x00 && b[1] === 0x00 && b[2] === 0xfe && b[3] === 0xff) {
+    return stripBom(decodeUtf32BE(b.subarray(4)))
+  }
   if (b.length >= 2 && b[0] === 0xff && b[1] === 0xfe) {
     return b.subarray(2).toString('utf16le').replace(/\0/g, '')
   }

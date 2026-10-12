@@ -112,7 +112,17 @@ function onResetSettings() {
           terminal: defaults.terminal,
           backup: defaults.backup,
         })
+        const loadErrorBefore = settings.loadErrorAt
         await settings.load()
+        /**
+         * review 0.1.2 审计修复：写盘成功 ≠ 界面刷新成功。
+         * 根因：load 失败会降级默认值但界面仍显示旧值，此前无条件报「已恢复默认设置」，
+         * 用户以为生效。刷新失败必须降级为 warning 并提示重启。
+         */
+        if (settings.lastError || settings.loadErrorAt > loadErrorBefore) {
+          message.warning('已恢复默认设置，界面刷新失败，请重启应用')
+          return
+        }
         selectedAccent.value = settings.accent
         applyAccentToDom(settings.accent as AccentName)
         message.success('已恢复默认设置')

@@ -146,6 +146,9 @@ describe('提权操作白名单（M7 §14.3）', () => {
     expect(isElevationError('Access is denied.')).toBe(true)
     expect(isElevationError('拒绝访问')).toBe(true)
     expect(isElevationError('This task requires elevated privileges')).toBe(true)
+    // 「elevation is required」形（review 0.1.2 审计修复漏语序）
+    expect(isElevationError('elevation is required')).toBe(true)
+    expect(isElevationError('Elevation is required to continue')).toBe(true)
     // Linux 风格权限错误（发行版内目录不可写等）不再触发无谓 UAC
     expect(isElevationError('permission denied')).toBe(false)
     expect(isElevationError('bash: /root/x: Permission denied')).toBe(false)

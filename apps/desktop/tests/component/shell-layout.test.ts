@@ -120,6 +120,42 @@ describe('SidebarNav', () => {
       writable: true,
     })
   })
+
+  it('窄屏时折叠按钮禁用且点击不写用户偏好；拉宽后恢复可切换（review 0.1.2 审计修复）', async () => {
+    const original = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 900, configurable: true, writable: true })
+    try {
+      const w = mount(SidebarNav, { props: { collapsed: false }, attachTo: document.body })
+      window.dispatchEvent(new Event('resize'))
+      await flushPromises()
+
+      const btn = w.find('.collapse-btn')
+      // 根因回归：窄屏 toggle 既展不开侧栏，还会把用户偏好写成 true
+      expect(btn.attributes('disabled')).toBeDefined()
+      expect(btn.attributes('title')).toContain('自动折叠')
+      await btn.trigger('click')
+      expect(w.emitted('update:collapsed')).toBeUndefined()
+
+      Object.defineProperty(window, 'innerWidth', {
+        value: 1280,
+        configurable: true,
+        writable: true,
+      })
+      window.dispatchEvent(new Event('resize'))
+      await flushPromises()
+      const wideBtn = w.find('.collapse-btn')
+      expect(wideBtn.attributes('disabled')).toBeUndefined()
+      await wideBtn.trigger('click')
+      // collapsed=false 的用户偏好未被窄屏 toggle 污染，拉宽后正常发出「折叠」
+      expect(w.emitted('update:collapsed')![0]).toEqual([true])
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        value: original,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
 })
 
 describe('TitleBar', () => {
@@ -185,6 +221,25 @@ describe('TitleBar', () => {
         value: original,
         configurable: true,
       })
+    }
+  })
+
+  it('wslAPI.app 缺失时窗口控制不抛同步 TypeError（review 0.1.2 审计修复）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const saved = wslAPI.app
+    try {
+      // 根因回归：window.wslAPI?.app.minimize() 在 app 缺失时同步 TypeError，.catch 兜不住
+      ;(wslAPI as { app?: unknown }).app = undefined
+      const w = mount(TitleBar, { attachTo: document.body })
+      const btns = w.findAll('.win-btn')
+      await btns[0]!.trigger('click')
+      await btns[1]!.trigger('click')
+      await btns[2]!.trigger('click')
+      await flushPromises()
+      expect(errSpy).not.toHaveBeenCalled()
+    } finally {
+      ;(wslAPI as { app?: unknown }).app = saved
+      errSpy.mockRestore()
     }
   })
 })

@@ -263,6 +263,8 @@ const api = {
     getVersion: (): Promise<string> => ipcRenderer.invoke(CH.appGetVersion),
     openConfigDir: (): Promise<void> => ipcRenderer.invoke(CH.appOpenConfigDir),
     openPath: (target: string): Promise<void> => ipcRenderer.invoke(CH.appOpenPath, target),
+    /** 用系统默认浏览器打开 http/https 外链（review 0.1.2 审计修复：openPath 只允许目录） */
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CH.appOpenExternal, url),
     pickDirectory: (defaultPath?: string): Promise<string | null> =>
       ipcRenderer.invoke(CH.appPickDirectory, defaultPath ? { defaultPath } : {}),
     pickSaveFile: (opts: {

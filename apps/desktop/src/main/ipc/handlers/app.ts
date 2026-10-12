@@ -129,6 +129,41 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
     }
   })
 
+  /**
+   * 外链打开（review 0.1.2 审计修复）：
+   * 根因：官网按钮误用 app:openPath（只允许目录）→ 100% 失败。新增专用通道。
+   * 协议白名单二次校验（schema 已挡一层）：URL 解析归一化后仅放行 http/https，
+   * `JaVaScRiPt:` 等大小写变体、file:/data: 一律拒绝；shell 失败映射为 AppError。
+   */
+  add(CH.appOpenExternal, async (_c, target: never): Promise<void> => {
+    const url = String(target)
+    let protocol = ''
+    try {
+      protocol = new URL(url).protocol
+    } catch {
+      throw createAppError('CONFIG_INVALID', {
+        message: '链接格式非法',
+        detail: url,
+      })
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw createAppError('PERMISSION_DENIED', {
+        message: '出于安全考虑只允许打开 http/https 链接',
+        detail: url,
+        suggestion: '请使用以 http:// 或 https:// 开头的合法链接',
+      })
+    }
+    try {
+      await shell.openExternal(url)
+    } catch (e) {
+      throw createAppError('IO_ERROR', {
+        message: '无法打开外部链接',
+        detail: e instanceof Error ? e.message : String(e),
+        suggestion: '请检查系统默认浏览器是否可用',
+      })
+    }
+  })
+
   // ── M7 诊断包 / 日志目录 / 签名状态 ──
   add(CH.diagnosticsOpenLogsDir, async (c): Promise<void> => {
     if (!c.diagnostics) {

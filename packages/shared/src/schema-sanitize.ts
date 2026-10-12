@@ -64,9 +64,10 @@ export function sanitizeWithSchema<T extends z.ZodTypeAny>(
 
     const retry = core.safeParse(out)
     if (retry.success) return retry.data as z.infer<T>
-    // 逐字段清洗后仍不满足 schema（缺必填/字段形态异常）：整对象回退默认值。
-    // 不得把「不满足 z.infer 契约」的对象当合法配置返回（此前 return out 属类型谎言 — review 0.1.2 根治）
-    if (defaults !== undefined) {
+    // 逐字段清洗后仍不满足 schema：仅当 out「键面残缺」（默认对象有键而 out 为 undefined 缺键）
+    // 才整对象回退默认值；否则返回 out —— 语义级 refine 失败（如 network.jsonc 重复 id）时
+    // 数据本身完整，整对象回退会把用户全部配置清空（review 0.1.2 审计修复：宁可保留用户数据）
+    if (defaults !== undefined && Object.keys(defaultObj).some((k) => out[k] === undefined)) {
       const fallback = core.safeParse(defaults)
       if (fallback.success) return fallback.data as z.infer<T>
     }

@@ -92,14 +92,21 @@ function makeCtl(overrides: Partial<TaskControl> = {}): TaskControl {
 
 type ToolCall = { program: string; args: string[] }
 
-function makeTool(results: Array<{ code?: number; stdout?: string; stderr?: string }>) {
+function makeTool(
+  results: Array<{ code?: number; stdout?: string; stderr?: string; truncated?: boolean }>,
+) {
   const calls: ToolCall[] = []
   let i = 0
   const fn = vi.fn(async (program: string, args: string[]) => {
     calls.push({ program, args })
     const r = results[Math.min(i, results.length - 1)] ?? { code: 0 }
     i++
-    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.code ?? 0 }
+    return {
+      stdout: r.stdout ?? '',
+      stderr: r.stderr ?? '',
+      code: r.code ?? 0,
+      ...(r.truncated ? { truncated: true } : {}),
+    }
   })
   return { fn, calls }
 }
@@ -192,6 +199,22 @@ describe('NetworkService.status', () => {
     // 查询失败 ≠ 确为空：抛错让渲染层如实展示（review 假成功根治）
     await expect(svc.status()).rejects.toMatchObject({ code: 'TASK_FAILED' })
     await expect(svc.status()).rejects.toThrow(/无法查询系统端口转发状态/)
+  })
+
+  it('netsh 输出截断 → TASK_FAILED（不得当完整转发表解析 — review 0.1.2 审计修复）', async () => {
+    const tool = makeTool([{ code: 0, stdout: '0.0.0.0 3000 127.0.0.1 3000', truncated: true }])
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      wslconfigPath: 'x',
+      readFile: async () => '',
+      runTool: tool.fn,
+      readWindowsProxy: async () => null,
+    })
+    await expect(svc.listPortProxy()).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+      message: expect.stringContaining('输出超限，无法可靠解析'),
+    })
   })
 })
 
@@ -624,6 +647,22 @@ describe('NetworkService 代理脚本', () => {
       runWsl,
     })
     await expect(svc.proxyState('Ubuntu')).rejects.toMatchObject({ code: 'IO_ERROR' })
+  })
+
+  it('proxyState：Distribution not found 不得误判为脚本不存在（review 0.1.2 审计修复）', async () => {
+    const runWsl = vi
+      .fn()
+      .mockResolvedValue({ code: 1, stdout: '', stderr: "Distribution 'Ubuntu' not found." })
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runWsl,
+    })
+    // 旧宽正则 /not found/ 会命中发行版报错并返回 exists:false（错误吞成默认值）
+    await expect(svc.proxyState('Ubuntu')).rejects.toMatchObject({
+      code: 'IO_ERROR',
+      message: expect.stringContaining('读取 Ubuntu 的代理脚本失败'),
+    })
   })
 
   it('proxyApply 写入脚本（含系统代理兜底）', async () => {

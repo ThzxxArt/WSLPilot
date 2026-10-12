@@ -195,7 +195,9 @@ async function bootstrap() {
   const io = createIoService({ logger, wsl, registry, configService, elevation })
 
   // M5：wsl.conf 编辑 / 自定义动作 / 发行版内文件桥
-  const wslconf = createWslConfService({ logger })
+  // review 0.1.2 审计修复：terminate 注入 wslconf 服务，使「写→terminate」在同一
+  // per-distro 队列内执行（并发保存不会落在另一次写的 terminate 窗口内）
+  const wslconf = createWslConfService({ logger, terminate: (n) => wsl.terminate(n) })
   const runner = createActionRunner({
     logger,
     configService,

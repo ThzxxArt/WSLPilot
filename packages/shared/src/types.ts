@@ -141,7 +141,7 @@ export interface PortProxyEntry {
   listenPort: number
   connectAddress: string
   connectPort: number
-  /** netsh 隧道类型（当前固定 v4tov4） */
+  /** netsh 隧道类型：v4tov4 / v6tov6（按 `netsh show all` 区段判定） */
   kind: string
 }
 

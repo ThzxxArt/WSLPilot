@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import { sanitizeWithSchema } from '../src/schema-sanitize'
-import { appSettingsSchema, defaultConfig, stateFileSchema } from '../src/config-schema'
+import {
+  appSettingsSchema,
+  defaultConfig,
+  networkFileSchema,
+  stateFileSchema,
+} from '../src/config-schema'
 
 describe('sanitizeWithSchema', () => {
   it('returns valid data unchanged', () => {
@@ -85,5 +90,61 @@ describe('sanitizeWithSchema', () => {
       defaultConfig('state'),
     ) as any
     expect(Object.keys(out.lastMetrics).sort()).toEqual(['a', 'c'])
+  })
+
+  it('network 重复 id（语义级 refine 失败）不得整对象回退清空用户配置 — review 0.1.2 审计修复', () => {
+    const defaults = defaultConfig('network') as any
+    const rules = [
+      {
+        id: 'dup',
+        distro: 'Ubuntu',
+        listenAddress: '0.0.0.0',
+        listenPort: 3000,
+        connectAddress: '127.0.0.1',
+        connectPort: 3000,
+        enabled: true,
+        protocol: 'tcp',
+      },
+      {
+        id: 'dup',
+        distro: 'Ubuntu',
+        listenAddress: '0.0.0.0',
+        listenPort: 3001,
+        connectAddress: '127.0.0.1',
+        connectPort: 3001,
+        enabled: true,
+        protocol: 'tcp',
+      },
+    ]
+    const data = {
+      $schemaVersion: 1,
+      portForwarding: rules,
+      proxy: {
+        useWindowsProxy: true,
+        httpProxy: 'http://127.0.0.1:7890',
+        httpsProxy: 'http://127.0.0.1:7891',
+        noProxy: 'localhost',
+      },
+    }
+    const out = sanitizeWithSchema(networkFileSchema, data, defaults) as any
+    // 数据完整、仅 refine（重复 id）失败：原样保留用户规则与代理，绝不回退默认空表
+    expect(out.portForwarding).toHaveLength(2)
+    expect(out.portForwarding.map((r: any) => r.id)).toEqual(['dup', 'dup'])
+    expect(out.portForwarding[1]!.listenPort).toBe(3001)
+    expect(out.proxy).toEqual(data.proxy)
+    expect(out.portForwarding).not.toEqual(defaults.portForwarding)
+  })
+
+  it('输出键面残缺（默认对象有键而 out 缺键）时仍整对象回退默认值 — review 0.1.2 审计修复', () => {
+    // 直接验证对象分支回退判定：字段级 refine 让 retry 失败（顶层 effects 会被 unwrap 剥离，
+    // 必须把 refine 放在字段 schema 上）；defaults 含 shape 外键（旧版遗留键）→ out 键面残缺
+    const inner = z.object({ a: z.number().default(1) }).superRefine((v, ctx) => {
+      if (v.a === 5) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'a=5 拒绝' })
+    })
+    const schema = z.object({ inner: inner.default({}) })
+    const defaults = { inner: { a: 1 }, legacy: 7 } as any
+    const out = sanitizeWithSchema(schema, { inner: { a: 5 } }, defaults)
+    // 若未回退，out.inner.a 会是清洗后的 5；回退后为默认 1
+    expect(out.inner.a).toBe(1)
   })
 })

@@ -278,10 +278,6 @@ export const ELEVATION_SUGGESTION =
 
 /**
  * 提权类失败识别（中英文 Windows 报错）。
- * 直接执行被拒绝时，服务层改由提权助手执行（设计书 §14.3）。
- */
-/**
- * 提权类失败识别（中英文 Windows 报错）。
  *
  * 收窄原则（review 0.1.2 根治）：只认**明确的 UAC/管理员语境**——
  * - 不再匹配裸 `permission denied`：Linux 风格的权限错误（发行版内目录不可写等）
@@ -290,7 +286,7 @@ export const ELEVATION_SUGGESTION =
  * - 漏判代价（错误照常上报 + 等价命令可用）小于误判代价（打断用户强弹 UAC）。
  */
 export function isElevationError(text: string): boolean {
-  return /requires?\s+elevation|elevation required|elevat(?:ed|ion)\s+(?:privileges|permissions|to)|run as administrator|administrator\s+privileges|请求的操作需要提升|需要提升|以管理员|拒绝访问|access\s+is\s+denied|access\s+denied/i.test(
+  return /requires?\s+elevation|elevation\s+(?:is\s+)?required|elevat(?:ed|ion)\s+(?:privileges|permissions|to)|run as administrator|administrator\s+privileges|请求的操作需要提升|需要提升|以管理员|拒绝访问|access\s+is\s+denied|access\s+denied/i.test(
     text,
   )
 }

@@ -49,6 +49,24 @@ export function isToolMissing(text: string): boolean {
   return /ENOENT|not recognized|不是内部或外部命令|找不到.*usbipd|no such file/i.test(text)
 }
 
+/**
+ * 输出截断消费（review 0.1.2 审计修复）：kit 已标记 truncated 但此前无人检查，
+ * 截断输出被当完整结果解析。凡解析 stdout 的调用点必须先过此守卫。
+ */
+function assertParsableOutput(
+  r: { truncated?: boolean },
+  message: string,
+  rawCommand: string,
+): void {
+  if (r.truncated !== true) return
+  throw createAppError('TASK_FAILED', {
+    message: `${message}：输出超限，无法可靠解析`,
+    detail: 'usbipd 输出超过缓冲区上限已被截断，不能当作完整结果使用',
+    rawCommand,
+    suggestion: '请减少设备数量后重试，或在终端执行上述命令查看完整输出',
+  })
+}
+
 function mapUsbipdFailure(
   r: { stdout: string; stderr: string; code: number },
   rawCommand: string,
@@ -135,10 +153,13 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
       ctl?.onCancel(() => ac.abort())
       logger.info('usbipd op', { op, busId: id, distro: target })
       const r = await tool('usbipd.exe', args, { timeoutMs: 30_000, signal: ac.signal })
-      if (ctl?.isCanceled()) {
+      if (r.code === 0) return
+      // review 0.1.2 审计修复：成功优先 —— 原实现先看 isCanceled()，取消信号在成功收尾
+      // 窗口到达时会把已完成的 usbipd 操作改判 TASK_CANCELED。仅在取消已请求
+      // （或子进程被 abort）且执行失败时才映射取消。
+      if (ctl?.isCanceled() || r.aborted === true) {
         throw createAppError('TASK_CANCELED', { message: `usbipd ${op} 已取消（${id}）` })
       }
-      if (r.code === 0) return
       const text = `${r.stderr}\n${r.stdout}`
       // bind / unbind 需要管理员权限：直接执行被拒 → 提权助手（一次 UAC；§14.3）
       if (isElevationError(text) && deps.elevation && (op === 'bind' || op === 'unbind')) {
@@ -162,6 +183,7 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
   return {
     async status(): Promise<UsbipdStatus> {
       const r = await tool('usbipd.exe', ['--version'], { timeoutMs: 10_000 })
+      assertParsableOutput(r, '读取 usbipd 版本失败', 'usbipd.exe --version')
       const text = `${r.stdout}\n${r.stderr}`.trim()
       if (r.code !== 0 && isToolMissing(text)) {
         return { installed: false, version: '' }
@@ -185,6 +207,7 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
 
     async list(): Promise<UsbDevice[]> {
       const r = await tool('usbipd.exe', ['list'], { timeoutMs: 15_000 })
+      assertParsableOutput(r, '读取 USB 设备列表失败', 'usbipd.exe list')
       const text = `${r.stdout}\n${r.stderr}`
       if (r.code !== 0 && isToolMissing(text)) {
         throw createAppError('TASK_FAILED', {

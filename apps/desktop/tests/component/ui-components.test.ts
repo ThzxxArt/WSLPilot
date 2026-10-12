@@ -129,11 +129,18 @@ describe('MetricCard', () => {
     }
   })
 
-  it('字符串数字（props 类型允许）不参与动画，直接展示（review 0.1.2）', async () => {
-    const w = mount(MetricCard, { props: { label: 'CPU', value: 0 } })
-    await w.setProps({ value: '42' })
-    // 若被错误送入 rAF 动画，首帧仍在起点（0），不会立即等于 42
-    expect(w.find('.metric-value').text()).toBe('42')
+  it('字符串数字不触发数值动画（rAF 不被调度，直接展示）— review 0.1.2 审计修复假覆盖', async () => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame')
+    try {
+      const w = mount(MetricCard, { props: { label: 'CPU', value: 0 } })
+      raf.mockClear()
+      await w.setProps({ value: '42' })
+      // 若实现把字符串数字送入动画，会调度 rAF → 此断言失败
+      expect(raf).not.toHaveBeenCalled()
+      expect(w.find('.metric-value').text()).toBe('42')
+    } finally {
+      raf.mockRestore()
+    }
   })
 
   it('动画中途开启 reduced-motion：取消动画并立即落终值（review 0.1.2）', async () => {
@@ -157,7 +164,8 @@ describe('MetricCard', () => {
 
 describe('ProgressRing 尺寸守卫与渐变令牌（review 0.1.2）', () => {
   it('stroke ≥ size 时半径 clamp 到 0（不产出负 r）', () => {
-    const w = mount(ProgressRing, { props: { percent: 50, size: 20, stroke: 20 } })
+    // stroke = size 的 1.2 倍：旧实现得 (20-24)/2 = -2，此用例在旧代码必失败（review 0.1.2 审计修复假覆盖）
+    const w = mount(ProgressRing, { props: { percent: 50, size: 20, stroke: 24 } })
     const r = Number(w.get('circle.value').attributes('r'))
     expect(Number.isFinite(r)).toBe(true)
     expect(r).toBe(0)
@@ -166,13 +174,17 @@ describe('ProgressRing 尺寸守卫与渐变令牌（review 0.1.2）', () => {
     expect(w.text()).toContain('50%')
   })
 
-  it('默认渐变色停来自 shared PRIMITIVE_GRADIENTS.aurora（禁手写 hex）', () => {
+  it('默认渐变色停派生自 shared PRIMITIVE_GRADIENTS.aurora（非硬编码默认值）', () => {
     const w = mount(ProgressRing, { props: { percent: 10 } })
+    const expected = primitiveGradients.aurora.match(/#[0-9a-f]{6}/gi) ?? []
+    expect(expected.length).toBeGreaterThanOrEqual(2)
     const stops = w.findAll('linearGradient stop')
-    const from = stops[0]!.attributes('stop-color')!
-    const to = stops[1]!.attributes('stop-color')!
-    expect(primitiveGradients.aurora).toContain(from)
-    expect(primitiveGradients.aurora).toContain(to)
+    expect(stops[0]!.attributes('stop-color')).toBe(expected[0])
+    expect(stops[1]!.attributes('stop-color')).toBe(expected[1])
+    // 旧实现把 hex 写死在 props 默认值（#22D3EE/#6366F1）；令牌解析实现默认必须为空串 —
+    // 回退硬编码默认值即失败（令牌变更时渲染不再联动）— review 0.1.2 审计修复假覆盖
+    expect(w.props('gradientFrom')).toBe('')
+    expect(w.props('gradientTo')).toBe('')
   })
 })
 

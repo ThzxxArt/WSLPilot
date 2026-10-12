@@ -152,15 +152,20 @@ async function saveFile() {
     return
   }
   // 跨发行版串写防护：文件属于哪个发行版就写回哪个（review 0.1.2 根治）
-  if (f.distro !== props.distroName) {
+  // 大小写归一（review 0.1.2 审计修复）：WSL 名不区分大小写，Ubuntu/ubuntu 同一发行版
+  if (f.distro.toLowerCase() !== props.distroName.toLowerCase()) {
     message.warning('发行版已切换，已阻止跨发行版写回；请重新打开文件后再保存')
     return
   }
+  // 保存快照：写盘以点击时文本为准（review 0.1.2 审计修复；
+  // 根因：await 后无条件清 dirty，保存期间的新输入会被误标为已保存 → 假干净）
+  const snapshot = f.text
   saving.value = true
   try {
-    await window.wslAPI.fs.write(f.distro, f.path, f.text)
-    // 保存期间视图若已被替换，只提示成功，不把脏标记落到别人的文件上
-    if (file.value === f) f.dirty = false
+    await window.wslAPI.fs.write(f.distro, f.path, snapshot)
+    // 保存期间视图若已被替换，只提示成功，不把脏标记落到别人的文件上；
+    // 文本若已不再等于已保存快照（保存期间又改了），保留 dirty，绝不假干净
+    if (file.value === f && f.text === snapshot) f.dirty = false
     message.success(`已保存 ${f.path}`)
   } catch (e) {
     message.error(errorLine(e, '写入文件失败'))
@@ -210,7 +215,11 @@ watch(
     if (!name || name === currentName.value) return
     // 发行版切换同样先确认；取消时回退父级选择（与 WslConfPanel 对齐，绝不静默丢文件编辑）
     // — review 0.1.2 根治：此前仅 return，父级停在未载入的新发行版上
-    if (!(await confirmDiscard())) {
+    const ok = await confirmDiscard()
+    // review 0.1.2 审计修复：等待确认期间父级可能被另一面板 restore-distro 拉回或再次切换；
+    // 根因：await 后未复验 props，旧续体仍按旧目标载入/回退 → 视图串台。
+    if (props.distroName !== name) return
+    if (!ok) {
       emit('restore-distro', currentName.value)
       return
     }
@@ -324,7 +333,7 @@ defineExpose({ confirmDiscard })
         <CodeEditor
           v-if="!file.binary"
           :model-value="file.text"
-          :readonly="file.truncated"
+          :readonly="file.truncated || saving"
           :min-height="260"
           :placeholder="file.path"
           @update:model-value="onEdit"

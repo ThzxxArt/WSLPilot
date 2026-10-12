@@ -185,13 +185,81 @@ describe('App 全局错误兜底（review 0.1.2）', () => {
     try {
       const w = mount(App, {
         attachTo: document.body,
-        global: { stubs: { ...stubs, DefaultLayout: Boom } },
+        global: {
+          stubs: { ...stubs, DefaultLayout: Boom },
+          // 生产由 main.ts installGlobalErrorHandling 兜住传播；测试显式装配同款 handler，
+          // 否则 Vue dev 模式对「无 app.config.errorHandler 的未捕获错误」会直接 rethrow
+          config: { errorHandler: vi.fn() },
+        },
       })
       await flushPromises()
       expect(w.find('.fatal-screen').exists()).toBe(true)
       expect(w.text()).toContain('渲染炸了')
       expect(w.find('.fatal-reload').exists()).toBe(true)
       expect(errSpy).toHaveBeenCalled()
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+
+  it('降级面板「返回应用」清除 fatalError 复位重渲染（review 0.1.2 审计修复）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // 只炸一次的子树：复位重渲染后必须能正常挂载（验证真的恢复而非再次降级）
+    let shouldThrow = true
+    const BoomOnce = {
+      name: 'BoomOnce',
+      setup() {
+        if (shouldThrow) {
+          shouldThrow = false
+          throw new Error('瞬时渲染错误')
+        }
+        return () => null
+      },
+    }
+    try {
+      const w = mount(App, {
+        attachTo: document.body,
+        global: {
+          stubs: { ...stubs, DefaultLayout: BoomOnce },
+          config: { errorHandler: vi.fn() },
+        },
+      })
+      await flushPromises()
+      expect(w.find('.fatal-screen').exists()).toBe(true)
+      expect(w.find('.fatal-back').exists()).toBe(true)
+
+      await w.find('.fatal-back').trigger('click')
+      await flushPromises()
+      // fatalError 清除后重渲染真实壳（此前只有整壳重载一条出路）
+      expect(w.find('.fatal-screen').exists()).toBe(false)
+      expect(w.find('.pilot-shell').exists()).toBe(true)
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+
+  it('onErrorCaptured 不再阻断传播：全局 errorHandler 同时收到错误（review 0.1.2 审计修复）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const globalHandler = vi.fn()
+    const Boom = {
+      name: 'Boom',
+      setup() {
+        throw new Error('传播检查')
+      },
+    }
+    try {
+      mount(App, {
+        attachTo: document.body,
+        global: {
+          stubs: { ...stubs, DefaultLayout: Boom },
+          config: { errorHandler: globalHandler },
+        },
+      })
+      await flushPromises()
+      // 根因回归：此前 return false 阻断传播，全局 handler 永不执行
+      expect(globalHandler).toHaveBeenCalledTimes(1)
+      expect(globalHandler.mock.calls[0]![0]).toBeInstanceOf(Error)
+      expect((globalHandler.mock.calls[0]![0] as Error).message).toBe('传播检查')
     } finally {
       errSpy.mockRestore()
     }

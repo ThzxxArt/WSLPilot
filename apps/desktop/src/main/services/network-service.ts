@@ -102,7 +102,24 @@ export interface NetworkService {
 /** 提权类失败识别（中英文 Windows 报错）— 唯一事实源在 shared/elevation（M7 提权助手共用） */
 export { isElevationError } from '@wslpilot/shared'
 
-const NOT_FOUND_RE = /no such file|not found|cannot open|没有那个文件|找不到/i
+/**
+ * 代理脚本「不存在」的收窄识别（review 0.1.2 审计修复）：
+ * 原裸 `not found` 会把「Distribution 'X' not found」误判为「脚本不存在 → exists:false」。
+ * 与 wslconf-service 同策略：要求命中 cat 语境行或显式「文件/路径」语境。
+ */
+const NOT_FOUND_RE = new RegExp(
+  [
+    // `cat: /etc/profile.d/wslpilot-proxy.sh: No such file or directory` / 中文同义
+    String.raw`cat\s*:[^\r\n]*(?:no such file|not found|没有那个文件|找不到)`,
+    // 以代理脚本路径为主语的 no-such-file 文案（部分 cat 实现不带工具名前缀）
+    String.raw`/etc/profile\.d/wslpilot-proxy\.sh[^\r\n]*(?:no such file|not found|没有那个文件|找不到)`,
+    String.raw`no such file or directory`,
+    String.raw`没有那个文件或目录`,
+    String.raw`cannot open[^\r\n]*(?:file|文件)`,
+    String.raw`文件不存在`,
+  ].join('|'),
+  'i',
+)
 
 /** Windows 系统代理（HKCU Internet Settings）；读不到返回 null，不阻断主流程 */
 export async function readWindowsProxyFromRegistry(
@@ -276,6 +293,15 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
   async function listPortProxy(): Promise<PortProxyEntry[]> {
     try {
       const r = await tool('netsh.exe', buildPortProxyShowArgs(), { timeoutMs: 15_000 })
+      // review 0.1.2 审计修复：截断输出不得当完整转发表解析（会丢条目 → 后续 find/删除判断错误）
+      if (r.truncated === true) {
+        throw createAppError('TASK_FAILED', {
+          message: '无法查询系统端口转发状态：输出超限，无法可靠解析',
+          detail: 'netsh 输出超过缓冲区上限已被截断，不能当作完整转发表使用',
+          rawCommand: 'netsh.exe interface portproxy show all',
+          suggestion: '请在管理员终端执行上述命令查看完整输出',
+        })
+      }
       if (r.code !== 0) {
         logger.warn('netsh portproxy show failed', { detail: `${r.stderr}\n${r.stdout}`.trim() })
         throw createAppError('TASK_FAILED', {

@@ -48,8 +48,8 @@ export default defineConfig({
       ],
       // ★ 硬门禁：低于阈值 CI 直接失败。
       // per-glob 两档（review 禁止虚高摆拍）——每档 = 实测值 −2pp 向下取整的诚实地板（防回归即可）。
-      // 实测（2026-10，0.1.2 全量补齐后）：ui 98.99/90.58/92.86（lines/branches/functions）；
-      // renderer 90.15/84.82/60.82。UI 测试持续补齐、地板随之抬升 —— 见 docs/testing.md。
+      // 实测（2026-10，0.1.2 独立审计修复后复测）：ui 98.99/90.58/92.86（lines/branches/functions）；
+      // renderer 90.22/85.23/61.12（333 用例）。UI 测试持续补齐、地板随之抬升 —— 见 docs/testing.md。
       thresholds: {
         'packages/ui/src/**': {
           lines: 96,
@@ -60,8 +60,8 @@ export default defineConfig({
         'apps/desktop/src/renderer/**': {
           lines: 88,
           statements: 88,
-          branches: 82,
-          functions: 58,
+          branches: 83,
+          functions: 59,
         },
       },
     },

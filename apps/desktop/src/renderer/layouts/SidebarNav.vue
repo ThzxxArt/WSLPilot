@@ -43,6 +43,9 @@ function go(name: string) {
 }
 
 function toggle() {
+  // review 0.1.2 审计修复：窄屏为强制折叠态（不覆盖用户偏好），此时 toggle
+  // 既展不开侧栏、还会把用户偏好写反；禁用入口，拉宽后自然恢复可切换。
+  if (narrow.value) return
   emit('update:collapsed', !props.collapsed)
 }
 </script>
@@ -74,6 +77,8 @@ function toggle() {
 
     <button
       class="collapse-btn"
+      :disabled="narrow"
+      :title="narrow ? '窗口过窄，侧栏自动折叠' : effectiveCollapsed ? '展开侧栏' : '折叠侧栏'"
       :aria-label="effectiveCollapsed ? '展开侧栏' : '折叠侧栏'"
       :aria-expanded="!effectiveCollapsed"
       @click="toggle"
@@ -106,13 +111,14 @@ function toggle() {
   flex: 1;
 }
 
+/* review 0.1.2 审计修复：硬编码 10px 与 ui 包 radius-md 令牌（12px）不一致，统一令牌化 */
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   height: 40px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 12px);
   color: var(--color-text-secondary);
   font-size: 13.5px;
   font-weight: 500;
@@ -158,6 +164,17 @@ function toggle() {
 .collapse-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
+}
+
+/* 窄屏强制折叠：toggle 不可用（review 0.1.2 审计修复） */
+.collapse-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.collapse-btn:disabled:hover {
+  background: none;
+  color: var(--color-text-tertiary);
 }
 
 .chevron {

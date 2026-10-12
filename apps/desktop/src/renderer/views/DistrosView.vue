@@ -364,9 +364,10 @@ function onDetailTerminal(name: string) {
   width: 160px;
 }
 
+/* review 0.1.2 审计修复：硬编码 10px 与 ui 包 radius-md 令牌（12px）不一致，统一令牌化 */
 .error-banner {
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 12px);
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
   color: var(--color-danger);
   font-size: 13px;

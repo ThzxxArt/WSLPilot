@@ -16,7 +16,7 @@ type AddFn = (
  */
 export function registerWslConfHandlers(
   add: AddFn,
-  deps: { wslconf: WslConfService; wsl: Pick<WslService, 'terminate' | 'assertRunning'> },
+  deps: { wslconf: WslConfService; wsl: Pick<WslService, 'assertRunning'> },
 ): void {
   add(CH.wslconfRead, async (_c, name: string) => {
     // 硬门禁（review：`wsl -d X -e cat` 会隐式启动发行版）：未运行不读
@@ -28,19 +28,11 @@ export function registerWslConfHandlers(
     CH.wslconfWrite,
     async (c, payload: { name: string; content: string }): Promise<WslConfWriteResult> => {
       await deps.wsl.assertRunning(payload.name)
-      await deps.wslconf.write(payload.name, payload.content)
       const autoStop = c.configService.loadSync('settings').wsl.autoShutdownAfterConfigChange
-      if (!autoStop) return { terminated: false }
-      try {
-        await deps.wsl.terminate(payload.name)
-        return { terminated: true }
-      } catch (e) {
-        // review 0.1.2 根治：文件已写成功 —— terminate 失败只影响「8 秒规则是否立即生效」，
-        // 不得把整次写入当作失败（返回可读原因，由 UI 提示手动重启）
-        const msg = e instanceof Error ? e.message : String(e)
-        c.logger.warn('wslconf written but terminate failed', { distro: payload.name, error: msg })
-        return { terminated: false, terminateError: msg }
-      }
+      // review 0.1.2 审计修复：terminate 此前在 per-distro 写队列之外，并发保存会落在
+      // 另一次写的 terminate 窗口内。现由 wslconf 服务在同一队列内执行 写→terminate，
+      // 保证 写1→terminate1→写2 严格有序；terminate 失败不回滚写入（服务内返回 terminateError）。
+      return deps.wslconf.writeAndMaybeTerminate(payload.name, payload.content, autoStop)
     },
   )
 }

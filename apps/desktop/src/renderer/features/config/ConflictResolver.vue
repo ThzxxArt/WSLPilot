@@ -53,15 +53,21 @@ function drain() {
   // resolve 必须幂等：naive 真实交互中 onEsc 与 onClose 可能先后触发同一次关闭，
   // 且按钮回调后 dialog 关闭还会再触发 onClose（review 根治）
   let resolved = false
+  // review 0.1.2 审计修复：naive 提供 action slot 时**替换**默认按钮，只有默认按钮路径才会自动 hide；
+  // 根因：finish 不关闭 dialog → 点「重载/覆盖/暂不处理」后旧框悬挂、队列继续弹 → 叠框恶化。
+  // 持有 dialog 实例，resolve 落地后显式 destroy（Esc/遮罩路径重复 destroy 为幂等 no-op）。
+  let inst: ReturnType<typeof dialog.warning> | null = null
   const finish = (action: ConflictAction) => {
     if (resolved) return
     resolved = true
     void resolve(payload.fileKey, action).finally(() => {
+      // 先收缩旧框，再让队列弹下一项（顺序保证：任何时刻至多一个冲突框在场）
+      inst?.destroy()
       showing = false
       drain()
     })
   }
-  dialog.warning({
+  inst = dialog.warning({
     title: '配置文件已被外部修改',
     // naive dialog 会吞掉纯文本里的 \n\n（渲染成一行）：改多段 VNode（review 0.1.2 根治）
     content: () =>

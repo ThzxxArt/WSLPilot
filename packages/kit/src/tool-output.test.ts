@@ -77,4 +77,26 @@ describe('decodeToolOutput', () => {
   it('UTF-8 BOM 被剥离', () => {
     expect(decodeToolOutput(Buffer.from([0xef, 0xbb, 0xbf, 0x68, 0x69]))).toBe('hi')
   })
+
+  it('UTF-32LE BOM（FF FE 00 00）优先于 UTF-16LE 判定 — review 0.1.2 审计修复', () => {
+    expect(
+      decodeToolOutput(Buffer.from([0xff, 0xfe, 0x00, 0x00, 0x41, 0, 0, 0, 0x42, 0, 0, 0])),
+    ).toBe('AB')
+    // 代理对代码点（😀 U+1F600）：旧实现按 UTF-16LE 解得 U+F600+U+0001，此断言在旧代码必失败
+    const emoji = Buffer.from([0xff, 0xfe, 0x00, 0x00, 0x00, 0xf6, 0x01, 0x00])
+    expect(decodeToolOutput(emoji)).toBe('😀')
+  })
+
+  it('UTF-32BE BOM（00 00 FE FF）解码（含代用对代码点）— review 0.1.2 审计修复', () => {
+    // U+1F600 😀 = 0x0001F600；BE 字节序
+    const buf = Buffer.from([
+      0x00, 0x00, 0xfe, 0xff, 0x00, 0x00, 0x00, 0x41, 0x00, 0x01, 0xf6, 0x00,
+    ])
+    expect(decodeToolOutput(buf)).toBe('A😀')
+  })
+
+  it('UTF-16LE BOM（FF FE 41 00）不被误判为 UTF-32LE', () => {
+    expect(decodeToolOutput(Buffer.from([0xff, 0xfe, 0x41, 0x00]))).toBe('A')
+    expect(decodeToolOutput(Buffer.from('\uFEFFhello', 'utf16le'))).toBe('hello')
+  })
 })

@@ -126,19 +126,10 @@ export function registerDistroHandlers(
   // 危险操作：仅执行，二次确认由渲染层按 confirmDestructive 负责
   add(CH.distrosUnregister, async (_c, name: string) => {
     const target = assertName(name)
-    // review 0.1.2 根治：注销会终结发行版 —— 同发行版（大小写归一）仍有 running 任务时
-    // 必须先拒绝，否则任务会随发行版被注销而诡异失败/悬挂
-    const lower = target.toLowerCase()
-    const busy = tasks
-      .list()
-      .filter((t) => t.status === 'running' && (t.distro ?? '').toLowerCase() === lower)
-    if (busy.length > 0) {
-      throw createAppError('TASK_FAILED', {
-        message: `发行版 ${target} 仍有 ${busy.length} 个任务在执行，暂不能注销`,
-        detail: busy.map((t) => `${t.taskId}（${t.type}）：${t.message}`).join('\n'),
-        suggestion: '请在任务中心等待其完成或取消后再注销',
-      })
-    }
-    await wsl.unregister(target)
+    // review 0.1.2 审计修复：原实现是 check-then-act（先 tasks.list() 再 wsl.unregister），
+    // 两步之间新任务可插入同发行版锁队列，注销仍会砸中执行中任务（TOCTOU）。
+    // 改为与 io 任务同键（name.toLowerCase()）的排他段：注销严格排在任何已排/执行中任务之后，
+    // 且后续任务排在注销之后，二者绝不并发。
+    await tasks.runExclusive(target.toLowerCase(), () => wsl.unregister(target))
   })
 }

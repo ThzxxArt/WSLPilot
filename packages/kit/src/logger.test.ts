@@ -188,4 +188,54 @@ describe('logger', () => {
     })
     await expect(fs.stat(todayFile)).resolves.toBeTruthy()
   })
+
+  it('总量超限时今日文件（正在写）不得被清理 — review 0.1.2 审计修复', async () => {
+    const logs = join(dir, 'logs')
+    await fs.mkdir(logs, { recursive: true })
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayFile = join(logs, `app-${localDayKey(yesterday)}.log`)
+    await fs.writeFile(yesterdayFile, 'old')
+    const todayFile = join(logs, `app-${localDayKey()}.log`)
+    // 今日文件单独就超 5MB：旧实现会先删昨日、再把今日也删掉（全部日志清空）
+    await fs.writeFile(todayFile, Buffer.alloc(LOG_RETENTION_MAX_BYTES + 1024))
+
+    createLogger(dir, 'info')
+
+    await waitUntil(async () => {
+      try {
+        await fs.stat(yesterdayFile)
+        return false
+      } catch {
+        return true
+      }
+    })
+    await expect(fs.stat(todayFile)).resolves.toBeTruthy()
+  })
+
+  it('总量超限且无今日文件时至少保留最新一天 — review 0.1.2 审计修复', async () => {
+    const logs = join(dir, 'logs')
+    await fs.mkdir(logs, { recursive: true })
+    const twoDaysAgo = new Date()
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2)
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const olderFile = join(logs, `app-${localDayKey(twoDaysAgo)}.log`)
+    const newestFile = join(logs, `app-${localDayKey(yesterday)}.log`)
+    await fs.writeFile(olderFile, Buffer.alloc(1024))
+    // 最新一天单独超 5MB：旧实现删完旧文件后会把最新一天也删掉（保留集清空）
+    await fs.writeFile(newestFile, Buffer.alloc(LOG_RETENTION_MAX_BYTES + 1024))
+
+    createLogger(dir, 'info')
+
+    await waitUntil(async () => {
+      try {
+        await fs.stat(olderFile)
+        return false
+      } catch {
+        return true
+      }
+    })
+    await expect(fs.stat(newestFile)).resolves.toBeTruthy()
+  })
 })

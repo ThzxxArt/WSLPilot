@@ -157,6 +157,17 @@ function noControl(maxLen: number) {
   )
 }
 
+/**
+ * 外链 URL（app:openExternal — review 0.1.2 审计修复）：
+ * 协议白名单 http/https（大小写不敏感前缀），长度受限防 IPC 撑爆。
+ * 用正则前缀而非 URL 解析：`JaVaScRiPt:` 等大小写变体天然不匹配白名单，直接拒绝。
+ */
+export const httpUrlSchema = z
+  .string()
+  .min(1)
+  .max(2048)
+  .refine((s) => /^https?:\/\//i.test(s), { message: '仅允许打开 http/https 链接' })
+
 /** UTF-8 字节长度（Node/渲染通用，不依赖 Buffer） */
 export function utf8Bytes(s: string): number {
   return new TextEncoder().encode(s).length
@@ -287,6 +298,8 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     })
     .default({}),
   [CH.appOpenPath]: ioPathSchema,
+  // 外链：只放行 http/https（review 0.1.2 审计修复），handler 侧再做二次协议校验（纵深防御）
+  [CH.appOpenExternal]: httpUrlSchema,
 
   // 诊断包（M7）：可选默认保存目录，其余由主进程弹保存对话框
   [CH.diagnosticsExportPackage]: z

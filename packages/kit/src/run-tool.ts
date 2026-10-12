@@ -16,6 +16,8 @@ export interface ToolResult {
   code: number
   /** 输出超过 maxBuffer 被截断（review 0.1.2：调用方须能区分「完整输出」与「截断输出」） */
   truncated?: boolean
+  /** 因 abort 取消而失败（review 0.1.2 审计修复：调用方可与普通失败区分结算） */
+  aborted?: boolean
 }
 
 export interface RunToolOptions {
@@ -64,11 +66,14 @@ export async function runTool(
     // maxBuffer 超限：execFile 以 ERR_CHILD_PROCESS_STDIO_MAXBUFFER 拒绝并可能只带回部分输出 ——
     // 标记 truncated，调用方不得把截断输出当完整结果解析（review 0.1.2）
     const truncated = err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+    // abort 取消（signal.aborted 或 AbortError）：显式标记，调用方按取消结算而非普通失败
+    const aborted = opts.signal?.aborted === true || (e as { name?: string }).name === 'AbortError'
     return {
       stdout: decodeToolOutput(err.stdout),
       stderr: stderrText,
       code: typeof err.code === 'number' ? err.code : -1,
       ...(truncated ? { truncated: true } : {}),
+      ...(aborted ? { aborted: true } : {}),
     }
   }
 }

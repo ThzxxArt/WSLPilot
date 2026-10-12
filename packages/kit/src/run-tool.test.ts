@@ -123,5 +123,34 @@ describe('runTool', () => {
     })
     const r = await runTool('netsh.exe', ['x'])
     expect(r.truncated).toBeUndefined()
+    expect(r.aborted).toBeUndefined()
+  })
+
+  it('abort 后标记 aborted，与普通失败区分 — review 0.1.2 审计修复', async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const err = Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError',
+      code: 'ABORT_ERR',
+    })
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, Buffer.alloc(0), Buffer.alloc(0))
+    })
+    const r = await runTool('usbipd.exe', ['bind', '--busid', '1-2'], { signal: ac.signal })
+    expect(r.aborted).toBe(true)
+    expect(r.code).toBe(-1)
+  })
+
+  it('signal.aborted 即标记（错误 name 非 AbortError 也按取消结算）', async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const err: Error & { code?: number } = new Error('killed')
+    err.code = 1
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, Buffer.alloc(0), Buffer.alloc(0))
+    })
+    const r = await runTool('netsh.exe', ['x'], { signal: ac.signal })
+    expect(r.aborted).toBe(true)
+    expect(r.code).toBe(1)
   })
 })

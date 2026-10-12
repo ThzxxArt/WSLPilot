@@ -204,10 +204,11 @@ function clearFinished() {
   overflow-y: auto;
 }
 
+/* review 0.1.2 审计修复：硬编码 10px 与 ui 包 radius-md 令牌（12px）不一致，统一令牌化 */
 .item {
   padding: 8px 10px;
   border: 1px solid var(--color-border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md, 12px);
   cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease-standard);
 }
@@ -292,7 +293,7 @@ function clearFinished() {
   overflow-y: auto;
   padding: 8px 10px;
   border: 1px solid var(--color-border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-md, 12px);
   background: var(--color-bg-sunken);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
