@@ -1,0 +1,18 @@
+# 行尾与文本规范化（跨平台仓库必备）：
+# 仓库内一律 LF；Windows 检出（CI windows runner / 开发机）也不得转成 CRLF，
+# 否则 prettier（endOfLine 默认 lf）会把全仓库判为格式错误（review：CI 首跑实锤）。
+* text=auto eol=lf
+
+# 二进制文件显式声明（不做任何文本/行尾转换）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.node binary
+*.vhdx binary
+*.tar binary
+*.zip binary
+*.7z binary
