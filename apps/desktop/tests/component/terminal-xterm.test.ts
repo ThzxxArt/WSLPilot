@@ -411,6 +411,30 @@ describe('XtermPane', () => {
     await new Promise((r) => setTimeout(r, 350))
     expect(message.error).toHaveBeenCalledTimes(2)
   })
+
+  it('持续失败不链式补发：连发触发落在同一单飞轮，失败轮结束即停手（review 0.1.2 二轮审计）', async () => {
+    ;(wslAPI.terminal.resize as ReturnType<typeof vi.fn>).mockResolvedValue(undefined)
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    // 建立尺寸记账（80×24）
+    t.handlers.resize!({})
+    await flushPromises()
+    ;(wslAPI.terminal.resize as ReturnType<typeof vi.fn>).mockClear()
+
+    // 持续失败 + 尺寸漂移：连发 5 次触发，全部复用同一在途单飞轮
+    wslAPI.terminal.resize.mockRejectedValue(new Error('size down'))
+    t.cols = 100
+    t.rows = 30
+    for (let i = 0; i < 5; i++) t.handlers.resize!({})
+    // 固定重试共 3 次（150ms 间隔），等全部落地
+    await new Promise((r) => setTimeout(r, 700))
+    expect(wslAPI.terminal.resize).toHaveBeenCalledTimes(3)
+
+    // 失败轮结束后不得链式补发：观察窗口内调用数保持不增（旧实现会失败即续飞 → 无限空转）
+    await new Promise((r) => setTimeout(r, 500))
+    expect(wslAPI.terminal.resize).toHaveBeenCalledTimes(3)
+  })
 })
 
 describe('终端主题对比度（4 个主题关键色对 — review 0.1.2 验收）', () => {

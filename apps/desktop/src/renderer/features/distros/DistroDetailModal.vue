@@ -617,7 +617,9 @@ async function saveMeta() {
       <!-- display-directive=show（review 0.1.2 审计修复）：
            根因：默认 'if' 在切页签时卸载 FileBrowserPanel，本地 dirty 无提示销毁；
            与 config 页签同策略常驻后，watch props 的切换/关窗确认仍生效 -->
-      <n-tab-pane name="files" tab="文件" display-directive="show">
+      <!-- 文件页签同样常驻但**懒挂载**（show:lazy）：首次切到该页才挂载（未点开不做多余
+           fs.readDir IPC），之后切页签不卸载（本地脏编辑不随页签切换销毁）— review 0.1.2 审计修复 -->
+      <n-tab-pane name="files" tab="文件" display-directive="show:lazy">
         <FileBrowserPanel
           ref="filePanel"
           :distro-name="distroName"

@@ -286,7 +286,7 @@ export const ELEVATION_SUGGESTION =
  * - 漏判代价（错误照常上报 + 等价命令可用）小于误判代价（打断用户强弹 UAC）。
  */
 export function isElevationError(text: string): boolean {
-  return /requires?\s+elevation|elevation\s+(?:is\s+)?required|elevat(?:ed|ion)\s+(?:privileges|permissions|to)|run as administrator|administrator\s+privileges|请求的操作需要提升|需要提升|以管理员|拒绝访问|access\s+is\s+denied|access\s+denied/i.test(
+  return /requires?\s+elevation|elevation\s+(?:is\s+)?required\b|elevat(?:ed|ion)\s+(?:privileges|permissions|to)|run as administrator|administrator\s+privileges|请求的操作需要提升|需要提升|以管理员|拒绝访问|access\s+is\s+denied|access\s+denied/i.test(
     text,
   )
 }

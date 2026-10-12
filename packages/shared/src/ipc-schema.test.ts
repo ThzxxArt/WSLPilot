@@ -42,6 +42,15 @@ describe('ipc-schema', () => {
     ).toThrow()
   })
 
+  it('app:openExternal 拒绝控制字符与非法协议（review 0.1.2 二轮审计）', () => {
+    expect(parseIpcArgs(CH.appOpenExternal, ['https://ok.dev'])).toBe('https://ok.dev')
+    // 换行夹带的第二个 URL 不得通过（旧实现仅协议前缀白名单即可绕过）
+    expect(() => parseIpcArgs(CH.appOpenExternal, ['https://x\nhttp://evil'])).toThrow()
+    expect(() => parseIpcArgs(CH.appOpenExternal, ['javascript:alert(1)'])).toThrow()
+    // 协议大小写变体经解析器规范化匹配白名单，不抛
+    expect(() => parseIpcArgs(CH.appOpenExternal, ['HTTPS://OK.DEV'])).not.toThrow()
+  })
+
   it('passes through channels without schema', () => {
     expect(parseIpcArgs(CH.distrosList, [])).toBeUndefined()
     expect(parseIpcArgs(CH.appGetVersion, [])).toBeUndefined()

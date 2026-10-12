@@ -30,7 +30,6 @@
 .system-card .table,
 .system-card .empty-line,
 .table-card .sub,
-.mirror-card .sub code,
 .proxy-card .hint {
   width: 100% !important;
 }

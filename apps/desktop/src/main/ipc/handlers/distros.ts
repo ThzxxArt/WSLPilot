@@ -126,10 +126,20 @@ export function registerDistroHandlers(
   // 危险操作：仅执行，二次确认由渲染层按 confirmDestructive 负责
   add(CH.distrosUnregister, async (_c, name: string) => {
     const target = assertName(name)
-    // review 0.1.2 审计修复：原实现是 check-then-act（先 tasks.list() 再 wsl.unregister），
-    // 两步之间新任务可插入同发行版锁队列，注销仍会砸中执行中任务（TOCTOU）。
-    // 改为与 io 任务同键（name.toLowerCase()）的排他段：注销严格排在任何已排/执行中任务之后，
-    // 且后续任务排在注销之后，二者绝不并发。
-    await tasks.runExclusive(target.toLowerCase(), () => wsl.unregister(target))
+    const lower = target.toLowerCase()
+    // 运行中任务（含无锁的终端动作）不得被注销强杀：先拒绝并给出可行动建议 —
+    // review 0.1.2 第二轮审计（runExclusive 只覆盖同锁队列，无锁动作需在此拦截；
+    // 旧实现在改用 runExclusive 时曾丢失这一检查）
+    const busy = tasks
+      .list()
+      .some((t) => t.status === 'running' && (t.distro ?? '').toLowerCase() === lower)
+    if (busy) {
+      throw createAppError('TASK_FAILED', {
+        message: `发行版 ${target} 有运行中的任务，无法注销`,
+        suggestion: '请等待任务完成，或先在任务抽屉中取消相关任务后重试',
+      })
+    }
+    // 排他段（TOCTOU 双保险）：与同发行版 io 任务严格互斥，绝不在任务执行中并发注销
+    await tasks.runExclusive(lower, () => wsl.unregister(target))
   })
 }

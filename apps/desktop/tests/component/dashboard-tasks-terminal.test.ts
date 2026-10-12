@@ -1,3 +1,4 @@
+import { reactive } from 'vue'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
 import {
@@ -51,9 +52,11 @@ vi.mock('naive-ui', async (importOriginal) => {
 })
 
 const routerMock = { push: vi.fn() }
+/** 可响应的 route.query：用例内改 distro 可触发 TerminalView 的 openOrActivate/watch 路径 */
+const routeMock = reactive({ query: {} as Record<string, unknown> })
 vi.mock('vue-router', () => ({
   useRouter: () => routerMock,
-  useRoute: () => ({ query: {} }),
+  useRoute: () => routeMock,
 }))
 
 let wslAPI: WslAPIMock
@@ -91,6 +94,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   setActivePinia(createPinia())
   document.body.innerHTML = ''
+  routeMock.query = {}
   wslAPI.config.get.mockImplementation(configGetImpl())
   wslAPI.distros.list.mockResolvedValue([])
   wslAPI.terminal.list.mockResolvedValue([])
@@ -477,6 +481,46 @@ describe('TerminalView 会话错误面', () => {
     releaseCreate({ ptyId: 'p1', distro: 'Ubuntu', createdAt: 1 })
     await flushPromises()
     expect(tabs.props('creatingDistros')).toEqual([])
+  })
+
+  it('openOrActivate 大小写归一：已开 Ubuntu 后请求 ubuntu 只激活不双开（review 0.1.2 二轮审计）', async () => {
+    wslAPI.distros.list.mockResolvedValue([distro({ state: 'Running' })])
+    routeMock.query = { distro: 'Ubuntu' }
+    mount(TerminalView, { attachTo: document.body })
+    await flushPromises()
+    // mock 会话返回 distro 'Ubuntu'（大小写归一比较的基准）
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+    expect(useTerminalStore().sessions).toHaveLength(1)
+
+    // 大小写变体请求同一发行版：命中已有 alive 会话 → 激活而非二次创建
+    routeMock.query = { distro: 'ubuntu' }
+    await flushPromises()
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+    expect(useTerminalStore().sessions).toHaveLength(1)
+    expect(useTerminalStore().activeId).toBe('p1')
+  })
+
+  it('openOrActivate 在途键大小写归一：创建中请求变体复用同一在途 Promise（review 0.1.2 二轮审计）', async () => {
+    wslAPI.distros.list.mockResolvedValue([distro({ state: 'Running' })])
+    let releaseCreate!: (v: unknown) => void
+    wslAPI.terminal.create.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseCreate = r
+      }) as never,
+    )
+    routeMock.query = { distro: 'Ubuntu' }
+    mount(TerminalView, { attachTo: document.body })
+    await flushPromises()
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+
+    // 创建在途（opening 键已小写）时以 'ubuntu' 变体再次请求 → 不发起第二次 create
+    routeMock.query = { distro: 'ubuntu' }
+    await flushPromises()
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+
+    releaseCreate({ ptyId: 'p1', distro: 'Ubuntu', createdAt: 1 })
+    await flushPromises()
+    expect(useTerminalStore().sessions).toHaveLength(1)
   })
 
   it('关闭会话失败给错误提示', async () => {

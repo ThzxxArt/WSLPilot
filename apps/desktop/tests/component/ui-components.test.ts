@@ -181,10 +181,8 @@ describe('ProgressRing 尺寸守卫与渐变令牌（review 0.1.2）', () => {
     const stops = w.findAll('linearGradient stop')
     expect(stops[0]!.attributes('stop-color')).toBe(expected[0])
     expect(stops[1]!.attributes('stop-color')).toBe(expected[1])
-    // 旧实现把 hex 写死在 props 默认值（#22D3EE/#6366F1）；令牌解析实现默认必须为空串 —
-    // 回退硬编码默认值即失败（令牌变更时渲染不再联动）— review 0.1.2 审计修复假覆盖
-    expect(w.props('gradientFrom')).toBe('')
-    expect(w.props('gradientTo')).toBe('')
+    // review 0.1.2 第二轮审计：不断言 props 默认值为空串（会拒绝「默认值 = 令牌常量」的
+    // 等价实现，属过度断言）；上面的色值跟随断言已本质覆盖「渲染与令牌联动」。
   })
 })
 

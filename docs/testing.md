@@ -156,7 +156,7 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 87→88；renderer 地板由 0.1.1 的 85/80/52 抬升至 88/83/59。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
-更新为「新实测 −2pp」；renderer functions 58% 是过渡期防线，不是终点。
+更新为「新实测 −2pp」；renderer functions 59% 是过渡期防线，不是终点。
 
 **覆盖范围**：
 
@@ -194,7 +194,7 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 
 - `lint-typecheck-test`：Node 20/22 矩阵，lint + format:check + typecheck +
   **Tokens drift check（`tokens:check`：`tokens.ts` 与生成产物逐字节对账）** + **test:coverage（85% 门禁）**
-  - **test:component（per-glob 两档门禁：ui 96/96/88/90、renderer 88/88/82/58）** + build +
+  - **test:component（per-glob 两档门禁：ui 96/96/88/90、renderer 88/88/83/59）** + build +
     **smoke:product（main 模块图 + preload 模块图硬校验）**
 - 覆盖率报告以 artifact 形式保留 14 天
 - `e2e`：Windows runner，`npm run test:e2e` 实跑 smoke + 视觉回归（`smoke.e2e.ts` 与 `visual.e2e.ts`）

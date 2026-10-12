@@ -51,8 +51,6 @@ function dynamicMasks(window: import('@playwright/test').Page) {
     window.locator('.system-card .empty-line'),
     // 网络页：端口转发表计数（规则来自用户配置）
     window.locator('.table-card .sub'),
-    // 网络页：.wslconfig 真实路径（含用户名）
-    window.locator('.mirror-card .sub code'),
     // 网络页：镜像模式卡（状态随运行机器 .wslconfig 变化：mirrored 说明卡 / NAT 推荐卡，
     // 两种形态的 .body 高度差约 250px）。
     // review 0.1.2 审计修复：曾把整卡掩码收窄为「状态徽章/路径行/正文」三个具体元素，

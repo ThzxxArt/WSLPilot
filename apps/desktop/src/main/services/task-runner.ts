@@ -266,6 +266,8 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
    * 返回链保留拒绝（异常照常抛给调用方）；存入 Map 的副本吞掉拒绝，防毒化后续排队。
    */
   function runExclusive<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+    // 调度器已关闭：不再接受新的排他段（dispose 已清锁，退出后的排队段不得继续执行 — 二轮审计）
+    if (disposed) throw createAppError('TASK_FAILED', { message: '任务调度器已关闭' })
     const prev = locks.get(lockKey) ?? Promise.resolve()
     const next = prev.then(fn, fn)
     locks.set(

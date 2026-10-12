@@ -497,52 +497,61 @@ describe('distros + meta IPC handlers', () => {
     const deps = makeDeps()
     const runExclusive = vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn())
     deps.tasks.runExclusive = runExclusive
+    // 其他发行版的运行中任务不阻塞本发行版注销（busy 检查只按同发行版大小写归一）
+    deps.tasks.list = vi.fn(() => [{ taskId: 't9', status: 'running', distro: 'Debian' }])
     const { wrapped } = register(ctx, deps)
     await wrapped.get(CH.distrosUnregister)({}, 'UBUNTU')
     // 与 io 任务同一 lockKey（name.toLowerCase()）：注销绝不与同发行版任务并发
     expect(runExclusive).toHaveBeenCalledWith('ubuntu', expect.any(Function))
     expect(deps.wsl.unregister).toHaveBeenCalledWith('UBUNTU')
-    // 成功后不再走旧的 check-then-act 列表检查
-    expect(deps.tasks.list).not.toHaveBeenCalled()
   })
 
-  it('unregister 与同发行版长任务严格互斥：排在运行中任务之后而非并发（review 0.1.2 审计修复）', async () => {
+  it('unregister 有同发行版运行中任务时拒绝，不排队也不执行（含无锁动作 — review 0.1.2 二轮审计）', async () => {
+    const ctx = makeCtx()
+    const deps = makeDeps()
+    // 运行中任务（如无锁终端动作）与请求名大小写不同，仍按小写归一命中
+    deps.tasks.list = vi.fn(() => [{ taskId: 't1', status: 'running', distro: 'Ubuntu' }])
+    const runExclusive = vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn())
+    deps.tasks.runExclusive = runExclusive
+    const { wrapped } = register(ctx, deps)
+    await expect(wrapped.get(CH.distrosUnregister)({}, 'ubuntu')).rejects.toThrow(/有运行中的任务/)
+    expect(deps.wsl.unregister).not.toHaveBeenCalled()
+    expect(runExclusive).not.toHaveBeenCalled()
+  })
+
+  it('unregister 与同发行版长任务严格互斥：运行中直接拒绝，任务结束后放行（review 0.1.2 二轮审计）', async () => {
     const ctx = makeCtx()
     const deps = makeDeps()
     const tasks = createTaskRunner({ logger: ctx.logger, onProgress: () => {} })
     deps.tasks = tasks as any
-    const order: string[] = []
+    const unregister = vi.fn(async () => {})
+    deps.wsl.unregister = unregister
+    const { wrapped } = register(ctx, deps)
     let release!: () => void
     const gate = new Promise<void>((r) => {
       release = r
     })
-    deps.wsl.unregister = vi.fn(async () => {
-      order.push('unregister')
-    })
-    const { wrapped } = register(ctx, deps)
-
+    let started = false
     const exportTask = tasks.start({
       type: 'export',
       distro: 'Ubuntu',
       message: '导出 Ubuntu',
       lockKey: 'ubuntu',
       run: async () => {
-        order.push('task:start')
+        started = true
         await gate
-        order.push('task:end')
       },
     })
-    await vi.waitFor(() => expect(order).toContain('task:start'))
+    await vi.waitFor(() => expect(started).toBe(true))
 
-    const p = wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')
-    await new Promise((r) => setTimeout(r, 10))
-    // 长任务未结束：注销必须排队等待（不得并发砸中执行中任务）
-    expect(order).toEqual(['task:start'])
-    expect(deps.wsl.unregister).not.toHaveBeenCalled()
+    // 长任务未结束：注销直接拒绝（不得并发执行，也不得排队等待后砸中执行中任务）
+    await expect(wrapped.get(CH.distrosUnregister)({}, 'ubuntu')).rejects.toThrow(/有运行中的任务/)
+    expect(unregister).not.toHaveBeenCalled()
 
     release()
-    await p
     await tasks.waitFor(exportTask.taskId)
-    expect(order).toEqual(['task:start', 'task:end', 'unregister'])
+    // 任务结束后 busy 解除，可正常注销
+    await wrapped.get(CH.distrosUnregister)({}, 'ubuntu')
+    expect(unregister).toHaveBeenCalledWith('ubuntu')
   })
 })

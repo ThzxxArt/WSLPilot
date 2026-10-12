@@ -166,7 +166,12 @@ export const httpUrlSchema = z
   .string()
   .min(1)
   .max(2048)
-  .refine((s) => /^https?:\/\//i.test(s), { message: '仅允许打开 http/https 链接' })
+  // 控制字符（换行等）拒绝：此前仅前缀白名单，`https://x\nhttp://evil` 可过 schema —
+  // 二轮审计算议（与 ioPathSchema 同一 noControl 标准）
+  // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+  .refine((s) => /^https?:\/\//i.test(s) && !/[\u0000-\u001f\u007f]/.test(s), {
+    message: '仅允许打开 http/https 链接（不含控制字符）',
+  })
 
 /** UTF-8 字节长度（Node/渲染通用，不依赖 Buffer） */
 export function utf8Bytes(s: string): number {

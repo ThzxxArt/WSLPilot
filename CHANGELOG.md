@@ -153,6 +153,23 @@
   - 视觉回归：镜像卡掩码收窄**评估后回退为整卡掩码**（收窄后 mask 矩形仍随
     mirrored/NAT 状态变化，两平台基线曾因此记录不同状态，环境一换即假红；
     定高整卡掩码使两形态在截图中等价）——0.1.2 变更记录以此为准
+- **第二轮审计收口**（对审计修复本身的独立复审，11 项漏面清零）：
+  - 诊断脱敏：单引号值支持转义引号；鉴权头正则改 `[ \t]*`（保留「scheme 与凭据零空格」
+    拼接形态的宁多打码，同时禁止 `\s*` 跨行吞并下一行）
+  - `isElevationError` 补 `required\b` 词尾边界（`requiredx` 不再命中）
+  - `httpUrlSchema` 拒绝控制字符（`https://x\nhttp://evil` 不再过 schema；
+    handler 侧协议白名单校验保持）——补换行/大小写变体用例
+  - 文件页签改 `show:lazy`（首次激活才挂载：未点开不做多余 `fs.readDir` IPC，
+    之后常驻不再随页签切换卸载丢编辑）
+  - 注销互斥恢复「运行中任务检查」（含无锁终端动作，不可被强杀）+ `runExclusive`
+    作为 TOCTOU 双保险；`runExclusive` 补 disposed 检查——补 busy 拒绝用例
+  - TerminalView 的会话去重/in-flight 键大小写归一（大小写变体不再绕过双开防护）——补用例
+  - 视觉掩码残留清理（`.mirror-card .sub code` 子掩码与 stability 定宽规则删除——
+    已被整卡掩码覆盖，截图零变化由 linux/win32 硬比对复核）
+  - ProgressRing 渐变断言去除过度钉死（色值跟随断言已本质覆盖）；XtermPane
+    失败轮不链式补发自愈——补用例
+  - docs/testing.md 门禁数字与配置对齐（83/59）；CI 令牌步骤更名
+    `Tokens artifacts check (generated & in sync)`（措辞与真实语义一致）
 
 ### Added
 

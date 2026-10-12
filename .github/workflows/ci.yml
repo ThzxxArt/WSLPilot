@@ -47,8 +47,10 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # 设计令牌漂移门控（review 0.1.2）：tokens.ts 与生成的 tokens.generated.scss 必须同步
-      - name: Tokens drift check
+      # 令牌生成物自检（review 0.1.2 二轮审计措辞校准）：生成物存在且与 tokens.ts 一致。
+      # CI 里 npm ci 的 postinstall 会先重新生成（生成物不入库），故该步骤的真实语义是
+      # 「生成链路可用 + 产物一致」的存在性自检；面向本地开发的漂移拦截为 npm run tokens:check
+      - name: Tokens artifacts check (generated & in sync)
         run: npm run tokens:check
 
       - name: Unit & integration tests (coverage gate ≥85%)
