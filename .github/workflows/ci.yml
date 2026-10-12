@@ -102,3 +102,12 @@ jobs:
           name: visual-baselines
           path: apps/desktop/tests/e2e/__screenshots__
           if-no-files-found: ignore
+
+      # 失败取证：actual / expected / diff 截图与 trace（视觉门禁红时定位根因用）
+      - name: Upload E2E failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: test-results/
+          if-no-files-found: ignore
