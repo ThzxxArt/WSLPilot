@@ -14,6 +14,12 @@ files:
 asarUnpack:
   - '**/node-pty/**'
   - '**/node_modules/node-pty/**'
+# ── 原生依赖 ──────────────────────────────────────────────────
+# node-pty 1.1.0 为 N-API + 官方预编译二进制（prebuilds 含 win32-x64 / win32-arm64 /
+# darwin 全平台，选装脚本命中预编译即跳过编译），N-API ABI 稳定、无需针对 Electron 重编。
+# 关闭 rebuild：① CI runner 无 Visual Studio 工具链，node-gyp 重编必然失败（tag 首跑实锤）；
+# ② 本地/CI 打包不再依赖 MSVC，产物直接用官方预编译二进制（win-unpacked 原生启动冒烟通过）。
+npmRebuild: false
 extraResources:
   # 图标由 files: resources/** 内置（asar），此处仅托盘运行时需要外部文件
   - from: resources/tray
