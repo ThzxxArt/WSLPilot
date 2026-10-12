@@ -76,34 +76,44 @@ describe('atomicWrite', () => {
     }
   })
 
-  it('覆盖已有文件时保留其权限 mode（review 0.1.2 根治）', async () => {
+  it('覆盖已有文件时保留其权限 mode（review 0.1.2 根治；跨平台动态断言 — CI 修复）', async () => {
     const file = join(dir, 'mode.jsonc')
     await atomicWrite(file, 'v1')
     await fs.chmod(file, 0o600)
+    // Windows 无法表达 POSIX 权限位（stat().mode 恒报 0o666/0o444，chmod 仅映射只读位）：
+    // 断言「写前 == 写后」的保留语义而非硬编码 0o600 —— Linux 上 before 即 0o600，
+    // 旧实现（tmp 默认权限 0o644）在此必失败
+    const before = (await fs.stat(file)).mode & 0o777
     await atomicWrite(file, 'v2')
     expect(await fs.readFile(file, 'utf8')).toBe('v2')
-    expect((await fs.stat(file)).mode & 0o777).toBe(0o600)
+    expect((await fs.stat(file)).mode & 0o777).toBe(before)
   })
 
   it('保留 mode 只取权限位 & 0o777，不复刻 setuid/setgid/sticky — review 0.1.2 审计修复', async () => {
     const file = join(dir, 'suid.jsonc')
     await atomicWrite(file, 'v1')
     await fs.chmod(file, 0o4755)
+    // 动态基准：POSIX 上为 0o755（setuid 位已被 & 0o777 剥掉）；Windows 上 mode 语义受限
+    const before = (await fs.stat(file)).mode & 0o777
     const realOpen = fs.open.bind(fs)
     const spy = vi.spyOn(fs, 'open').mockImplementation(realOpen as never)
     try {
       await atomicWrite(file, 'v2')
-      // 旧实现把完整 stat.mode（0o104755，含文件类型位与 setuid）传给 fs.open；
-      // 新实现必须只传权限位 0o755 —— 此断言在旧代码必失败
+      // 旧实现把完整 stat.mode（含文件类型位与 setuid）传给 fs.open；
+      // 新实现必须只传「权限位 & 0o777」——与 stat 动态一致（两端同验该契约）
       const openCall = spy.mock.calls.find((c) => String(c[0]).includes('.tmp'))
       expect(openCall).toBeTruthy()
-      expect(openCall![2]).toBe(0o755)
+      expect(openCall![2]).toBe(before)
     } finally {
       spy.mockRestore()
     }
     expect(await fs.readFile(file, 'utf8')).toBe('v2')
+    // 写后权限位不劣化（setuid 剥除后的值保留；仅 POSIX 可断言具体位）
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(file)).mode & 0o777).toBe(0o755)
+    }
+    // setuid/setgid/sticky 位不得复刻（Windows mode 无这些位恒 0，断言两端无害）
     const st = await fs.stat(file)
-    expect(st.mode & 0o777).toBe(0o755)
     expect(st.mode & 0o7000).toBe(0)
   })
 
