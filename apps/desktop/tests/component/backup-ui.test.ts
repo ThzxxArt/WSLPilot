@@ -496,4 +496,64 @@ describe('BackupView 并发与重置（review 0.1.2 根治）', () => {
     expect(text).not.toContain('行-99\n')
     expect(document.body.textContent).toContain('仅显示最后 500 行')
   })
+
+  it('步骤条当前步 aria-current="step" 且随步骤迁移（review 0.1.2 a11y）', async () => {
+    const w = mountBackupView()
+    await flushPromises()
+    const steps = () => w.findAll('li.step-item')
+    expect(steps()).toHaveLength(4)
+    expect(steps()[0]!.attributes('aria-current')).toBe('step')
+    expect(steps()[1]!.attributes('aria-current')).toBeUndefined()
+
+    w.findComponent(ExportWizard).vm.$emit('update:form', {
+      name: 'Ubuntu',
+      path: 'D:\\b\\u.tar',
+      format: 'tar',
+    })
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    expect(steps()[1]!.attributes('aria-current')).toBe('step')
+    expect(steps()[0]!.attributes('aria-current')).toBeUndefined()
+  })
+
+  it('导入流程走到确认并 start → io.import 收到全量精确字段（review 0.1.2）', async () => {
+    wslAPI.io.import.mockResolvedValueOnce({ taskId: 'imp-1' })
+    const w = mountBackupView()
+    await flushPromises()
+
+    const rg = w.findComponent(NRadioGroup)
+    await rg.vm.$emit('update:value', 'import')
+    await flushPromises()
+
+    w.findComponent(ImportWizard).vm.$emit('update:form', {
+      name: 'Restored',
+      archivePath: 'D:\\picked\\in.tar',
+      installPath: 'D:\\WSL\\Restored',
+      format: 'tar',
+      version: 1,
+      inPlace: false,
+    })
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('确认信息')
+
+    const startBtn = findBtn(w, '开始导入恢复')
+    expect(startBtn, '确认步应有开始导入恢复按钮').toBeTruthy()
+    await startBtn!.trigger('click')
+    await flushPromises()
+
+    expect(wslAPI.io.import).toHaveBeenCalledWith({
+      name: 'Restored',
+      installPath: 'D:\\WSL\\Restored',
+      archivePath: 'D:\\picked\\in.tar',
+      format: 'tar',
+      version: 1,
+      inPlace: false,
+    })
+    expect(w.text()).toContain('查看日志')
+  })
 })

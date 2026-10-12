@@ -10,13 +10,15 @@ import {
   type DiffLine,
   type WslConfChange,
   type WslConfModel,
+  type WslConfWriteResult,
 } from '@wslpilot/shared'
 
 export type WslConfMode = 'form' | 'raw'
 
 export interface WslConfApi {
   read(name: string): Promise<string>
-  write(name: string, content: string): Promise<{ terminated: boolean }>
+  /** 文件已写成功时 terminated:false + terminateError 如实上报（review 0.1.2 根治） */
+  write(name: string, content: string): Promise<WslConfWriteResult>
 }
 
 export interface WslConfEditor {
@@ -40,7 +42,7 @@ export interface WslConfEditor {
   /** 相对磁盘载入内容的变更清单（form 模式） */
   pendingChanges(): WslConfChange[]
   diff(): DiffLine[]
-  save(): Promise<{ terminated: boolean }>
+  save(): Promise<WslConfWriteResult>
 }
 
 function defaultApi(): WslConfApi {
@@ -174,7 +176,7 @@ export function useWslConf(
     }
   }
 
-  async function save(): Promise<{ terminated: boolean }> {
+  async function save(): Promise<WslConfWriteResult> {
     const name = nameOf()
     const text = effectiveText()
     const g = ++gen

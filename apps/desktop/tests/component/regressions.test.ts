@@ -357,4 +357,51 @@ describe('文件浏览器确认语义（自查回归）', () => {
     expect(w.text()).not.toContain('stale-entry')
     expect(w.text()).toContain('hosts')
   })
+
+  it('二进制文件展示提示、不渲染编辑器且保存禁用（不可在线编辑）', async () => {
+    fsApi.read.mockResolvedValueOnce({
+      text: '',
+      sizeBytes: 128,
+      truncated: false,
+      binary: true,
+    })
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const fileBtn = w.findAll('button.entry').find((b) => b.text().includes('hosts'))
+    await fileBtn!.trigger('click')
+    await flushPromises()
+
+    expect(w.text()).toContain('二进制文件不支持在线编辑')
+    const save = w.findAll('button').find((b) => b.text().includes('保存'))
+    expect(save).toBeTruthy()
+    expect(save!.attributes('disabled')).toBeDefined()
+    // 二进制不渲染编辑器（不给误编辑入口）
+    expect(w.find('textarea').exists()).toBe(false)
+    expect(fsApi.write).not.toHaveBeenCalled()
+  })
+
+  it('写出失败：错误提示可见且不得标记已保存（dirty 保留）', async () => {
+    fsApi.write.mockRejectedValueOnce(new Error('权限不足（EACCES）'))
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+    expect(w.text()).toContain('未保存')
+
+    const save = w.findAll('button').find((b) => b.text().includes('保存'))!
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(fsApi.write).toHaveBeenCalledWith('Ubuntu', '/hosts', 'dirty content')
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('权限不足（EACCES）'))
+    expect(message.success).not.toHaveBeenCalled()
+    // 失败后 dirty 必须保留：绝不把「未保存」误标成已保存
+    expect(w.text()).toContain('未保存')
+  })
 })

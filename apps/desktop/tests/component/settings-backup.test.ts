@@ -416,6 +416,39 @@ describe('SettingsView 设置 setter 覆盖面（落盘参数逐项对账）', (
     })
   })
 
+  it('补漏：硬件加速 / 选中即复制 开关落盘（精确 patch）', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+
+    await clickSwitch('硬件加速')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      advanced: { hardwareAcceleration: false },
+    })
+
+    await clickSwitch('选中即复制')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      terminal: { copyOnSelect: true },
+    })
+    void w
+  })
+
+  it('补漏：默认 Shell 防抖输入落盘（卸载 flush，精确 patch）', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    const input = w
+      .findAllComponents(NInput)
+      .find((c) =>
+        (c.element as HTMLElement).closest('.setting-line')?.textContent?.includes('默认 Shell'),
+      )
+    expect(input, '找不到「默认 Shell」输入框').toBeTruthy()
+    input!.vm.$emit('update:value', '/bin/zsh')
+    // 防抖 400ms 内卸载：flush 必须把挂起值精确落盘
+    w.unmount()
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      wsl: { defaultShell: '/bin/zsh' },
+    })
+  })
+
   it('配置标签支持 Space 激活（role=button 键盘规范 — 与 TitleBar 同款）', async () => {
     const w = mount(SettingsView, { attachTo: document.body })
     await flushPromises()

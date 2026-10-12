@@ -770,6 +770,35 @@ describe('A9 DistroDetailModal', () => {
     expect(message.warning).toHaveBeenCalled()
   })
 
+  it('元数据编辑控件与 label 程序化关联：8 个控件逐一带 aria-label（review 0.1.2 a11y）', async () => {
+    useDistrosStore().items = [distro()]
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    findBodyButton('编辑元数据')!.click()
+    await flushPromises()
+    const edit = document.body.querySelector('.meta-edit')
+    expect(edit).toBeTruthy()
+    for (const label of [
+      '别名',
+      '标签',
+      '备注',
+      '图标名',
+      '品牌色',
+      '终端启动目录',
+      '快捷动作',
+      '置顶',
+    ]) {
+      expect(edit!.querySelector(`[aria-label="${label}"]`), label).toBeTruthy()
+    }
+    // 文本域与开关落到真实控件上（非空壳 div）
+    expect(edit!.querySelector('textarea[aria-label="备注"]')).toBeTruthy()
+    expect(edit!.querySelector('.n-switch[aria-label="置顶"]')).toBeTruthy()
+  })
+
   it('注销发行版调用 distros.unregister（与 wsl --unregister / 通道动词一致）', async () => {
     useSettingsStore().confirmDestructive = false
     useDistrosStore().items = [distro()]

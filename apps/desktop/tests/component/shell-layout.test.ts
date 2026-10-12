@@ -167,6 +167,26 @@ describe('TitleBar', () => {
     )
     errSpy.mockRestore()
   })
+
+  it('快捷键文案按平台渲染：Mac 显示 ⌘ K，其他平台 Ctrl K（review 0.1.2 平台化）', () => {
+    const original = navigator.platform
+    try {
+      const w1 = mount(TitleBar, { attachTo: document.body })
+      expect(w1.find('kbd').text()).toBe('Ctrl K')
+
+      Object.defineProperty(window.navigator, 'platform', {
+        value: 'MacIntel',
+        configurable: true,
+      })
+      const w2 = mount(TitleBar, { attachTo: document.body })
+      expect(w2.find('kbd').text()).toBe('⌘ K')
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', {
+        value: original,
+        configurable: true,
+      })
+    }
+  })
 })
 
 describe('StatusBar', () => {

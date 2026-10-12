@@ -206,11 +206,16 @@ async function confirmSave() {
   preview.value = false
   try {
     const r = await conf.save()
-    message.success(
-      r.terminated
-        ? 'wsl.conf 已保存 · 已按设置终止该发行版，约 8 秒后重新启动生效'
-        : 'wsl.conf 已保存 · 完全停止发行版后（约 8 秒）生效',
-    )
+    // 文件已写成功但自动终止失败：如实上报（review 0.1.2 根治 terminateError 无出口）
+    if (!r.terminated && r.terminateError) {
+      message.warning(`wsl.conf 已保存，但按设置自动终止发行版失败：${r.terminateError}`)
+    } else {
+      message.success(
+        r.terminated
+          ? 'wsl.conf 已保存 · 已按设置终止该发行版，约 8 秒后重新启动生效'
+          : 'wsl.conf 已保存 · 完全停止发行版后（约 8 秒）生效',
+      )
+    }
     // autoShutdown 后 store 里的运行状态已失真：保存成功即刷新（review 0.1.2 根治）
     await distros.refresh()
   } catch (e) {

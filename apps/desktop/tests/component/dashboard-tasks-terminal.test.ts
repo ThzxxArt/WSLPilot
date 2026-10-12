@@ -375,6 +375,19 @@ describe('InstallDistroModal', () => {
     }
     expect(w.emitted('update:show')).toBeUndefined()
   })
+
+  it('步骤条当前步 aria-current="step" 且随步骤迁移（review 0.1.2 a11y）', async () => {
+    await openModal()
+    const steps = () => Array.from(document.body.querySelectorAll('.install-modal .step'))
+    expect(steps()).toHaveLength(3)
+    expect(steps()[0]!.getAttribute('aria-current')).toBe('step')
+    expect(steps()[1]!.getAttribute('aria-current')).toBeNull()
+
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    expect(steps()[1]!.getAttribute('aria-current')).toBe('step')
+    expect(steps()[0]!.getAttribute('aria-current')).toBeNull()
+  })
 })
 
 describe('TerminalView 会话错误面', () => {

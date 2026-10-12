@@ -158,13 +158,19 @@ function resetAndPick() {
     :mask-closable="!isRunning"
     @update:show="(v: boolean) => (v ? emit('update:show', true) : close())"
   >
-    <!-- 步骤指示：① 选择 → ② 安装 → ③ 完成 -->
+    <!-- 步骤指示：① 选择 → ② 安装 → ③ 完成（当前步 aria-current="step" — review 0.1.2 a11y） -->
     <div class="steps">
-      <span class="step" :class="{ on: step === 0 }">① 选择发行版</span>
+      <span class="step" :class="{ on: step === 0 }" :aria-current="step === 0 ? 'step' : undefined"
+        >① 选择发行版</span
+      >
       <span class="step-sep">›</span>
-      <span class="step" :class="{ on: step === 1 }">② 安装</span>
+      <span class="step" :class="{ on: step === 1 }" :aria-current="step === 1 ? 'step' : undefined"
+        >② 安装</span
+      >
       <span class="step-sep">›</span>
-      <span class="step" :class="{ on: step === 2 }">③ 完成</span>
+      <span class="step" :class="{ on: step === 2 }" :aria-current="step === 2 ? 'step' : undefined"
+        >③ 完成</span
+      >
     </div>
 
     <div v-if="!activeTaskId" class="form">

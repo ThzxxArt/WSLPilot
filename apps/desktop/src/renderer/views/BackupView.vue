@@ -388,13 +388,14 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
     </div>
 
     <section class="card wizard-card">
-      <!-- 步骤条 -->
+      <!-- 步骤条（当前步 aria-current="step" — review 0.1.2 a11y） -->
       <ol class="steps">
         <li
           v-for="(label, i) in stepLabels"
           :key="label"
           class="step-item"
           :class="{ active: step === i + 1, done: step > i + 1 }"
+          :aria-current="step === i + 1 ? 'step' : undefined"
         >
           <span class="dot">{{ i + 1 }}</span>
           <span class="step-label">{{ label }}</span>

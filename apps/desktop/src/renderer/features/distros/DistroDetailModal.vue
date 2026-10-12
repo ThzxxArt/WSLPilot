@@ -458,15 +458,25 @@ async function saveMeta() {
           </NTag>
         </div>
 
-        <!-- 元数据编辑 -->
+        <!-- 元数据编辑（可视化 label 与控件做程序化关联 — review 0.1.2 a11y） -->
         <div v-if="editing" class="meta-edit">
           <div class="field">
             <div class="label">别名</div>
-            <NInput v-model:value="editAlias" size="small" placeholder="例如：主力开发" />
+            <NInput
+              v-model:value="editAlias"
+              size="small"
+              placeholder="例如：主力开发"
+              :input-props="{ 'aria-label': '别名' }"
+            />
           </div>
           <div class="field">
             <div class="label">标签（逗号分隔）</div>
-            <NInput v-model:value="editTags" size="small" placeholder="work, node, python" />
+            <NInput
+              v-model:value="editTags"
+              size="small"
+              placeholder="work, node, python"
+              :input-props="{ 'aria-label': '标签' }"
+            />
           </div>
           <div class="field">
             <div class="label">备注</div>
@@ -476,15 +486,26 @@ async function saveMeta() {
               type="textarea"
               :rows="2"
               placeholder="日常开发使用…"
+              :input-props="{ 'aria-label': '备注' }"
             />
           </div>
           <div class="field">
             <div class="label">图标名</div>
-            <NInput v-model:value="editIcon" size="small" placeholder="ubuntu / debian / …" />
+            <NInput
+              v-model:value="editIcon"
+              size="small"
+              placeholder="ubuntu / debian / …"
+              :input-props="{ 'aria-label': '图标名' }"
+            />
           </div>
           <div class="field">
             <div class="label">品牌色</div>
-            <NInput v-model:value="editColor" size="small" placeholder="#E95420" />
+            <NInput
+              v-model:value="editColor"
+              size="small"
+              placeholder="#E95420"
+              :input-props="{ 'aria-label': '品牌色' }"
+            />
           </div>
           <div class="field">
             <div class="label">终端启动目录</div>
@@ -492,16 +513,19 @@ async function saveMeta() {
               v-model:value="editStartupCwd"
               size="small"
               placeholder="~ 或 /home/me/project"
+              :input-props="{ 'aria-label': '终端启动目录' }"
             />
           </div>
           <div class="field">
             <div class="label">快捷动作（动作卡片上的直达项）</div>
+            <!-- 非 filterable 多选不渲染内部 input：aria-label 走 fallthrough 到控件根节点 -->
             <NSelect
               v-model:value="editQuickActions"
               size="small"
               multiple
               :options="quickActionOptions"
               placeholder="选择动作 id"
+              aria-label="快捷动作"
             />
           </div>
           <div class="field field-row">
@@ -509,7 +533,7 @@ async function saveMeta() {
               <div class="label">置顶</div>
               <div class="hint">置顶后固定排在列表最前</div>
             </div>
-            <NSwitch v-model:value="editPinned" size="small" />
+            <NSwitch v-model:value="editPinned" size="small" aria-label="置顶" />
           </div>
           <div class="edit-actions">
             <n-button size="small" @click="editing = false"> 取消 </n-button>

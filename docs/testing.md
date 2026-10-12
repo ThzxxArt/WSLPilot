@@ -137,7 +137,7 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（0.1.2）**：单测 1068 条，Lines 95.88% / Branches 88.2% / Functions 95.48%。
+**当前基线（0.1.2）**：单测 1069 条，Lines 95.88% / Branches 88.2% / Functions 95.48%。
 
 ### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
 
@@ -146,14 +146,14 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 
 | 分母                                   | Lines  | Statements | Branches | Functions |
 | -------------------------------------- | ------ | ---------- | -------- | --------- |
-| `packages/ui/src/**`（实测）           | 98.95% | 98.95%     | 89.71%   | 92.86%    |
-| ↑ 门禁地板                             | **96** | **96**     | **87**   | **90**    |
-| `apps/desktop/src/renderer/**`（实测） | 89.96% | 89.96%     | 84.11%   | 59.74%    |
-| ↑ 门禁地板                             | **87** | **87**     | **82**   | **57**    |
+| `packages/ui/src/**`（实测）           | 98.99% | 98.99%     | 90.58%   | 92.86%    |
+| ↑ 门禁地板                             | **96** | **96**     | **88**   | **90**    |
+| `apps/desktop/src/renderer/**`（实测） | 90.15% | 90.15%     | 84.82%   | 60.82%    |
+| ↑ 门禁地板                             | **88** | **88**     | **82**   | **58**    |
 
-（实测取自 `npm run test:component` 全量 300 用例；0.1.2 分母纳入 ui 桶
-`composables` / `directives` / `naive` / `index.ts` 后重测 —— branches 地板随分母扩大
-诚实下调 88→87、functions 81→90；renderer 地板由 0.1.1 的 85/80/52 抬升至 87/82/57。）
+（实测取自 `npm run test:component` 全量 318 用例；0.1.2 分母纳入 ui 桶
+`composables` / `directives` / `naive` / `index.ts` 后重测 —— ui branches 地板随测试补齐
+87→88；renderer 地板由 0.1.1 的 85/80/52 抬升至 88/82/58。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
 更新为「新实测 −2pp」；renderer functions 57% 是过渡期防线，不是终点。

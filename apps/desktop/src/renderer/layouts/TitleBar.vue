@@ -10,6 +10,11 @@ const { openPalette } = useCommandPalette()
 
 const gradient = computed(() => ACCENT_GRADIENTS[settings.accent] ?? ACCENT_GRADIENTS.aurora)
 
+/** review 0.1.2 平台化：macOS 显示 ⌘ K，其他平台显示 Ctrl K */
+const shortcutLabel = computed(() =>
+  typeof navigator !== 'undefined' && /mac/i.test(navigator.platform ?? '') ? '⌘ K' : 'Ctrl K',
+)
+
 /**
  * 窗口控制失败不再产生 unhandled rejection（review 0.1.2 根治）：
  * 最小化/最大化/关闭任一 IPC 失败时记录诊断，绝不静默吞掉也不炸控制台。
@@ -43,7 +48,7 @@ function close() {
       <!-- 原生 button：Enter/Space 由浏览器触发 click，单一触发源（不再手写 keydown 双触发） -->
       <button class="search-box" type="button" aria-label="打开命令面板" @click="openPalette">
         <span class="search-placeholder">搜索或执行命令…</span>
-        <kbd>Ctrl K</kbd>
+        <kbd>{{ shortcutLabel }}</kbd>
       </button>
     </div>
 

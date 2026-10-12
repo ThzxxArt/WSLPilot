@@ -130,6 +130,25 @@ describe('useWslConf', () => {
     expect(conf2.isDirty.value).toBe(true)
   })
 
+  it('save 透传 terminateError（文件已写、自动终止失败如实上报 — review 0.1.2）', async () => {
+    const api = makeApi({
+      write: vi.fn(async () => ({ terminated: false, terminateError: 'wsl --terminate 超时' })),
+    })
+    const conf = useWslConf('Ubuntu', { api })
+    await conf.load()
+    conf.setField('network', 'hostname', 'saved')
+    const r = await conf.save()
+    expect(r).toEqual({ terminated: false, terminateError: 'wsl --terminate 超时' })
+    // 保存成功语义：脏态归零，不得因 terminateError 当作失败
+    expect(conf.isDirty.value).toBe(false)
+
+    const ok = makeApi({ write: vi.fn(async () => ({ terminated: true })) })
+    const conf2 = useWslConf('Ubuntu', { api: ok })
+    await conf2.load()
+    conf2.setField('network', 'hostname', 'x')
+    expect(await conf2.save()).toEqual({ terminated: true })
+  })
+
   it('setRaw 在 form 模式下重建模型', async () => {
     const api = makeApi()
     const conf = useWslConf('Ubuntu', { api })

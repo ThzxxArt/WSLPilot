@@ -4,7 +4,13 @@
  * 各 *.test.ts 仍自行声明 naive-ui / vue-router mock（vi.mock 工厂需与使用方同文件）。
  */
 import { vi } from 'vitest'
-import { defaultConfig, type ConfigKey, type DistroView, type WslAction } from '@wslpilot/shared'
+import {
+  defaultConfig,
+  type ConfigKey,
+  type DistroView,
+  type WslAction,
+  type WslConfWriteResult,
+} from '@wslpilot/shared'
 
 export function appError(msg: string) {
   return { code: 'TASK_FAILED', message: msg, recoverable: true }
@@ -119,7 +125,8 @@ export function createWslAPI() {
     },
     wslconf: {
       read: vi.fn(async () => '[automount]\nenabled = true\n'),
-      write: vi.fn(async () => ({ terminated: false })),
+      // 真实契约：文件已写成功时 terminated:false + terminateError 可选（review 0.1.2）
+      write: vi.fn(async (): Promise<WslConfWriteResult> => ({ terminated: false })),
     },
     /** 网络（真实 preload 契约有该命名空间；此前缺失导致 NetworkView 用例全在错误态下跑） */
     network: {

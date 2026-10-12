@@ -287,9 +287,53 @@ describe('WslConfPanel 保存与错误面', () => {
     expect(confirm, '差异预览应有确认写入按钮').toBeTruthy()
     confirm!.click()
     await flushPromises()
-    expect(wslAPI.wslconf.write).toHaveBeenCalledWith('Ubuntu', expect.any(String))
+    // 精确对账：首个开关即 automount.enabled（true → false），最小编辑只改这一行
+    expect(wslAPI.wslconf.write).toHaveBeenCalledWith('Ubuntu', '[automount]\nenabled = false\n')
     expect(message.success).toHaveBeenCalledWith(expect.stringContaining('wsl.conf 已保存'))
     expect(w.find('p.error').exists()).toBe(false)
+  })
+
+  it('raw 模式保存：wslconf.write 收到精确的编辑后内容（替换宽断言 — review 0.1.2）', async () => {
+    mount(WslConfPanel, { props: { distroName: 'Ubuntu' }, attachTo: document.body })
+    await flushPromises()
+    const rawBtn = Array.from(document.body.querySelectorAll('button.mode-btn')).find((b) =>
+      (b.textContent ?? '').includes('原始文本'),
+    )
+    expect(rawBtn, '应有「原始文本」模式按钮').toBeTruthy()
+    rawBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    const ta = document.body.querySelector<HTMLTextAreaElement>('.editor-textarea')
+    expect(ta).toBeTruthy()
+    const edited = '# 手工编辑\n[boot]\nsystemd = true\n'
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setter.call(ta!, edited)
+    ta!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    findBodyButton('预览并保存')!.click()
+    await flushPromises()
+    findBodyButton('确认写入')!.click()
+    await flushPromises()
+    expect(wslAPI.wslconf.write).toHaveBeenCalledWith('Ubuntu', edited)
+  })
+
+  it('保存成功但自动终止失败：warning 如实上报 terminateError（review 0.1.2 根治）', async () => {
+    await mountDirty()
+    wslAPI.wslconf.write.mockResolvedValueOnce({
+      terminated: false,
+      terminateError: 'wsl --terminate 超时',
+    })
+    findBodyButton('预览并保存')!.click()
+    await flushPromises()
+    findBodyButton('确认写入')!.click()
+    await flushPromises()
+    expect(message.warning).toHaveBeenCalledWith(
+      expect.stringContaining('wsl.conf 已保存，但按设置自动终止发行版失败'),
+    )
+    expect(message.warning).toHaveBeenCalledWith(expect.stringContaining('wsl --terminate 超时'))
+    // 保存成功路径与终止失败并存：不得再报「已保存 · 生效」的 success
+    expect(message.success).not.toHaveBeenCalled()
   })
 
   it('写入失败走错误提示（错误态）', async () => {

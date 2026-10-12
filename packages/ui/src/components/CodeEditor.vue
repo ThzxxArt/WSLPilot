@@ -51,16 +51,42 @@ function onKeydown(e: KeyboardEvent) {
     const el = e.target as HTMLTextAreaElement
     const start = el.selectionStart
     const end = el.selectionEnd
-    const insert = e.shiftKey ? '' : '  '
     let next = text.value
-    let caret = start + insert.length
-    if (e.shiftKey) {
-      const lineStart = next.lastIndexOf('\n', Math.max(0, start - 1)) + 1
-      const removed = next.slice(lineStart, lineStart + 2) === '  ' ? 2 : 0
-      next = next.slice(0, lineStart) + next.slice(lineStart + removed)
-      caret = Math.max(lineStart, start - removed)
+    let caret = start
+    /** 非 null 时选区恢复为 [caret, selEnd]（多行块整体覆盖） */
+    let selEnd: number | null = null
+    // 跨行选区：整块缩进/反缩进，逐行处理（review 0.1.2 根治：Tab 替换多行选区的数据丢失）
+    if (start !== end && next.slice(start, end).includes('\n')) {
+      const blockStart = next.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+      const nlAfterEnd = next.indexOf('\n', end)
+      const blockEnd = nlAfterEnd === -1 ? next.length : nlAfterEnd
+      const transformed = next
+        .slice(blockStart, blockEnd)
+        .split('\n')
+        .map((line) => {
+          if (e.shiftKey) {
+            // 行首去最多两个空格；无缩进不动
+            const remove = line.startsWith('  ') ? 2 : line.startsWith(' ') ? 1 : 0
+            return line.slice(remove)
+          }
+          // 空行跳过
+          return line.length === 0 ? line : `  ${line}`
+        })
+        .join('\n')
+      next = next.slice(0, blockStart) + transformed + next.slice(blockEnd)
+      caret = blockStart
+      selEnd = blockStart + transformed.length
     } else {
-      next = next.slice(0, start) + insert + next.slice(end)
+      const insert = e.shiftKey ? '' : '  '
+      caret = start + insert.length
+      if (e.shiftKey) {
+        const lineStart = next.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+        const removed = next.slice(lineStart, lineStart + 2) === '  ' ? 2 : 0
+        next = next.slice(0, lineStart) + next.slice(lineStart + removed)
+        caret = Math.max(lineStart, start - removed)
+      } else {
+        next = next.slice(0, start) + insert + next.slice(end)
+      }
     }
     text.value = next
     emit('update:modelValue', next)
@@ -69,7 +95,8 @@ function onKeydown(e: KeyboardEvent) {
         ? requestAnimationFrame
         : (fn: () => void) => setTimeout(fn, 0)
     raf(() => {
-      el.selectionStart = el.selectionEnd = caret
+      el.selectionStart = caret
+      el.selectionEnd = selEnd ?? caret
     })
   }
 }

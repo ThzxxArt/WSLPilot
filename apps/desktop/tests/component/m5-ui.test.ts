@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import CodeEditor from '@ui/components/CodeEditor.vue'
 import Kbd from '@ui/components/Kbd.vue'
@@ -49,6 +49,45 @@ describe('CodeEditor', () => {
     const emitted = w.emitted('update:modelValue')
     expect(emitted).toBeTruthy()
     expect(emitted![0]![0]).toBe('indented')
+  })
+
+  it('多行选区 Tab：每行行首加两空格，空行跳过，选区恢复覆盖块（review 0.1.2）', async () => {
+    const w = mount(CodeEditor, { props: { modelValue: 'a\n\nb' } })
+    const ta = w.find('textarea').element as HTMLTextAreaElement
+    ta.selectionStart = 0
+    ta.selectionEnd = ta.value.length
+    await w.find('textarea').trigger('keydown', { key: 'Tab' })
+    const out = '  a\n\n  b'
+    expect(w.emitted('update:modelValue')![0]![0]).toBe(out)
+    // rAF 恢复选区：多行时覆盖整个变换后的块
+    await vi.waitFor(() => {
+      expect(ta.selectionStart).toBe(0)
+      expect(ta.selectionEnd).toBe(out.length)
+    })
+  })
+
+  it('多行选区 Shift+Tab：每行行首去最多两空格，无缩进不动（review 0.1.2）', async () => {
+    const w = mount(CodeEditor, { props: { modelValue: '  a\n b\nc' } })
+    const ta = w.find('textarea').element as HTMLTextAreaElement
+    ta.selectionStart = 0
+    ta.selectionEnd = ta.value.length
+    await w.find('textarea').trigger('keydown', { key: 'Tab', shiftKey: true })
+    const out = 'a\nb\nc'
+    expect(w.emitted('update:modelValue')![0]![0]).toBe(out)
+    await vi.waitFor(() => {
+      expect(ta.selectionStart).toBe(0)
+      expect(ta.selectionEnd).toBe(out.length)
+    })
+  })
+
+  it('多行选区只变换覆盖块，块外文本不动', async () => {
+    const w = mount(CodeEditor, { props: { modelValue: 'keep\nx\ny\ntail' } })
+    const ta = w.find('textarea').element as HTMLTextAreaElement
+    // 选区从 'x' 行首跨到 'y'（不含 tail 行）
+    ta.selectionStart = 'keep\n'.length
+    ta.selectionEnd = 'keep\nx\ny'.length
+    await w.find('textarea').trigger('keydown', { key: 'Tab' })
+    expect(w.emitted('update:modelValue')![0]![0]).toBe('keep\n  x\n  y\ntail')
   })
 
   it('隐藏行号时可关闭', () => {
