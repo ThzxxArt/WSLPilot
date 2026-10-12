@@ -15,6 +15,8 @@ export default defineConfig({
   // 并行 worker 双开 Electron 会让后启动的实例秒退、断言假红（review 根治）
   workers: 1,
   fullyParallel: false,
+  // review 0.1.2：CI 出现 .only 直接失败 —— 防误提交静默缩减测试面（本地调试仍可用）
+  forbidOnly: !!process.env.CI,
   reporter: [['list'], ['html', { outputFolder: './playwright-report', open: 'never' }]],
   // 视觉回归基线（M7）：基线按平台分文件（{platform} 后缀）并随仓库入库；
   // 'none' = 缺基线直接红（禁止 CI 自动造基线放行 — review 假门禁根治）。

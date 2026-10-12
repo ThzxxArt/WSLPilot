@@ -70,6 +70,15 @@ describe('registry pure parsers', () => {
     expect(parseGuidDetail('{X}', DEBIAN).version).toBe(1)
     expect(parseGuidDetail('{X}', DEBIAN).defaultUid).toBeUndefined()
   })
+
+  it('Version 缺失保留 undefined，不伪造默认 2（review 0.1.2 根治）', () => {
+    const noVersion = '    DistributionName    REG_SZ    Weird\n    BasePath    REG_SZ    C:\\W'
+    const d = parseGuidDetail('{X}', noVersion)
+    expect(d.name).toBe('Weird')
+    expect(d.version).toBeUndefined()
+    const full = parseGuidFull('{X}', noVersion)
+    expect(full?.version).toBeUndefined()
+  })
 })
 
 describe('createRegistryService', () => {
@@ -105,6 +114,33 @@ describe('createRegistryService', () => {
     await expect(svc.listGuids()).resolves.toEqual([])
     await expect(svc.detail('X')).resolves.toEqual({})
     expect(log.debug).toHaveBeenCalled()
+  })
+
+  it('查询失败不写 30s 缓存：恢复后立即重试拿真数据（review 0.1.2 根治）', async () => {
+    let fail = true
+    const good = makeQuery()
+    const svc = createRegistryService(logger(), async (args) => {
+      if (fail) throw new Error('reg transient down')
+      return good(args)
+    })
+    await expect(svc.listGuids()).resolves.toEqual([])
+    fail = false
+    // 失败若被写进 30s TTL 缓存，这里仍会拿到 []（假「确无发行版」）
+    await expect(svc.listGuids()).resolves.toHaveLength(2)
+  })
+
+  it('readAll single-flight：并发调用合并为一次根查询（review 0.1.2 根治）', async () => {
+    const good = makeQuery()
+    const q = vi.fn(async (args: string[]) => {
+      await new Promise((r) => setTimeout(r, 10))
+      return good(args)
+    })
+    const svc = createRegistryService(logger(), q)
+    const [guids, all] = await Promise.all([svc.listGuids(), svc.listAll()])
+    expect(guids).toHaveLength(2)
+    expect(all).toHaveLength(2)
+    const rootQueries = q.mock.calls.filter((c) => !String(c[0]!.join(' ')).includes('{'))
+    expect(rootQueries).toHaveLength(1)
   })
 })
 

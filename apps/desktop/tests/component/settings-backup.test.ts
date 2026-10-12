@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
-import { NCheckbox, NRadioGroup, NSelect } from 'naive-ui'
+import { NCheckbox, NInput, NRadioGroup, NSelect } from 'naive-ui'
+import { defaultConfig } from '@wslpilot/shared'
 import { appError, createWslAPI, distro, findButton, bodyText, type WslAPIMock } from './support'
 
 enableAutoUnmount(afterEach)
@@ -422,5 +423,64 @@ describe('SettingsView 设置 setter 覆盖面（落盘参数逐项对账）', (
     tag.element.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
     await flushPromises()
     expect(wslAPI.config.openExternal).toHaveBeenCalledWith('distros')
+  })
+})
+
+describe('SettingsView 编辑安全与恢复默认（review 0.1.2）', () => {
+  function inputInLine(w: ReturnType<typeof mount>, label: string) {
+    return (
+      w
+        .findAllComponents(NInput)
+        .find((c) =>
+          (c.element as HTMLElement).closest('.setting-line')?.textContent?.includes(label),
+        ) ?? null
+    )
+  }
+
+  it('卸载时 flush 挂起的防抖编辑（400ms 内切页不丢最后一次编辑）', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    const input = inputInLine(w, '字体')
+    expect(input, '找不到「字体」输入框').toBeTruthy()
+    input!.vm.$emit('update:value', 'Fira Code')
+    // 未到 400ms 即卸载：flush 必须把挂起值落盘
+    w.unmount()
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      terminal: { fontFamily: 'Fira Code' },
+    })
+  })
+
+  it('setAccent 落盘失败不得报成功（判 persistField 返回值）', async () => {
+    wslAPI.config.set.mockRejectedValueOnce(new Error('磁盘满'))
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    w.findComponent(NRadioGroup).vm.$emit('update:value', 'ocean')
+    await flushPromises()
+    expect(message.success).not.toHaveBeenCalled()
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('磁盘满'))
+  })
+
+  it('恢复默认设置：确认后全量 patch 默认值并提示成功', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    findButton(w, '恢复默认设置')!.element.click()
+    await flushPromises()
+    expect(dialog.warning).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining('恢复默认设置') }),
+    )
+    const opts = dialog.warning.mock.calls.at(-1)![0] as {
+      onPositiveClick: () => Promise<void>
+    }
+    await opts.onPositiveClick()
+    await flushPromises()
+    const defaults = defaultConfig('settings')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      general: defaults.general,
+      advanced: defaults.advanced,
+      wsl: defaults.wsl,
+      terminal: defaults.terminal,
+      backup: defaults.backup,
+    })
+    expect(message.success).toHaveBeenCalledWith('已恢复默认设置')
   })
 })

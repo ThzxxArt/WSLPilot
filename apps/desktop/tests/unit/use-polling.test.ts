@@ -72,4 +72,51 @@ describe('usePolling', () => {
     vi.advanceTimersByTime(1000)
     expect(task).toHaveBeenCalledTimes(1)
   })
+
+  it('task reject 被 catch 落地（不产生 unhandled rejection — review 0.1.2）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const task = vi.fn(() => Promise.reject(new Error('poll boom')))
+    const { start, stop } = usePolling(task, { intervalMs: 1000, pauseWhenHidden: false })
+    start()
+    vi.advanceTimersByTime(1000)
+    await Promise.resolve()
+    expect(task).toHaveBeenCalledTimes(1)
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('轮询任务失败'), expect.any(Error))
+    stop()
+    errSpy.mockRestore()
+  })
+
+  it('task 同步异常也被捕获', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const task = vi.fn(() => {
+      throw new Error('sync boom')
+    })
+    const { start, stop } = usePolling(task, { intervalMs: 1000, pauseWhenHidden: false })
+    start()
+    expect(() => vi.advanceTimersByTime(1000)).not.toThrow()
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('轮询任务异常'), expect.any(Error))
+    stop()
+    errSpy.mockRestore()
+  })
+
+  it('visibilitychange 真正暂停/恢复定时器（不做空转 — review 0.1.2）', () => {
+    const task = vi.fn()
+    const { start, stop } = usePolling(task, { intervalMs: 1000, pauseWhenHidden: true })
+    start()
+    vi.advanceTimersByTime(1000)
+    expect(task).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    vi.advanceTimersByTime(5000)
+    expect(task).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    // 恢复可见：立即补一次采样
+    expect(task).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(2000)
+    expect(task).toHaveBeenCalledTimes(4)
+    stop()
+  })
 })

@@ -697,6 +697,40 @@ describe('NetworkService 代理脚本', () => {
     })
     await expect(svc.proxyApply('a\u0000b')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
   })
+
+  it('proxyApply / proxyClear 轻量串行：并发调用不交错（review 0.1.2 根治）', async () => {
+    let active = 0
+    let maxActive = 0
+    const gate = () =>
+      new Promise<void>((r) =>
+        setTimeout(() => {
+          active--
+          r()
+        }, 5),
+      )
+    const runIn = vi.fn(async () => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await gate()
+      return { code: 0, stdout: '', stderr: '' }
+    })
+    const runWsl = vi.fn(async () => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await gate()
+      return { code: 0, stdout: '', stderr: '' }
+    })
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader(),
+      runWslWithStdin: runIn,
+      runWsl,
+    })
+    await Promise.all([svc.proxyApply('Ubuntu'), svc.proxyClear('Ubuntu')])
+    expect(maxActive).toBe(1)
+    expect(runIn).toHaveBeenCalledTimes(1)
+    expect(runWsl).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('NetworkService 默认依赖', () => {

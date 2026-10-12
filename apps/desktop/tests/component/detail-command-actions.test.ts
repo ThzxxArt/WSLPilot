@@ -10,6 +10,11 @@ import {
   bodyText,
   type WslAPIMock,
 } from './support'
+import {
+  flattenPaletteGroups,
+  groupPaletteItems,
+  type PaletteItem,
+} from '../../src/renderer/features/command/palette'
 
 enableAutoUnmount(afterEach)
 
@@ -63,9 +68,13 @@ let wslAPI: WslAPIMock
 const { createPinia, setActivePinia } = await import('pinia')
 const { useDistrosStore } = await import('../../src/renderer/stores/distros')
 const { useActionsStore } = await import('../../src/renderer/stores/actions')
+const { useTasksStore } = await import('../../src/renderer/stores/tasks')
 const { useCommandPalette } = await import('../../src/renderer/composables/useCommandPalette')
 const DistroDetailModal = (
   await import('../../src/renderer/features/distros/DistroDetailModal.vue')
+).default
+const InstallDistroModal = (
+  await import('../../src/renderer/features/distros/InstallDistroModal.vue')
 ).default
 const CommandPalette = (await import('../../src/renderer/features/command/CommandPalette.vue'))
   .default
@@ -279,6 +288,147 @@ describe('CommandPalette 搜索与键盘面', () => {
       'settings',
       expect.objectContaining({ general: expect.objectContaining({ reduceMotion: true }) }),
     )
+  })
+
+  it('方向键高亮与视觉顺序一致（分组展平序 — review 0.1.2 根治）', async () => {
+    await openPalette()
+    const palette = document.body.querySelector('.palette')!
+    const visibleItems = () =>
+      Array.from(document.body.querySelectorAll<HTMLElement>('.palette-item')).filter(
+        (el) => el.getAttribute('aria-hidden') !== 'true',
+      )
+    // 空查询下视觉分组序为 动作→发行版→导航→设置；原实现 flat 按 buildItems 插入序，
+    // 第二个高亮会落到渲染在「设置」组的「打开配置目录」，视觉跳组
+    palette.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await flushPromises()
+    expect(visibleItems()[1]!.classList.contains('active')).toBe(true)
+    expect(paletteInput().getAttribute('aria-activedescendant')).toBe(visibleItems()[1]!.id)
+
+    palette.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await flushPromises()
+    expect(visibleItems()[2]!.classList.contains('active')).toBe(true)
+    expect(paletteInput().getAttribute('aria-activedescendant')).toBe(visibleItems()[2]!.id)
+  })
+
+  it('结果集缩减后 activeIndex 夹紧：Enter 执行仍存在的最后一项', async () => {
+    useDistrosStore().items = [distro({ name: 'Ubuntu' }), distro({ name: 'Debian' })]
+    await openPalette()
+    const input = paletteInput()
+    input.value = '@ 启动'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    const palette = document.body.querySelector('.palette')!
+    for (let i = 0; i < 10; i++) {
+      palette.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    }
+    await flushPromises()
+
+    // 发行版缩水为 1 个：原实现 activeIndex 越界后 Enter 拿到 undefined，静默无响应
+    useDistrosStore().items = [distro({ name: 'Ubuntu' })]
+    await flushPromises()
+    palette.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(wslAPI.distros.start).toHaveBeenCalledWith('Ubuntu')
+  })
+})
+
+describe('palette 展平序纯逻辑', () => {
+  function item(id: string, group: PaletteItem['group']): PaletteItem {
+    return { id, group, label: id, run: vi.fn() }
+  }
+
+  it('flattenPaletteGroups 按分组序展平、组内保持传入（分数）序', () => {
+    // 模拟按分数排序后的交错顺序：动作 → 发行版 → 动作
+    const ranked = [
+      item('a1', '动作'),
+      item('d1', '发行版'),
+      item('a2', '动作'),
+      item('s1', '设置'),
+    ]
+    const flat = flattenPaletteGroups(groupPaletteItems(ranked))
+    expect(flat.map((i) => i.id)).toEqual(['a1', 'a2', 'd1', 's1'])
+  })
+})
+
+describe('InstallDistroModal 安装面', () => {
+  async function mountInstall() {
+    wslAPI.distros.listOnline.mockResolvedValue(['Ubuntu'])
+    const w = mount(InstallDistroModal, { props: { show: true }, attachTo: document.body })
+    await flushPromises()
+    return w
+  }
+
+  it('双击「开始安装」只发起一次（starting in-flight 锁 — review 0.1.2 根治）', async () => {
+    let release!: (v: { taskId: string }) => void
+    wslAPI.distros.install.mockImplementationOnce(
+      () => new Promise<{ taskId: string }>((r) => (release = r)),
+    )
+    await mountInstall()
+    const btn = findBodyButton('开始安装')!
+    btn.click()
+    btn.click()
+    await flushPromises()
+    expect(wslAPI.distros.install).toHaveBeenCalledTimes(1)
+    release({ taskId: 'ins' })
+    await flushPromises()
+  })
+
+  it('完成后「打开终端」携带 query.distro（新装发行版直达）', async () => {
+    await mountInstall()
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    useTasksStore().applyProgress({
+      taskId: 'ins',
+      type: 'install',
+      distro: 'Ubuntu',
+      percent: 100,
+      message: '安装完成',
+      status: 'success',
+    })
+    await flushPromises()
+    findBodyButton('打开终端')!.click()
+    await flushPromises()
+    expect(routerMock.push).toHaveBeenCalledWith({
+      path: '/terminal',
+      query: { distro: 'Ubuntu' },
+    })
+  })
+
+  it('任务记录被 trim 淘汰不为死路：给出「关闭 / 重新开始」兜底', async () => {
+    await mountInstall()
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    // 模拟 trimFinished 把该任务淘汰（activeTaskId 还在、task 为 null）
+    useTasksStore().entries = []
+    await flushPromises()
+    expect(bodyText()).toContain('任务记录已滚动清理')
+    expect(findBodyButton('关闭')).toBeTruthy()
+    expect(findBodyButton('重新开始')).toBeTruthy()
+    findBodyButton('重新开始')!.click()
+    await flushPromises()
+    expect(bodyText()).toContain('选择发行版')
+  })
+
+  it('重新打开弹窗重置用时（不沿用上次安装读数）', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    try {
+      const w = await mountInstall()
+      findBodyButton('开始安装')!.click()
+      await flushPromises()
+      vi.advanceTimersByTime(1500)
+      await flushPromises()
+      expect(bodyText()).toContain('用时 00:01')
+
+      await w.setProps({ show: false })
+      await flushPromises()
+      await w.setProps({ show: true })
+      await flushPromises()
+      findBodyButton('开始安装')!.click()
+      await flushPromises()
+      expect(bodyText()).toContain('用时 00:00')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

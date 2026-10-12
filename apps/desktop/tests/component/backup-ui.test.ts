@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { NSelect, NRadioGroup, NCheckbox } from 'naive-ui'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
+import { NMessageProvider, NSelect, NRadioGroup, NCheckbox } from 'naive-ui'
 import ProgressRing from '@ui/components/ProgressRing.vue'
+import BackupView from '../../src/renderer/views/BackupView.vue'
 import ExportWizard from '../../src/renderer/features/backup/ExportWizard.vue'
 import ImportWizard from '../../src/renderer/features/backup/ImportWizard.vue'
 import MoveWizard from '../../src/renderer/features/backup/MoveWizard.vue'
 import type { DistroView } from '@wslpilot/shared'
+
+enableAutoUnmount(afterEach)
 
 const wslAPI = {
   app: {
@@ -24,9 +28,16 @@ const wslAPI = {
     move: vi.fn(),
     listBackups: vi.fn(async () => []),
   },
+  distros: {
+    list: vi.fn(async () => [] as DistroView[]),
+  },
 }
 // happy-dom 已提供 window：只挂 wslAPI，绝不整体覆盖（覆盖会破坏 DOM 事件）
 ;(globalThis as any).window.wslAPI = wslAPI
+
+const { createPinia, setActivePinia } = await import('pinia')
+const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+const { useTasksStore } = await import('../../src/renderer/stores/tasks')
 
 function distro(name: string, state: 'Running' | 'Stopped' = 'Stopped'): DistroView {
   return {
@@ -99,6 +110,48 @@ describe('ExportWizard', () => {
     expect(last.name).toBe('Ubuntu')
     // 选中后自动建议默认路径
     expect(last.path).toContain('D:\\Backups')
+  })
+
+  it('名称/格式变化跟随建议路径（未手改时）；手工路径不被覆盖（review 0.1.2 根治）', async () => {
+    const w = mount(ExportWizard, {
+      props: {
+        step: 1,
+        form: { name: '', path: '', format: 'tar' },
+        distros: [distro('Ubuntu'), distro('Debian')],
+        defaultDir: 'D:\\Backups',
+        keepRecent: 5,
+      },
+    })
+    const select = w.findComponent(NSelect)
+    await select.vm.$emit('update:value', 'Ubuntu')
+    await flushPromises()
+    let last = w.emitted('update:form')!.at(-1)![0] as {
+      name: string
+      path: string
+      format: string
+    }
+    expect(last.path).toContain('Ubuntu')
+    expect(last.path).toMatch(/\.tar$/)
+
+    // 父级回传表单并进入第 2 步后切格式：已建议后缀同步为 .vhdx，路径跟随
+    await w.setProps({ step: 2, form: { ...last, format: 'tar' } })
+    const rg = w.findComponent(NRadioGroup)
+    await rg.vm.$emit('update:value', 'vhd')
+    await flushPromises()
+    last = w.emitted('update:form')!.at(-1)![0] as { name: string; path: string; format: string }
+    expect(last.format).toBe('vhd')
+    expect(last.path).toMatch(/\.vhdx$/)
+
+    // 用户手改路径后：name 再变化不得覆盖
+    await w.setProps({
+      step: 1,
+      form: { name: 'Ubuntu', path: 'D:\\custom\\my.tar', format: 'vhd' },
+    })
+    await flushPromises()
+    await w.findComponent(NSelect).vm.$emit('update:value', 'Debian')
+    await flushPromises()
+    last = w.emitted('update:form')!.at(-1)![0] as { name: string; path: string; format: string }
+    expect(last.path).toBe('D:\\custom\\my.tar')
   })
 
   it('step 2 browse button picks save path and emits', async () => {
@@ -212,6 +265,41 @@ describe('ImportWizard', () => {
     expect(w.text()).toContain('安装位置')
     expect(w.text()).toContain('建议使用独立空目录')
   })
+
+  it('手动输入 archivePath 按扩展名同步 format（review 0.1.2 根治）', async () => {
+    const w = mount(ImportWizard, {
+      props: {
+        step: 2,
+        form: {
+          name: 'New',
+          archivePath: '',
+          installPath: 'D:\\New',
+          format: 'tar',
+          version: 2,
+          inPlace: false,
+        },
+        distros: [],
+        defaultDir: 'D:\\Backups',
+      },
+    })
+    const input = w.find('input[placeholder="选择 .tar 或 .vhdx 备份文件"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('D:\\b\\u.vhdx')
+    await flushPromises()
+    let last = w.emitted('update:form')!.at(-1)![0] as { format: string }
+    expect(last.format).toBe('vhd')
+
+    await input.setValue('D:\\b\\u.tar')
+    await flushPromises()
+    last = w.emitted('update:form')!.at(-1)![0] as { format: string }
+    expect(last.format).toBe('tar')
+
+    // 清空输入不擅自改格式
+    await input.setValue('')
+    await flushPromises()
+    last = w.emitted('update:form')!.at(-1)![0] as { format: string }
+    expect(last.format).toBe('tar')
+  })
 })
 
 describe('MoveWizard', () => {
@@ -250,5 +338,162 @@ describe('MoveWizard', () => {
       },
     })
     expect(w2.text()).toContain('自动备份已关闭')
+  })
+
+  it('目标等于当前位置时提示（组件内可得 basePath — review 0.1.2 根治）', () => {
+    const w = mount(MoveWizard, {
+      props: {
+        step: 2,
+        form: { name: 'Ubuntu', path: 'c:\\wsl\\ubuntu\\', terminateFirst: true },
+        distros: [distro('Ubuntu')],
+        autoBackup: true,
+      },
+    })
+    // 大小写/尾分隔符不同也算同一位置
+    expect(w.text()).toContain('目标位置与发行版当前位置相同')
+  })
+})
+
+describe('BackupView 并发与重置（review 0.1.2 根治）', () => {
+  /** BackupView 依赖 useMessage：必须包 NMessageProvider 才能挂载 */
+  function mountBackupView() {
+    const Host = defineComponent({
+      setup: () => () => h(NMessageProvider, null, { default: () => h(BackupView) }),
+    })
+    return mount(Host, { attachTo: document.body })
+  }
+
+  function findBtn(w: ReturnType<typeof mount>, label: string) {
+    return w.findAll('button').find((b) => b.text().includes(label)) ?? null
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    document.body.innerHTML = ''
+    wslAPI.io.export.mockResolvedValue({ taskId: 'new-1' })
+    wslAPI.io.listBackups.mockResolvedValue([])
+  })
+
+  it('挂载时接续本页运行中任务到进度视图；reset 保留默认备份格式', async () => {
+    const settings = useSettingsStore()
+    settings.backupFormat = 'vhd'
+    const tasks = useTasksStore()
+    tasks.track({ taskId: 'run-1' }, { type: 'export', distro: 'Ubuntu', message: '导出 Ubuntu' })
+
+    const w = mountBackupView()
+    await flushPromises()
+    // 接续：直接进入进度步骤（无需重走向导）
+    expect(w.text()).toContain('查看日志')
+
+    const listCallsBefore = wslAPI.io.listBackups.mock.calls.length
+    tasks.applyProgress({
+      taskId: 'run-1',
+      type: 'export',
+      percent: 100,
+      message: '完成',
+      status: 'success',
+    })
+    await flushPromises()
+    // isDone 时刷新最近备份列表（review 0.1.2 根治）
+    expect(wslAPI.io.listBackups.mock.calls.length).toBeGreaterThan(listCallsBefore)
+    const again = findBtn(w, '再来一次')
+    expect(again).toBeTruthy()
+    await again!.trigger('click')
+    await flushPromises()
+
+    // reset 不丢设置默认格式（export / import 都保留 vhd）
+    expect(w.findComponent(ExportWizard).props('form').format).toBe('vhd')
+    const rg = w.findComponent(NRadioGroup)
+    await rg.vm.$emit('update:value', 'import')
+    await flushPromises()
+    expect(w.findComponent(ImportWizard).props('form').format).toBe('vhd')
+  })
+
+  it('双击「开始」只启动一个长任务（starting 锁 — review 0.1.2 根治）', async () => {
+    let releaseExport!: (v: unknown) => void
+    wslAPI.io.export.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseExport = r
+      }) as never,
+    )
+    const w = mountBackupView()
+    await flushPromises()
+
+    // 通过 ExportWizard 更新表单，随后两步到确认页
+    w.findComponent(ExportWizard).vm.$emit('update:form', {
+      name: 'Ubuntu',
+      path: 'D:\\b\\u.tar',
+      format: 'tar',
+    })
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+
+    const startBtn = findBtn(w, '开始导出备份')
+    expect(startBtn).toBeTruthy()
+    await startBtn!.trigger('click')
+    await startBtn!.trigger('click')
+    await flushPromises()
+    // 锁生效：两次点击只拉起一个长任务
+    expect(wslAPI.io.export).toHaveBeenCalledTimes(1)
+    releaseExport({ taskId: 'new-1' })
+    await flushPromises()
+    // 启动完成后进入进度页
+    expect(w.text()).toContain('查看日志')
+  })
+
+  it('迁移目标等于当前位置时「下一步」被拦截（review 0.1.2 根治）', async () => {
+    wslAPI.distros.list.mockResolvedValue([distro('Ubuntu')])
+    const w = mountBackupView()
+    await flushPromises()
+    const rg = w.findComponent(NRadioGroup)
+    await rg.vm.$emit('update:value', 'move')
+    await flushPromises()
+    w.findComponent(MoveWizard).vm.$emit('update:form', {
+      name: 'Ubuntu',
+      path: 'c:\\wsl\\ubuntu\\',
+      terminateFirst: true,
+    })
+    await flushPromises()
+    // step1 → 2
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('迁移目标位置')
+    // step2 → 3 的校验被硬拦截：停在 step2，不进入确认页
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('迁移目标位置')
+    expect(w.text()).not.toContain('确认信息')
+  })
+
+  it('日志抽屉只渲染尾部 ≤500 行并提示截断（review 0.1.2 根治）', async () => {
+    const tasks = useTasksStore()
+    tasks.track({ taskId: 'run-2' }, { type: 'export', distro: 'U', message: 'm' })
+    for (let i = 0; i < 600; i++) {
+      tasks.applyProgress({
+        taskId: 'run-2',
+        type: 'export',
+        percent: 10,
+        message: 'm',
+        status: 'running',
+        logLine: `行-${i}`,
+      })
+    }
+    const w = mountBackupView()
+    await flushPromises()
+    await findBtn(w, '查看日志')!.trigger('click')
+    await flushPromises()
+
+    const pre = document.body.querySelector('pre.log')
+    expect(pre).toBeTruthy()
+    const text = pre!.textContent ?? ''
+    // 只渲染尾部 500 行（行-100..行-599）
+    expect(text.startsWith('行-100')).toBe(true)
+    expect(text).toContain('行-599')
+    expect(text).not.toContain('行-99\n')
+    expect(document.body.textContent).toContain('仅显示最后 500 行')
   })
 })

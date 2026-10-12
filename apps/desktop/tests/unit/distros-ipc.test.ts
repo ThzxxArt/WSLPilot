@@ -489,4 +489,41 @@ describe('distros + meta IPC handlers', () => {
     expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
     await expect(wrapped.get(CH.distrosUnregister)({}, 'a/b')).rejects.toThrow()
   })
+
+  it('unregister 互斥：同发行版（大小写归一）有 running 任务时拒绝（review 0.1.2 根治）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    deps.tasks.list = vi.fn(() => [
+      {
+        taskId: 't9',
+        type: 'convert',
+        distro: 'ubuntu',
+        status: 'running',
+        percent: null,
+        message: '转换中',
+        logs: [],
+        startedAt: 1,
+      },
+    ])
+    await expect(wrapped.get(CH.distrosUnregister)({}, 'UBUNTU')).rejects.toThrow(
+      /TASK_FAILED.*仍有 1 个任务/,
+    )
+    expect(deps.wsl.unregister).not.toHaveBeenCalled()
+
+    // 已终态任务不拦截
+    deps.tasks.list = vi.fn(() => [
+      {
+        taskId: 't9',
+        type: 'convert',
+        distro: 'ubuntu',
+        status: 'success',
+        percent: 100,
+        message: '完成',
+        logs: [],
+        startedAt: 1,
+      },
+    ])
+    await wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')
+    expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
+  })
 })

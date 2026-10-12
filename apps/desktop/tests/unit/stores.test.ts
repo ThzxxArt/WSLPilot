@@ -118,6 +118,28 @@ describe('useDistrosStore', () => {
     await p1
     expect(s.items.map((d) => d.name)).toEqual(['B'])
   })
+
+  it('busy key / byName 大小写归一（WSL 名不区分大小写 — review 0.1.2）', async () => {
+    wslAPI.distros.list.mockResolvedValue([
+      { name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: false },
+    ])
+    let resolveStart!: () => void
+    wslAPI.distros.start.mockReturnValueOnce(new Promise<void>((r) => (resolveStart = r)))
+    const s = useDistrosStore()
+    await s.refresh()
+    // byName 大小写不敏感
+    expect(s.byName('ubuntu')?.name).toBe('Ubuntu')
+    expect(s.byName('UBUNTU')?.name).toBe('Ubuntu')
+    // busy 归一：start('ubuntu') 必须让 isBusy('Ubuntu') 命中，按钮 loading 才生效
+    const p = s.start('ubuntu')
+    expect(s.isBusy('Ubuntu')).toBe(true)
+    expect(s.isBusy('UBUNTU')).toBe(true)
+    expect(s.isBusy('ubuntu', 'start')).toBe(true)
+    expect(s.isBusy('Ubuntu', 'terminate')).toBe(false)
+    resolveStart()
+    await p
+    expect(s.isBusy('UBUNTU')).toBe(false)
+  })
 })
 
 describe('useSettingsStore', () => {
@@ -376,6 +398,53 @@ describe('useMetricsStore', () => {
     const s = useMetricsStore()
     const m = await s.sampleDistro('A')
     expect(m!.cpuPercent).toBe(5)
+  })
+
+  it('sampleDistro 区分「未运行」与「采样失败」（review 0.1.2）', async () => {
+    const s = useMetricsStore()
+    // 未运行：预期状态，不污染 lastError
+    wslAPI.metrics.sample.mockRejectedValueOnce(
+      new Error(
+        'WSLPILOT:{"code":"DISTRO_NOT_RUNNING","message":"发行版 A 未运行","recoverable":true}',
+      ),
+    )
+    await expect(s.sampleDistro('A')).resolves.toBeNull()
+    expect(s.lastError).toBeNull()
+    // 采样失败：错误必须落地，不再静默 null
+    wslAPI.metrics.sample.mockRejectedValueOnce(new Error('采样超时'))
+    await expect(s.sampleDistro('A')).resolves.toBeNull()
+    expect(s.lastError).toBeTruthy()
+  })
+
+  it('无 Running 发行版时不 push 0 假数据点（history 冻结 — review 0.1.2）', async () => {
+    wslAPI.metrics.sampleOverview.mockResolvedValue({
+      runningCount: 0,
+      totalCount: 2,
+      memUsedKB: 0,
+      memTotalKB: 0,
+      diskUsedKB: 0,
+      diskTotalKB: 0,
+      cpuPercent: 0,
+      sampledAt: 't0',
+      perDistro: {},
+    })
+    const s = useMetricsStore()
+    await s.sample()
+    expect(s.history.cpu).toHaveLength(0)
+
+    wslAPI.metrics.sampleOverview.mockResolvedValue({
+      runningCount: 1,
+      totalCount: 2,
+      memUsedKB: 1,
+      memTotalKB: 2,
+      diskUsedKB: 0,
+      diskTotalKB: 0,
+      cpuPercent: 7,
+      sampledAt: 't1',
+      perDistro: {},
+    })
+    await s.sample()
+    expect(s.history.cpu).toEqual([7])
   })
 
   it('sample ignores non-overview payloads', async () => {

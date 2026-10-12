@@ -47,6 +47,10 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # 设计令牌漂移门控（review 0.1.2）：tokens.ts 与生成的 tokens.generated.scss 必须同步
+      - name: Tokens drift check
+        run: npm run tokens:check
+
       - name: Unit & integration tests (coverage gate ≥85%)
         run: npm run test:coverage
 

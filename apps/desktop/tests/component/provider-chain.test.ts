@@ -48,8 +48,14 @@ describe('生产壳 provider 链（真 naive-ui）', () => {
       },
     })
     await flushPromises()
-    await new Promise((r) => setTimeout(r, 100))
-    await flushPromises()
+    // review 0.1.2：去掉硬 sleep 100ms（负载相关抖动源）——条件等待：轮询断言直到满足或超时
+    await vi.waitFor(
+      () => {
+        expect(wrapper.text()).toContain('网络模式')
+        expect(wrapper.text()).not.toContain('读取失败')
+      },
+      { timeout: 30_000, interval: 50 },
+    )
     // NetworkView setup 走完（useNotification 不抛）且渲染出镜像卡标题
     expect(wrapper.text()).toContain('网络模式')
     // 健康路径断言：真实 network 契约（support.createWslAPI 已补命名空间）下不得落错误态

@@ -99,6 +99,50 @@ describe('useActionsStore', () => {
     expect(s.lastRemoved).toBeNull()
   })
 
+  it('并发 upsert 不丢更新（写队列 — review 0.1.2 根治）', async () => {
+    let releaseFirst!: () => void
+    wslAPI.actions.save
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((r) => {
+            releaseFirst = r
+          }),
+      )
+      .mockResolvedValue({})
+    const s = useActionsStore()
+    const p1 = s.upsert(A1)
+    const p2 = s.upsert(A2)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(wslAPI.actions.save).toHaveBeenCalledTimes(1)
+    releaseFirst()
+    await Promise.all([p1, p2])
+    // 第二次写入基于第一次的结果：两条都在，而不是后者覆盖前者
+    expect(s.items.map((a) => a.id).sort()).toEqual(['a1', 'a2'])
+    expect(wslAPI.actions.save).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: 'a1' }),
+      expect.objectContaining({ id: 'a2' }),
+    ])
+  })
+
+  it('remove 返回被删对象；连续删除后各自撤销恢复各自（review 0.1.2 根治）', async () => {
+    wslAPI.actions.save.mockResolvedValue({})
+    const s = useActionsStore()
+    await s.upsert(A1)
+    await s.upsert(A2)
+    const r1 = await s.remove('a1')
+    const r2 = await s.remove('a2')
+    expect(r1?.id).toBe('a1')
+    expect(r2?.id).toBe('a2')
+    expect(s.lastRemoved?.id).toBe('a2')
+    // 点 A 的撤销：恢复 A，不误清 B 的撤销缓冲
+    await s.undoRestore(r1!)
+    expect(s.items.map((a) => a.id)).toEqual(['a1'])
+    expect(s.lastRemoved?.id).toBe('a2')
+    await s.undoRestore(r2!)
+    expect(s.items.map((a) => a.id).sort()).toEqual(['a1', 'a2'])
+    expect(s.lastRemoved).toBeNull()
+  })
+
   it('remove 不存在的 id 无副作用；undoRestore 空操作', async () => {
     const s = useActionsStore()
     await s.remove('nope')

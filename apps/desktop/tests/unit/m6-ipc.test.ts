@@ -60,6 +60,7 @@ describe('network handlers（M6）', () => {
     const handlers = collect(registerNetworkHandlers, {
       network,
       tasks: makeTasks(),
+      wsl: { assertRunning: vi.fn(async () => {}) },
     })
     const out = await handlers.get(CH.networkStatus)!(makeCtx(), undefined)
     expect(out).toEqual({ mode: 'mirrored' })
@@ -68,7 +69,11 @@ describe('network handlers（M6）', () => {
   it('network:apply 以 id 为白名单键启动长任务', async () => {
     const network = { applyRule: vi.fn(async () => {}) }
     const tasks = makeTasks()
-    const handlers = collect(registerNetworkHandlers, { network, tasks })
+    const handlers = collect(registerNetworkHandlers, {
+      network,
+      tasks,
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     const handle = await handlers.get(CH.networkApply)!(makeCtx(), 'dev-3000')
     expect(handle).toEqual({ taskId: 't' })
     expect(tasks.start).toHaveBeenCalledWith(
@@ -80,7 +85,11 @@ describe('network handlers（M6）', () => {
   it('network:applyAll / network:remove 走串行锁', async () => {
     const network = { applyAll: vi.fn(async () => {}), removeRule: vi.fn(async () => {}) }
     const tasks = makeTasks()
-    const handlers = collect(registerNetworkHandlers, { network, tasks })
+    const handlers = collect(registerNetworkHandlers, {
+      network,
+      tasks,
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     await handlers.get(CH.networkApplyAll)!(makeCtx(), undefined)
     await handlers.get(CH.networkRemove)!(makeCtx(), 'dev-3000')
     expect(network.applyAll).toHaveBeenCalled()
@@ -98,7 +107,11 @@ describe('network handlers（M6）', () => {
         content: 'x',
       })),
     }
-    const handlers = collect(registerNetworkHandlers, { network, tasks: makeTasks() })
+    const handlers = collect(registerNetworkHandlers, {
+      network,
+      tasks: makeTasks(),
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     expect(await handlers.get(CH.networkProxyApply)!(makeCtx(), { distro: 'Ubuntu' })).toEqual({
       distro: 'Ubuntu',
     })
@@ -110,6 +123,29 @@ describe('network handlers（M6）', () => {
     ).toMatchObject({ exists: true })
     expect(network.proxyApply).toHaveBeenCalledWith('Ubuntu')
     expect(network.proxyClear).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('硬门禁：proxy 三通道未运行一律拒绝（review 0.1.2 根治）', async () => {
+    const network = {
+      proxyApply: vi.fn(async () => {}),
+      proxyClear: vi.fn(async () => {}),
+      proxyState: vi.fn(async () => ({ path: '', exists: false, content: '' })),
+    }
+    const assertRunning = vi.fn(async () => {
+      throw new Error('发行版 Ubuntu 未运行')
+    })
+    const handlers = collect(registerNetworkHandlers, {
+      network,
+      tasks: makeTasks(),
+      wsl: { assertRunning },
+    })
+    for (const ch of [CH.networkProxyApply, CH.networkProxyClear, CH.networkProxyState]) {
+      await expect(handlers.get(ch)!(makeCtx(), { distro: 'Ubuntu' })).rejects.toThrow('未运行')
+    }
+    expect(network.proxyApply).not.toHaveBeenCalled()
+    expect(network.proxyClear).not.toHaveBeenCalled()
+    expect(network.proxyState).not.toHaveBeenCalled()
+    expect(assertRunning).toHaveBeenCalledTimes(3)
   })
 })
 

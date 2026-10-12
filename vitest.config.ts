@@ -25,10 +25,9 @@ export default defineConfig({
         'apps/desktop/src/preload/**/*.ts',
         'apps/desktop/src/renderer/stores/**/*.ts',
         'apps/desktop/src/renderer/composables/**/*.ts',
-        'apps/desktop/src/renderer/features/terminal/**/*.ts',
-        'apps/desktop/src/renderer/features/backup/**/*.ts',
-        'apps/desktop/src/renderer/features/command/**/*.ts',
-        'apps/desktop/src/renderer/features/network/**/*.ts',
+        // review 0.1.2：features 用通配整体纳入 —— 枚举白名单会让未来新 feature 目录的
+        // .ts 静默掉出分母（漏测 = 不受门禁约束），枚举维护跟不上新增目录
+        'apps/desktop/src/renderer/features/**/*.ts',
       ],
       exclude: [
         '**/*.test.ts',

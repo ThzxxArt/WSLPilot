@@ -107,6 +107,26 @@ describe('wslconf handlers（M5）', () => {
     expect(wslconf.read).not.toHaveBeenCalled()
     expect(wslconf.write).not.toHaveBeenCalled()
   })
+
+  it('terminate 失败不判整次写入失败：返回 terminated:false + terminateError（review 0.1.2 根治）', async () => {
+    const wslconf = { read: vi.fn(), write: vi.fn(async () => {}) }
+    const terminate = vi.fn(async () => {
+      throw new Error('wsl --terminate 失败')
+    })
+    const handlers = collect(registerWslConfHandlers, {
+      wslconf,
+      wsl: { terminate, assertRunning: vi.fn(async () => {}) },
+    })
+    const ctx = makeCtx()
+    ctx.configService.loadSync = vi.fn(() => ({ wsl: { autoShutdownAfterConfigChange: true } }))
+    const out = await handlers.get(CH.wslconfWrite)!(ctx, { name: 'Ubuntu', content: '[a]\n' })
+    expect(out).toEqual({
+      terminated: false,
+      terminateError: expect.stringContaining('terminate 失败'),
+    })
+    // 文件已写入成功，绝不回滚/判失败
+    expect(wslconf.write).toHaveBeenCalledWith('Ubuntu', '[a]\n')
+  })
 })
 
 describe('action handlers（M5）', () => {
@@ -136,6 +156,43 @@ describe('action handlers（M5）', () => {
     } as any
   }
 
+  it('action:run 硬门禁双保险：prepare 后未运行发行版拒绝执行（review 0.1.2 根治）', async () => {
+    const tasks = makeTasks()
+    const runner = {
+      prepare: vi.fn(async () => ({
+        action: {
+          id: 'a1',
+          label: '测试',
+          scope: 'distro',
+          program: '/bin/true',
+          args: [],
+          terminal: false,
+          confirm: false,
+        },
+        distro: 'Ubuntu',
+        program: '/bin/true',
+        args: [],
+        rawCommand: 'x',
+      })),
+      spawnTerminal: vi.fn(),
+      run: vi.fn(async () => {}),
+      killSession: vi.fn(),
+    }
+    const assertRunning = vi.fn(async () => {
+      throw new Error('发行版 Ubuntu 未运行')
+    })
+    const handlers = collect(registerActionHandlers, {
+      runner,
+      tasks,
+      wsl: { assertRunning },
+    })
+    await expect(
+      handlers.get(CH.actionRun)!(makeCtx(), { actionId: 'a1', distro: 'Ubuntu' }),
+    ).rejects.toThrow('未运行')
+    expect(tasks.start).not.toHaveBeenCalled()
+    expect(assertRunning).toHaveBeenCalledWith('Ubuntu')
+  })
+
   it('headless 动作返回 TaskHandle（无 ptyId）并按发行版加锁', async () => {
     const tasks = makeTasks()
     const runner = {
@@ -158,7 +215,11 @@ describe('action handlers（M5）', () => {
       run: vi.fn(async () => {}),
       killSession: vi.fn(),
     }
-    const handlers = collect(registerActionHandlers, { runner, tasks })
+    const handlers = collect(registerActionHandlers, {
+      runner,
+      tasks,
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     const handle = await handlers.get(CH.actionRun)!(makeCtx(), {
       actionId: 'a1',
       distro: 'Ubuntu',
@@ -192,7 +253,11 @@ describe('action handlers（M5）', () => {
       run: vi.fn(async () => {}),
       killSession: vi.fn(),
     }
-    const handlers = collect(registerActionHandlers, { runner, tasks })
+    const handlers = collect(registerActionHandlers, {
+      runner,
+      tasks,
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     const handle = await handlers.get(CH.actionRun)!(makeCtx(), {
       actionId: 'a2',
       distro: 'Ubuntu',
@@ -227,7 +292,11 @@ describe('action handlers（M5）', () => {
       run: vi.fn(async () => {}),
       killSession: vi.fn(),
     }
-    const handlers = collect(registerActionHandlers, { runner, tasks })
+    const handlers = collect(registerActionHandlers, {
+      runner,
+      tasks,
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     await expect(
       handlers.get(CH.actionRun)!(makeCtx(), { actionId: 'a2', distro: 'Ubuntu' }),
     ).rejects.toThrow('scheduler closed')
@@ -245,7 +314,10 @@ describe('fs handlers（M5）', () => {
       write: vi.fn(async () => {}),
       revealInExplorer: vi.fn(async () => {}),
     }
-    const handlers = collect(registerFsHandlers, { fsBridge })
+    const handlers = collect(registerFsHandlers, {
+      fsBridge,
+      wsl: { assertRunning: vi.fn(async () => {}) },
+    })
     const ctx = makeCtx()
 
     const entries = await handlers.get(CH.fsReadDir)!(ctx, { distro: 'Ubuntu', path: '/' })
@@ -262,5 +334,17 @@ describe('fs handlers（M5）', () => {
 
     await handlers.get(CH.fsRevealInExplorer)!(ctx, { distro: 'Ubuntu', path: '/etc' })
     expect(fsBridge.revealInExplorer).toHaveBeenCalled()
+  })
+
+  it('revealInExplorer 同样过运行门禁（review 0.1.2 根治：此前静默失效）', async () => {
+    const fsBridge = { revealInExplorer: vi.fn(async () => {}) }
+    const assertRunning = vi.fn(async () => {
+      throw new Error('发行版 Ubuntu 未运行')
+    })
+    const handlers = collect(registerFsHandlers, { fsBridge, wsl: { assertRunning } })
+    await expect(
+      handlers.get(CH.fsRevealInExplorer)!(makeCtx(), { distro: 'Ubuntu', path: '/etc' }),
+    ).rejects.toThrow('未运行')
+    expect(fsBridge.revealInExplorer).not.toHaveBeenCalled()
   })
 })

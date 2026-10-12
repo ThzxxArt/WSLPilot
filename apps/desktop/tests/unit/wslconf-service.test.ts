@@ -73,6 +73,27 @@ describe('createWslConfService.read', () => {
     await expect(svc.read('Ubuntu')).rejects.toMatchObject({ code: 'IO_ERROR' })
   })
 
+  it('发行版不存在类错误不得被误判为「文件不存在→空配置」（review 0.1.2 正则收窄）', async () => {
+    for (const stderr of [
+      'There is no distribution with the supplied name.',
+      "Distribution 'Ubuntu' not found.",
+      'WSL 发行版不存在',
+    ]) {
+      const run = makeRun({ code: 1, stderr })
+      const svc = createWslConfService({ logger: logger(), runWsl: run, runWslWithStdin: vi.fn() })
+      await expect(svc.read('Ubuntu')).rejects.toMatchObject({ code: 'IO_ERROR' })
+    }
+  })
+
+  it('cat 语境的 not found 仍降级为空配置（收窄不误伤）', async () => {
+    const run = makeRun({
+      code: 1,
+      stderr: 'cat: /etc/wsl.conf: cannot open: No such file or directory',
+    })
+    const svc = createWslConfService({ logger: logger(), runWsl: run, runWslWithStdin: vi.fn() })
+    expect(await svc.read('Ubuntu')).toBe('')
+  })
+
   it('拒绝非法发行版名', async () => {
     const svc = createWslConfService({
       logger: logger(),
@@ -128,6 +149,42 @@ describe('createWslConfService.write', () => {
       runWslWithStdin: runIn,
     })
     await expect(svc.write('Ubuntu', '[a]\nb = 1\n')).rejects.toMatchObject({ code: 'IO_ERROR' })
+  })
+
+  it('权限正则去掉裸 root：路径含 root 的非权限失败不再误判（review 0.1.2 根治）', async () => {
+    const runIn = makeRun({ code: 1, stderr: 'tee: /root/backup/x: no space left on device' })
+    const svc = createWslConfService({
+      logger: logger(),
+      runWsl: makeRun({ code: 0 }),
+      runWslWithStdin: runIn,
+    })
+    await expect(svc.write('Ubuntu', '[a]\nb = 1\n')).rejects.toMatchObject({ code: 'IO_ERROR' })
+  })
+
+  it('同发行版读-写轻量串行：后续写等前序完成（review 0.1.2 根治）', async () => {
+    let releaseA: () => void = () => {}
+    const runIn = vi.fn((_args: string[], input: string) => {
+      if (input.includes('A = 1')) {
+        return new Promise<{ code: number; stdout: string; stderr: string }>((res) => {
+          releaseA = () => res({ code: 0, stdout: '', stderr: '' })
+        })
+      }
+      return Promise.resolve({ code: 0, stdout: '', stderr: '' })
+    })
+    const svc = createWslConfService({
+      logger: logger(),
+      runWsl: makeRun({ code: 0 }),
+      runWslWithStdin: runIn,
+    })
+    const pA = svc.write('Ubuntu', '[a]\nA = 1\n')
+    const pB = svc.write('Ubuntu', '[a]\nB = 1\n')
+    await new Promise((r) => setTimeout(r, 0))
+    // A 未完成前 B 不得发起（否则读-改-写会交错覆盖）
+    expect(runIn).toHaveBeenCalledTimes(1)
+    releaseA()
+    await Promise.all([pA, pB])
+    expect(runIn).toHaveBeenCalledTimes(2)
+    expect(runIn.mock.calls[1]![1]).toContain('B = 1')
   })
 })
 

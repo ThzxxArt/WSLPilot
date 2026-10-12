@@ -170,7 +170,6 @@ describe('ConfigService', () => {
   it('detects external modification as conflict (content hash, not time window)', async () => {
     // 写入一次，让 lastSelfWriteHash 记录当前内容
     await svc.patch('settings', { general: { accent: 'aurora' } })
-    await new Promise((r) => setTimeout(r, 100))
 
     const filePath = join(dir, 'settings.jsonc')
     // 外部改成不同内容（与自写哈希不同）
@@ -180,12 +179,14 @@ describe('ConfigService', () => {
       'utf8',
     )
 
-    let conflict: { fileKey: string; detail: string } | null = null
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 25))
-      conflict = svc.getConflict('settings')
-      if (conflict) break
-    }
+    // review 0.1.2：固定 100ms + 40×25ms 轮询是 chokidar 时序抖动源 → vi.waitFor 条件等待（超时给足）
+    await vi.waitFor(
+      () => {
+        expect(svc.getConflict('settings')).not.toBeNull()
+      },
+      { timeout: 5000, interval: 25 },
+    )
+    const conflict = svc.getConflict('settings')
     // ★ 无条件断言 —— 外部内容不同必须被识别为冲突
     expect(conflict).not.toBeNull()
     expect(conflict!.fileKey).toBe('settings')
@@ -194,15 +195,16 @@ describe('ConfigService', () => {
 
   it('外部改坏（JSONC 解析失败）→ conflict 指明解析失败，不静默采纳坏配置', async () => {
     await svc.patch('settings', { general: { accent: 'aurora' } })
-    await new Promise((r) => setTimeout(r, 100))
     await fs.writeFile(join(dir, 'settings.jsonc'), '{ 坏文件', 'utf8')
 
-    let conflict: { detail: string } | null = null
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 25))
-      conflict = svc.getConflict('settings')
-      if (conflict) break
-    }
+    // review 0.1.2：固定轮询 → vi.waitFor 条件等待
+    await vi.waitFor(
+      () => {
+        expect(svc.getConflict('settings')).not.toBeNull()
+      },
+      { timeout: 5000, interval: 25 },
+    )
+    const conflict = svc.getConflict('settings')
     expect(conflict).not.toBeNull()
     expect(conflict!.detail).toContain('解析失败')
   })
@@ -222,7 +224,6 @@ describe('ConfigService', () => {
 
   it('notify 单个监听器抛错不阻断其余监听器（review 容错）', async () => {
     await svc.patch('settings', { general: { accent: 'aurora' } })
-    await new Promise((r) => setTimeout(r, 100))
     const second = vi.fn()
     svc.onChange('settings', () => {
       throw new Error('listener boom')
@@ -233,29 +234,34 @@ describe('ConfigService', () => {
       JSON.stringify({ $schemaVersion: 2, general: { accent: 'sunset' } }),
       'utf8',
     )
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 25))
-      if (svc.getConflict('settings')) break
-    }
+    // review 0.1.2：固定轮询 → vi.waitFor；冲突标记与监听器调用在同一同步处理段落定
+    await vi.waitFor(
+      () => {
+        expect(svc.getConflict('settings')).not.toBeNull()
+        expect(second).toHaveBeenCalled()
+      },
+      { timeout: 5000, interval: 25 },
+    )
     expect(svc.getConflict('settings')).not.toBeNull()
     expect(second).toHaveBeenCalled()
   })
 
   it('冲突未决时 patch/update/replace 拒绝写（不吞外部修改）', async () => {
     await svc.patch('settings', { general: { accent: 'aurora' } })
-    await new Promise((r) => setTimeout(r, 100))
     const filePath = join(dir, 'settings.jsonc')
     await fs.writeFile(
       filePath,
       JSON.stringify({ $schemaVersion: 2, general: { accent: 'sunset' } }),
       'utf8',
     )
-    let conflict: { fileKey: string } | null = null
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 25))
-      conflict = svc.getConflict('settings')
-      if (conflict) break
-    }
+    // review 0.1.2：固定轮询 → vi.waitFor 条件等待
+    await vi.waitFor(
+      () => {
+        expect(svc.getConflict('settings')).not.toBeNull()
+      },
+      { timeout: 5000, interval: 25 },
+    )
+    const conflict = svc.getConflict('settings')
     expect(conflict).not.toBeNull()
     const before = await fs.readFile(filePath, 'utf8')
 

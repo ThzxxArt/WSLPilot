@@ -161,11 +161,32 @@ describe('诊断服务（M7 §15.3）', () => {
     expect(result.entries).toEqual(['manifest.json'])
   })
 
-  it('normalizeDiagnosticsTarget：补 .zip、拒绝空名', () => {
+  it('normalizeDiagnosticsTarget：补 .zip、拒绝空名', async () => {
     expect(normalizeDiagnosticsTarget('C:\\x\\diag')).toBe('C:\\x\\diag.zip')
     expect(normalizeDiagnosticsTarget('C:\\x\\diag.zip')).toBe('C:\\x\\diag.zip')
     expect(() => normalizeDiagnosticsTarget('')).toThrow()
     expect(() => normalizeDiagnosticsTarget('C:\\x\\.zip')).toThrow()
-    expect(readZipNames(createZip([]))).toEqual([])
+    expect(readZipNames(await createZip([]))).toEqual([])
+  })
+
+  it('collectRecentLogs：单文件超上限跳过，继续收集小文件（review 0.1.2 根治）', async () => {
+    const dir = join(root, 'logs-oversize')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'app-20261010.log'), Buffer.alloc(9 * 1024 * 1024))
+    writeFileSync(join(dir, 'app-20261009.log'), 'small')
+    const files = await collectRecentLogs(dir, 10, 8 * 1024 * 1024)
+    // 超限的 9MB 文件被跳过，而不是独占整个预算
+    expect(files.map((f) => f.name)).toEqual(['app-20261009.log'])
+  })
+
+  it('openLogsDir：mkdir 失败映射 IO_ERROR（不冒泡 UNKNOWN — review 0.1.2 根治）', async () => {
+    const fileAsDir = join(root, 'not-a-dir')
+    writeFileSync(fileAsDir, 'x')
+    const svc = createDiagnosticsService({
+      logger,
+      userDataDir: fileAsDir,
+      appVersion: '0.1.0',
+    })
+    await expect(svc.openLogsDir()).rejects.toMatchObject({ code: 'IO_ERROR' })
   })
 })

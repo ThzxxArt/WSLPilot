@@ -66,6 +66,28 @@ describe('useDevicesStore', () => {
     expect(s.items).toEqual([])
   })
 
+  it('重叠 load 的旧响应晚到不覆盖新状态（代际守卫 — review 0.1.2）', async () => {
+    let resolveFirstStatus!: (v: unknown) => void
+    const firstStatus = new Promise((r) => (resolveFirstStatus = r))
+    wslAPI.devices.status
+      .mockReturnValueOnce(firstStatus)
+      .mockResolvedValueOnce({ installed: true, version: 'new' })
+    wslAPI.devices.list.mockResolvedValue([{ ...DEV, busId: '9-9' }])
+    const s = useDevicesStore()
+    const p1 = s.load()
+    const p2 = s.load()
+    await p2
+    expect(s.status.version).toBe('new')
+    expect(s.items.map((d) => d.busId)).toEqual(['9-9'])
+
+    // 旧响应（第一代）晚到：不得覆盖第二代结果，也不得把 loading 打回 false 之前的状态
+    resolveFirstStatus({ installed: false, version: 'old' })
+    await p1
+    expect(s.status.version).toBe('new')
+    expect(s.items.map((d) => d.busId)).toEqual(['9-9'])
+    expect(s.loading).toBe(false)
+  })
+
   it('bind / unbind 返回任务句柄', async () => {
     wslAPI.devices.bind.mockResolvedValue({ taskId: 'b' })
     wslAPI.devices.unbind.mockResolvedValue({ taskId: 'u' })

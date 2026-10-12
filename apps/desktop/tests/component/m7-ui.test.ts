@@ -22,10 +22,31 @@ describe('Skeleton（M7 骨架屏 §12.8）', () => {
     const rows = w.findAll('.skeleton')
     expect(rows).toHaveLength(3)
     expect(w.get('.skeleton-rows').attributes('aria-busy')).toBe('true')
+    // 无障碍收敛（review 0.1.2）：aria-busy 由容器统一承载，行节点不再重复播报
+    expect(rows[0]!.attributes('aria-busy')).toBeUndefined()
+    expect(rows[0]!.attributes('role')).toBeUndefined()
     // 末行短一截（文本骨架通用形态）
     expect(rows[2]!.attributes('style')).toContain('width: 60%')
     expect(rows[0]!.attributes('style')).toContain('width: 100%')
     await flushPromises()
+  })
+
+  it('单根结构：父组件透传 class/style 落根节点，无多根 extraneous attrs 告警（review 0.1.2）', () => {
+    const Parent = defineComponent({
+      components: { Skeleton },
+      template: '<Skeleton class="probe" style="margin: 0px" :rows="2" />',
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const w = mount(Parent)
+      const root = w.get('.skeleton-rows')
+      expect(root.classes()).toContain('probe')
+      expect(root.attributes('style')).toContain('margin')
+      const warnings = warn.mock.calls.flat().join(' ')
+      expect(warnings).not.toContain('Extraneous non-props attributes')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
@@ -98,6 +119,25 @@ describe('vRipple 指令（§13.2 涟漪）', () => {
     expect(btn.element.querySelector('.ripple-wave')).toBeNull()
     w.unmount()
     vi.useRealTimers()
+  })
+
+  it('animationend 清理后撤销兜底定时器（不再多留 500ms 引用）（review 0.1.2）', () => {
+    vi.useFakeTimers()
+    try {
+      const w = mount(Host, { attachTo: document.body })
+      const btn = w.find('button')
+      const baseline = vi.getTimerCount()
+      btn.element.dispatchEvent(
+        new PointerEvent('pointerdown', { clientX: 5, clientY: 5, button: 0, bubbles: true }),
+      )
+      expect(vi.getTimerCount()).toBe(baseline + 1)
+      btn.element.querySelector('.ripple-wave')!.dispatchEvent(new Event('animationend'))
+      expect(btn.element.querySelector('.ripple-wave')).toBeNull()
+      expect(vi.getTimerCount()).toBe(baseline)
+      w.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reduced-motion 下不生成涟漪（降级）', () => {

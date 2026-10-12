@@ -3,6 +3,7 @@ import {
   TERMINAL_LIGHT_THEME,
   TERMINAL_CONTRAST_THEME,
   DEFAULT_TERMINAL_PREFS,
+  hexToRgba,
   normalizeFontFamily,
   resolveTerminalTheme,
 } from '../../src/renderer/features/terminal/theme'
@@ -52,6 +53,16 @@ describe('terminal theme', () => {
     expect(DEFAULT_TERMINAL_PREFS.cursorStyle).toBe(t.cursorStyle)
     expect(DEFAULT_TERMINAL_PREFS.cursorBlink).toBe(t.cursorBlink)
     expect(DEFAULT_TERMINAL_PREFS.lineHeight).toBe(t.lineHeight)
+  })
+
+  it('hexToRgba 支持 #rrggbb 与 #rgb 短写法（review 0.1.2 根治）', () => {
+    expect(hexToRgba('#6366F1', 0.5)).toBe('rgba(99, 102, 241, 0.5)')
+    // #abc → #aabbcc
+    expect(hexToRgba('#abc', 1)).toBe('rgba(170, 187, 204, 1)')
+    expect(hexToRgba('f00', 0.25)).toBe('rgba(255, 0, 0, 0.25)')
+    // 非法输入回退默认紫
+    expect(hexToRgba('nope', 0.5)).toBe('rgba(99, 102, 241, 0.5)')
+    expect(hexToRgba('#abcd', 0.5)).toBe('rgba(99, 102, 241, 0.5)')
   })
 
   it('resolveTerminalTheme 三模式', () => {

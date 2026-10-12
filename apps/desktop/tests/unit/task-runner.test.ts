@@ -456,4 +456,47 @@ describe('TaskRunner', () => {
     const rec = await runner.waitFor(handle.taskId)
     expect(rec.status).toBe('success')
   })
+
+  it('失败原因经 TaskProgress.error 端到端透传（不再让 UI 用 message 冒充 — review 0.1.2）', async () => {
+    const events = makeRunner()
+    const progress: TaskProgress[] = []
+    const runner = createTaskRunner({
+      logger: logger(),
+      onProgress: (p) => progress.push(p),
+    })
+    const handle = runner.start({
+      type: 'export',
+      distro: 'U',
+      message: 'start',
+      run: async () => {
+        throw createAppError('TASK_FAILED', { message: '磁盘空间不足' })
+      },
+    })
+    await runner.waitFor(handle.taskId)
+    const terminal = progress.filter((p) => p.status === 'failed')
+    expect(terminal.length).toBeGreaterThan(0)
+    expect(terminal.at(-1)!.error).toBe('磁盘空间不足')
+    void events
+  })
+
+  it('取消结算同样携带 error 字段', async () => {
+    const progress: TaskProgress[] = []
+    const runner = createTaskRunner({
+      logger: logger(),
+      onProgress: (p) => progress.push(p),
+    })
+    const handle = runner.start({
+      type: 'move',
+      distro: 'U',
+      message: 'start',
+      run: (ctl) =>
+        new Promise<void>((_resolve, reject) => {
+          ctl.onCancel(() => reject(createAppError('TASK_CANCELED', { message: '任务已取消' })))
+        }),
+    })
+    runner.cancel(handle.taskId)
+    await runner.waitFor(handle.taskId)
+    const terminal = progress.filter((p) => p.status === 'canceled')
+    expect(terminal.at(-1)!.error).toBeTruthy()
+  })
 })

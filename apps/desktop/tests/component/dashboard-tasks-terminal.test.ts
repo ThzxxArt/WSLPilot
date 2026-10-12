@@ -255,6 +255,69 @@ describe('TaskDrawer 取消与日志', () => {
     expect(useTasksStore().entries.map((e) => e.taskId)).toEqual(['r1'])
     expect(message.success).toHaveBeenCalledWith('已清理完成的任务')
   })
+
+  it('日志用单 <pre> 拼接渲染（无逐行 div，role=log aria-live — review 0.1.2 根治）', async () => {
+    const tasks = useTasksStore()
+    tasks.applyProgress({
+      taskId: 't1',
+      type: 'export',
+      distro: 'U',
+      percent: 10,
+      message: '导出中',
+      status: 'running',
+      logLine: '第一行日志',
+    })
+    tasks.applyProgress({
+      taskId: 't1',
+      type: 'export',
+      percent: 20,
+      message: '导出中',
+      status: 'running',
+      logLine: '第二行日志',
+    })
+    mount(TaskDrawer, { props: { show: true }, attachTo: document.body })
+    await flushPromises()
+    const pre = document.body.querySelector('pre.log')
+    expect(pre).toBeTruthy()
+    expect(pre!.getAttribute('role')).toBe('log')
+    expect(pre!.getAttribute('aria-live')).toBe('polite')
+    expect(pre!.textContent).toContain('第一行日志')
+    expect(pre!.textContent).toContain('第二行日志')
+    // 2000 行不再产生 2000 个节点
+    expect(document.body.querySelectorAll('.log-line')).toHaveLength(0)
+  })
+
+  it('取消按钮在途禁用（pending 防重 — review 0.1.2 根治）', async () => {
+    const tasks = useTasksStore()
+    tasks.applyProgress({
+      taskId: 't2',
+      type: 'export',
+      distro: 'U',
+      percent: 10,
+      message: '导出中',
+      status: 'running',
+    })
+    let releaseCancel!: (v: boolean) => void
+    wslAPI.task.cancel.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseCancel = r
+      }) as never,
+    )
+    mount(TaskDrawer, { props: { show: true }, attachTo: document.body })
+    await flushPromises()
+    const btn = findBodyButton('取消')!
+    expect(btn).toBeTruthy()
+    btn.click()
+    await flushPromises()
+    expect(wslAPI.task.cancel).toHaveBeenCalledTimes(1)
+    // 在途：按钮 disabled/pending，重复点击不再发请求
+    expect(btn.disabled).toBe(true)
+    btn.click()
+    await flushPromises()
+    expect(wslAPI.task.cancel).toHaveBeenCalledTimes(1)
+    releaseCancel(true)
+    await flushPromises()
+  })
 })
 
 describe('InstallDistroModal', () => {
@@ -345,6 +408,25 @@ describe('TerminalView 会话错误面', () => {
     expect(opts.map((o) => o.value)).toEqual(['Run-one'])
     // Stopped-one 不可选
     expect(opts.some((o) => o.value === 'Stopped-one')).toBe(false)
+  })
+
+  it('创建在途时 in-flight 名单传给 TerminalTabs（打开按钮 loading 依据 — review 0.1.2 根治）', async () => {
+    wslAPI.distros.list.mockResolvedValue([distro({ state: 'Running' })])
+    let releaseCreate!: (v: unknown) => void
+    wslAPI.terminal.create.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseCreate = r
+      }) as never,
+    )
+    const w = mount(TerminalView, { attachTo: document.body })
+    await flushPromises()
+    const tabs = w.findComponent({ name: 'TerminalTabs' })
+    expect(tabs.exists()).toBe(true)
+    expect(tabs.props('creatingDistros')).toContain('Ubuntu')
+
+    releaseCreate({ ptyId: 'p1', distro: 'Ubuntu', createdAt: 1 })
+    await flushPromises()
+    expect(tabs.props('creatingDistros')).toEqual([])
   })
 
   it('关闭会话失败给错误提示', async () => {

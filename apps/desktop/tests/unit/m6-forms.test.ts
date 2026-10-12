@@ -137,6 +137,23 @@ describe('规则系统状态', () => {
   it('status 为空视为未生效', () => {
     expect(ruleSystemState(RULE, null)).toBe('none')
   })
+
+  it('地址比较前 trim + 小写：空白/大小写不误判（review 0.1.2 根治）', () => {
+    const rule = { ...RULE, connectAddress: 'LOCALHOST' }
+    const status: NetworkStatus = {
+      ...STATUS,
+      portProxy: [
+        {
+          listenAddress: ' 0.0.0.0 ',
+          listenPort: 3000,
+          connectAddress: 'localhost',
+          connectPort: 3000,
+          kind: 'v4tov4',
+        },
+      ],
+    }
+    expect(ruleSystemState(rule, status)).toBe('applied')
+  })
 })
 
 describe('命令预览与摘要', () => {
@@ -204,5 +221,20 @@ describe('代理表单', () => {
         noProxy: '',
       }),
     ).toMatch(/HTTPS/)
+  })
+
+  it('基本形态校验：host:port / scheme://host:port（review 0.1.2 根治）', () => {
+    const base = { useWindowsProxy: false, httpsProxy: '', noProxy: '' }
+    // 合法形态
+    expect(validateProxyForm({ ...base, httpProxy: '127.0.0.1:7890' })).toBeNull()
+    expect(validateProxyForm({ ...base, httpProxy: 'http://proxy.example.com:8080' })).toBeNull()
+    expect(validateProxyForm({ ...base, httpProxy: 'socks5://127.0.0.1:1080' })).toBeNull()
+    expect(validateProxyForm({ ...base, httpProxy: 'user:pass@127.0.0.1:7890' })).toBeNull()
+    expect(validateProxyForm({ ...base, httpProxy: '[::1]:7890' })).toBeNull()
+    // 非法形态：缺端口 / 端口越界 / 垃圾串
+    expect(validateProxyForm({ ...base, httpProxy: 'http://127.0.0.1' })).toMatch(/格式/)
+    expect(validateProxyForm({ ...base, httpProxy: '127.0.0.1:99999' })).toMatch(/格式/)
+    expect(validateProxyForm({ ...base, httpProxy: 'http://' })).toMatch(/格式/)
+    expect(validateProxyForm({ ...base, httpProxy: '不是代理' })).toMatch(/格式/)
   })
 })

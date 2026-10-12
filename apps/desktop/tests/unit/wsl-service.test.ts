@@ -413,7 +413,9 @@ describe('WslService', () => {
       expect(Date.now() - started).toBeLessThan(15_000)
       const reports = (ctl.report.mock as { calls: unknown[][] }).calls
       expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
-    })
+      // review 0.1.2：本用例依赖真实 4s 轮询时钟（服务实现内固定 4000ms，测试不可注入），
+      // 默认 5s 超时在 CI 负载下会假超时 —— 显式放宽到 15s，防抖动不放松断言
+    }, 15_000)
 
     it('install 前缀碰撞：只有 Ubuntu-22.04 在列时不判 Ubuntu 已装，直到进程真正退出', async () => {
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
@@ -435,6 +437,8 @@ describe('WslService', () => {
       expect(logs.some((l) => l.includes('已注册'))).toBe(false)
       const reports = (ctl2.report.mock as { calls: unknown[][] }).calls
       expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
+      // review 0.1.2：依赖真实 4s 轮询 + 4.2s 模拟退出（服务内固定时钟，测试不可注入），
+      // 显式 15s 超时防 CI 抖动；结算语义断言保持不放宽
     }, 15_000)
 
     it('install 装前已存在（精确命中）：注册信号不启用，等待进程退出结算', async () => {

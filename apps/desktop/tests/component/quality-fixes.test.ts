@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
+import { defineComponent } from 'vue'
 import { NRadioGroup, NSelect } from 'naive-ui'
 import { defaultConfig, type ConfigKey, type DistroView, type WslAction } from '@wslpilot/shared'
 
@@ -83,7 +84,7 @@ const wslAPI = {
     shutdown: vi.fn(async () => {}),
     setDefault: vi.fn(async () => {}),
     unregister: vi.fn(async () => {}),
-    registryDetail: vi.fn(async () => ({ values: {} })),
+    registryDetail: vi.fn(async (): Promise<Record<string, unknown>> => ({ values: {} })),
     install: vi.fn(async () => ({ taskId: 'ins' })),
     setVersion: vi.fn(async () => ({ taskId: 'cv' })),
   },
@@ -194,6 +195,16 @@ function distro(over: Partial<DistroView> = {}): DistroView {
   }
 }
 
+/** 可控 confirmDiscard 的面板替身：模拟 wsl.conf 面板的脏编辑守卫（不涉及真实读取） */
+let guardResult = true
+const DirtyGuardStub = defineComponent({
+  name: 'DirtyGuardStub',
+  setup(_props, { expose }) {
+    expose({ confirmDiscard: () => Promise.resolve(guardResult) })
+    return () => null
+  },
+})
+
 interface BtnLike {
   text(): string
   element: { hasAttribute(name: string): boolean; click(): void }
@@ -231,6 +242,7 @@ async function makeDirty() {
 beforeEach(() => {
   vi.clearAllMocks()
   dialogResult = true
+  guardResult = true
   routeMock.query = {}
   useCommandPalette().closePalette()
   setActivePinia(createPinia())
@@ -770,6 +782,213 @@ describe('A9 DistroDetailModal', () => {
     findBodyButton('注销发行版')!.click()
     await flushPromises()
     expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('注销先过脏守卫：留在此页不注销不关窗，确认放弃后才注销并关窗（review 0.1.2 根治）', async () => {
+    useSettingsStore().confirmDestructive = false
+    useDistrosStore().items = [distro({ name: 'Ubuntu', state: 'Running' })]
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      // WslConfPanel 真身（脏编辑来源）；动作/文件面板 stub
+      global: { stubs: { ActionsPanel: true, FileBrowserPanel: true } },
+    })
+    await flushPromises()
+    await makeDirty()
+
+    dialogResult = false
+    findBodyButton('注销发行版')!.click()
+    await flushPromises()
+    expect(dialog.warning).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '放弃未保存的修改？' }),
+    )
+    expect(wslAPI.distros.unregister).not.toHaveBeenCalled()
+    expect(w.emitted('update:show')).toBeUndefined()
+
+    dialogResult = true
+    findBodyButton('注销发行版')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu')
+    expect(w.emitted('update:show')!.at(-1)).toEqual([false])
+  })
+
+  it('版本转换先过脏守卫：守卫拒绝不启动转换，通过后才转换并关窗（review 0.1.2 根治）', async () => {
+    useSettingsStore().confirmDestructive = false
+    useDistrosStore().items = [distro({ name: 'Ubuntu', state: 'Stopped' })]
+    guardResult = false
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: {
+        stubs: { WslConfPanel: DirtyGuardStub, ActionsPanel: true, FileBrowserPanel: true },
+      },
+    })
+    await flushPromises()
+
+    findBodyButton('转换为 WSL')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.setVersion).not.toHaveBeenCalled()
+    expect(w.emitted('update:show')).toBeUndefined()
+
+    guardResult = true
+    findBodyButton('转换为 WSL')!.click()
+    await flushPromises()
+    // 夹具为 WSL2 → 转换目标是 WSL1
+    expect(wslAPI.distros.setVersion).toHaveBeenCalledWith('Ubuntu', 1)
+    expect(w.emitted('update:show')!.at(-1)).toEqual([false])
+  })
+
+  it('切换发行版复位编辑态；同开弹窗保持页签，关-开后页签才回概览（review 0.1.2 根治）', async () => {
+    useDistrosStore().items = [
+      distro({ name: 'Ubuntu', state: 'Running' }),
+      distro({ name: 'Debian', state: 'Running' }),
+    ]
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    findBodyButton('编辑元数据')!.click()
+    await flushPromises()
+    expect(document.body.querySelector('.meta-edit')).toBeTruthy()
+
+    const confTab = Array.from(document.body.querySelectorAll('.n-tabs-tab')).find((el) =>
+      (el.textContent ?? '').includes('配置'),
+    )
+    expect(confTab).toBeTruthy()
+    ;(confTab as HTMLElement).click()
+    await flushPromises()
+    const activeTabText = () =>
+      document.body.querySelector('.n-tabs-tab--active')?.textContent ?? ''
+    expect(activeTabText()).toContain('配置')
+
+    // 同开弹窗内换发行版：编辑态必须复位，页签保持（含 restore-distro 回切场景）
+    await w.setProps({ distroName: 'Debian' })
+    await flushPromises()
+    expect(document.body.querySelector('.meta-edit')).toBeNull()
+    expect(activeTabText()).toContain('配置')
+
+    // 只有「关闭 → 打开」才复位页签
+    await w.setProps({ show: false })
+    await flushPromises()
+    await w.setProps({ show: true })
+    await flushPromises()
+    expect(activeTabText()).toContain('概览')
+  })
+
+  it('切换发行版后旧 registryDetail 响应不得覆盖新发行版（代际守卫）', async () => {
+    let resolveOld!: (v: Record<string, unknown>) => void
+    wslAPI.distros.registryDetail
+      .mockImplementationOnce(() => new Promise((r) => (resolveOld = r)))
+      .mockResolvedValueOnce({ guid: 'NEW-DEBIAN', values: {} })
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    await w.setProps({ distroName: 'Debian' })
+    await flushPromises()
+    expect(bodyText()).toContain('NEW-DEBIAN')
+
+    resolveOld({ guid: 'STALE-UBUNTU', values: {} })
+    await flushPromises()
+    expect(bodyText()).not.toContain('STALE-UBUNTU')
+    expect(bodyText()).toContain('NEW-DEBIAN')
+  })
+
+  it('启动双击只发起一次（busy 防护）', async () => {
+    useDistrosStore().items = [distro({ name: 'Ubuntu', state: 'Stopped' })]
+    let release!: () => void
+    wslAPI.distros.start.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    const btn = findBodyButton('启动')!
+    btn.click()
+    btn.click()
+    await flushPromises()
+    expect(wslAPI.distros.start).toHaveBeenCalledTimes(1)
+    release()
+    await flushPromises()
+  })
+
+  it('注销双击只发起一次（本地 in-flight 锁）', async () => {
+    useSettingsStore().confirmDestructive = false
+    useDistrosStore().items = [distro()]
+    let release!: () => void
+    wslAPI.distros.unregister.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    const btn = findBodyButton('注销发行版')!
+    btn.click()
+    btn.click()
+    await flushPromises()
+    expect(wslAPI.distros.unregister).toHaveBeenCalledTimes(1)
+    release()
+    await flushPromises()
+  })
+
+  it('转换双击只发起一次（converting 锁）', async () => {
+    useSettingsStore().confirmDestructive = false
+    useDistrosStore().items = [distro({ name: 'Ubuntu', state: 'Stopped' })]
+    let release!: (v: { taskId: string }) => void
+    wslAPI.distros.setVersion.mockImplementationOnce(
+      () => new Promise<{ taskId: string }>((r) => (release = r)),
+    )
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs },
+    })
+    await flushPromises()
+    const btn = findBodyButton('转换为 WSL')!
+    btn.click()
+    btn.click()
+    await flushPromises()
+    expect(wslAPI.distros.setVersion).toHaveBeenCalledTimes(1)
+    release({ taskId: 'cv' })
+    await flushPromises()
+  })
+
+  it('连点关闭只弹一次确认（关窗守卫重入锁 — review 0.1.2 根治）', async () => {
+    useDistrosStore().items = [distro({ name: 'Ubuntu', state: 'Running' })]
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: { stubs: { ActionsPanel: true, FileBrowserPanel: true } },
+    })
+    await flushPromises()
+    await makeDirty()
+
+    const captured: Array<Record<string, unknown>> = []
+    const original = dialog.warning.getMockImplementation()!
+    dialog.warning.mockImplementation((opts: unknown) => {
+      captured.push(opts as Record<string, unknown>)
+    })
+    try {
+      const closeBtn = document.body.querySelector<HTMLButtonElement>(
+        '.detail-modal .n-card-header__close',
+      )!
+      closeBtn.click()
+      await flushPromises()
+      closeBtn.click()
+      await flushPromises()
+      expect(captured).toHaveLength(1)
+      ;(captured[0]!.onPositiveClick as () => void)()
+      await flushPromises()
+      expect(w.emitted('update:show')!.at(-1)).toEqual([false])
+    } finally {
+      dialog.warning.mockImplementation(original)
+    }
   })
 })
 

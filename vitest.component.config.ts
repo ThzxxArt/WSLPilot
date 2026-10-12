@@ -29,6 +29,13 @@ export default defineConfig({
       // 豁免理由），无法在不启动整个应用的情况下真实测试。
       include: [
         'packages/ui/src/components/**/*.{vue,ts}',
+        // review 0.1.2：composables/directives/naive/index.ts 此前不在任何分母——
+        // vRipple/useReducedMotion/applyAccentToDom/theme-overrides 有测试但不计分，
+        // 门禁对它们的回归盲区；现纳入组件分母（happy-dom 正是其真实运行环境）
+        'packages/ui/src/composables/**/*.ts',
+        'packages/ui/src/directives/**/*.ts',
+        'packages/ui/src/naive/**/*.ts',
+        'packages/ui/src/index.ts',
         'apps/desktop/src/renderer/**/*.vue',
         'apps/desktop/src/renderer/router/**/*.ts',
       ],
@@ -41,20 +48,21 @@ export default defineConfig({
       ],
       // ★ 硬门禁：低于阈值 CI 直接失败。
       // per-glob 两档（review 禁止虚高摆拍）——每档 = 实测值 −2pp 向下取整的诚实地板（防回归即可）。
-      // 实测（2026-10，0.1.1：221 用例）：ui 98.25/90.76/83.33；renderer 87.90/82.51/54.69。
-      // UI 测试持续补齐、地板随之抬升（renderer 地板已从 84/80/47 → 85/80/52）——见 docs/testing.md。
+      // 实测（2026-10，0.1.2：ui 桶纳入 composables/directives/naive/index.ts 后重测）：
+      // ui 98.95/89.71/92.86（lines/branches/functions）；renderer 89.96/84.11/59.74。
+      // UI 测试持续补齐、地板随之抬升 —— 见 docs/testing.md。
       thresholds: {
-        'packages/ui/src/components/**': {
+        'packages/ui/src/**': {
           lines: 96,
           statements: 96,
-          branches: 88,
-          functions: 81,
+          branches: 87,
+          functions: 90,
         },
         'apps/desktop/src/renderer/**': {
-          lines: 85,
-          statements: 85,
-          branches: 80,
-          functions: 52,
+          lines: 87,
+          statements: 87,
+          branches: 82,
+          functions: 57,
         },
       },
     },

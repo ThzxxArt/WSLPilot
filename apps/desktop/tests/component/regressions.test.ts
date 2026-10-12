@@ -24,18 +24,19 @@ const dialog = {
     else opts.onNegativeClick?.()
   }),
 }
+const message = { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }
 vi.mock('naive-ui', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
   return {
     ...actual,
-    useMessage: () => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }),
+    useMessage: () => message,
     useDialog: () => dialog,
     useNotification: () => ({ warning: vi.fn(), success: vi.fn(), error: vi.fn() }),
   }
 })
 
 const fsApi = {
-  readDir: vi.fn(async (): Promise<DirEntry[]> => [
+  readDir: vi.fn(async (_distro: string, _path: string): Promise<DirEntry[]> => [
     { name: 'etc', path: '/etc', isDirectory: true },
     { name: 'hosts', path: '/hosts', isDirectory: false, size: 10 },
   ]),
@@ -227,7 +228,7 @@ describe('文件浏览器确认语义（自查回归）', () => {
     expect(fsApi.readDir).toHaveBeenLastCalledWith('Ubuntu', '/etc')
   })
 
-  it('截断文件禁止保存（防止把前缀写回截断原文件）', async () => {
+  it('截断文件只读展示前缀（文案与实现一致）且禁止保存', async () => {
     fsApi.read.mockResolvedValueOnce({
       text: 'prefix only',
       sizeBytes: 9_000_000,
@@ -245,9 +246,115 @@ describe('文件浏览器确认语义（自查回归）', () => {
     await flushPromises()
 
     expect(w.text()).toContain('超限截断')
+    expect(w.text()).toContain('仅展示前缀')
     const save = w.findAll('button').find((b) => b.text().includes('保存'))
     expect(save!.attributes('disabled')).toBeDefined()
-    // 编辑器不渲染（只读提示替代）
-    expect(w.find('textarea').exists()).toBe(false)
+    // 文案称「仅展示前缀」就必须真的渲染前缀：只读编辑器（review 0.1.2 根治）
+    const ta = w.find('textarea')
+    expect(ta.exists()).toBe(true)
+    expect(ta.element.hasAttribute('readonly')).toBe(true)
+    expect(ta.element.value).toBe('prefix only')
+  })
+
+  it('取消切换发行版：emit restore-distro 回退选择，且不读新发行版（与 WslConfPanel 对齐）', async () => {
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+    const loadsBefore = fsApi.readDir.mock.calls.length
+
+    dialogResult = false // 留在此页
+    await w.setProps({ distroName: 'Debian' })
+    await flushPromises()
+
+    expect(w.emitted('restore-distro')![0]).toEqual(['Ubuntu'])
+    expect(fsApi.readDir.mock.calls.length).toBe(loadsBefore)
+    // 脏编辑仍在（未静默丢）
+    expect(w.text()).toContain('未保存')
+  })
+
+  it('跨发行版写回被阻止：文件属于 Ubuntu，props 已是 Debian 时不得写入', async () => {
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+
+    // 取消切换后父级尚未回退：props 已变 Debian，文件仍属 Ubuntu
+    dialogResult = false
+    await w.setProps({ distroName: 'Debian' })
+    await flushPromises()
+    message.warning.mockClear()
+
+    const save = w.findAll('button').find((b) => b.text().includes('保存'))!
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(fsApi.write).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalledWith(expect.stringContaining('阻止跨发行版写回'))
+  })
+
+  it('保存期间引用被清空不误报失败（局部快照），且保存中冻结返回/导航', async () => {
+    let resolveWrite!: () => void
+    fsApi.write.mockImplementationOnce(() => new Promise<void>((r) => (resolveWrite = r)))
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await openDirtyFile(w)
+
+    const save = w.findAll('button').find((b) => b.text().includes('保存'))!
+    await save.trigger('click')
+    await flushPromises()
+    // 写盘在途：返回与面包屑导航必须禁用（review 0.1.2 根治）
+    const back = w.findAll('button').find((b) => b.text().includes('← 返回'))!
+    expect(back.attributes('disabled')).toBeDefined()
+    const rootCrumb = w.findAll('nav.crumbs button').find((b) => b.text().includes('根'))!
+    expect(rootCrumb.attributes('disabled')).toBeDefined()
+
+    // 保存期间切换发行版 → 面板 reload 清空 file 引用（父级状态先行变化）
+    dialogResult = true
+    await w.setProps({ distroName: 'Debian' })
+    await flushPromises()
+    resolveWrite()
+    await flushPromises()
+
+    // 旧实现会在 await 后对已置空的 file.value.dirty 赋值 → TypeError → 假失败（改坏必红）
+    expect(message.error).not.toHaveBeenCalled()
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('已保存'))
+  })
+
+  it('快速进出目录：旧响应晚到不得覆盖新目录（reload 代际守卫）', async () => {
+    let resolveEtc!: (v: DirEntry[]) => void
+    fsApi.readDir.mockImplementation((_distro: string, p: string) => {
+      if (p === '/etc') return new Promise<DirEntry[]>((r) => (resolveEtc = r))
+      return Promise.resolve([
+        { name: 'etc', path: '/etc', isDirectory: true },
+        { name: 'hosts', path: '/hosts', isDirectory: false, size: 10 },
+      ])
+    })
+    const w = mount(FileBrowserPanel, {
+      props: { distroName: 'Ubuntu' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const etc = w.findAll('button.entry').find((b) => b.text().includes('etc'))!
+    await etc.trigger('click')
+    await flushPromises()
+    // /etc 读取在途：立刻返回根目录（第二次读取先完成）
+    const rootCrumb = w.findAll('nav.crumbs button').find((b) => b.text().includes('根'))!
+    await rootCrumb.trigger('click')
+    await flushPromises()
+
+    resolveEtc([{ name: 'stale-entry', path: '/etc/stale', isDirectory: false }])
+    await flushPromises()
+
+    expect(w.text()).not.toContain('stale-entry')
+    expect(w.text()).toContain('hosts')
   })
 })

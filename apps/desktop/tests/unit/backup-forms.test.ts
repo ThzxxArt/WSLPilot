@@ -72,12 +72,29 @@ describe('export form', () => {
     expect(req).toEqual({ name: 'U', path: 'C:\\x.tar', format: 'vhd' })
   })
 
+  it('非法发行版名硬拦截（与执行边界同源 — review 0.1.2 根治）', () => {
+    expect(validateExportForm({ name: 'a/b', path: 'C:\\x.tar', format: 'tar' })).toContain(
+      '不合法',
+    )
+    expect(validateExportForm({ name: 'a\u0000b', path: 'C:\\x.tar', format: 'tar' })).toContain(
+      '不合法',
+    )
+  })
+
+  it('导出路径含控制字符被拦截（review 0.1.2 根治）', () => {
+    expect(validateExportForm({ name: 'U', path: 'C:\\x\n.tar', format: 'tar' })).toContain(
+      '控制字符',
+    )
+    expect(validateExportForm({ name: 'U', path: 'C:\\ok.tar', format: 'tar' })).toBeNull()
+  })
+
   it('summary rows and command preview reflect the form', () => {
     const form = { name: 'Ubuntu', path: 'C:\\b\\u.tar', format: 'tar' as const }
     const rows = exportSummary(form)
     expect(rows.find((r) => r.label === '发行版')?.value).toBe('Ubuntu')
     expect(rows.find((r) => r.label === '格式')?.value).toContain('tar')
-    expect(exportCommandPreview(form)).toBe('wsl.exe --export Ubuntu "C:\\b\\u.tar"')
+    // 命令预览走 shared 的 PowerShell 单引号引用规则：无元字符的路径不加引号（并行改动适配）
+    expect(exportCommandPreview(form)).toBe('wsl.exe --export Ubuntu C:\\b\\u.tar')
     expect(summaryToText(rows)).toContain('导出备份')
     expect(
       exportSummary({ ...form, format: 'vhd' }).find((r) => r.label === '格式')?.value,
@@ -117,6 +134,40 @@ describe('import form', () => {
     ).toBeNull()
   })
 
+  it('路径含控制字符被拦截（归档 / 安装位置 — review 0.1.2 根治）', () => {
+    expect(
+      validateImportForm({
+        name: 'New',
+        archivePath: 'a\u0000.tar',
+        installPath: 'D:\\New',
+        format: 'tar',
+        version: 2,
+        inPlace: false,
+      }),
+    ).toContain('控制字符')
+    expect(
+      validateImportForm({
+        name: 'New',
+        archivePath: 'a.tar',
+        installPath: 'D:\\Ne\u0007w',
+        format: 'tar',
+        version: 2,
+        inPlace: false,
+      }),
+    ).toContain('控制字符')
+    // 就地导入：installPath 不参与校验，但归档路径仍查
+    expect(
+      validateImportForm({
+        name: 'New',
+        archivePath: 'a\u001f.vhdx',
+        installPath: '',
+        format: 'vhd',
+        version: 2,
+        inPlace: true,
+      }),
+    ).toContain('控制字符')
+  })
+
   it('builds request and summaries per mode', () => {
     const tar = {
       name: ' New ',
@@ -134,7 +185,7 @@ describe('import form', () => {
       version: 1,
       inPlace: false,
     })
-    expect(importCommandPreview(tar)).toBe('wsl.exe --import New "D:\\N" a.tar --version 1')
+    expect(importCommandPreview(tar)).toBe('wsl.exe --import New D:\\N a.tar --version 1')
     expect(importSummary(tar).find((r) => r.label === 'WSL 版本')?.value).toBe('WSL 1')
 
     const inplace = { ...tar, inPlace: true, format: 'vhd' as const }
@@ -168,6 +219,13 @@ describe('move form', () => {
     })
   })
 
+  it('迁移目标含控制字符被拦截（review 0.1.2 根治）', () => {
+    expect(validateMoveForm({ name: 'U', path: 'D:\\U\n2', terminateFirst: true })).toContain(
+      '控制字符',
+    )
+    expect(validateMoveForm({ name: 'U', path: 'D:\\U2', terminateFirst: true })).toBeNull()
+  })
+
   it('summary shows terminate and auto-backup policy', () => {
     const form = { name: 'Ubuntu', path: 'D:\\Ubuntu', terminateFirst: true }
     const rows = moveSummary(form, { willTerminate: true, autoBackup: true })
@@ -183,6 +241,6 @@ describe('move form', () => {
 
     const rows3 = moveSummary(form, { willTerminate: false, autoBackup: true })
     expect(rows3.find((r) => r.label === '运行中处理')).toBeUndefined()
-    expect(moveCommandPreview(form)).toBe('wsl.exe --manage Ubuntu --move "D:\\Ubuntu"')
+    expect(moveCommandPreview(form)).toBe('wsl.exe --manage Ubuntu --move D:\\Ubuntu')
   })
 })

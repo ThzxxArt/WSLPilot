@@ -5,7 +5,7 @@ import {
   actionTaskHandle,
   type ActionConfigReader,
 } from '../../src/main/services/action-runner'
-import type { WslAction, DistroMeta } from '@wslpilot/shared'
+import { createAppError, type WslAction, type DistroMeta } from '@wslpilot/shared'
 import type { TaskControl } from '../../src/main/services/task-runner'
 
 function logger() {
@@ -203,6 +203,42 @@ describe('actionRunner.prepare', () => {
     })
     const runner = createActionRunner(deps)
     await expect(runner.prepare('whoami')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+  })
+
+  it('P0 门禁顺序（review 0.1.2 根治）：探测型动作未运行先抛 DISTRO_NOT_RUNNING，且不发起 runWsl 探测', async () => {
+    const deps = makeDeps({
+      assertRunning: vi.fn(async () => {
+        throw createAppError('DISTRO_NOT_RUNNING', { message: '发行版 Ubuntu 未运行' })
+      }),
+    })
+    const runner = createActionRunner(deps)
+    await expect(runner.prepare('whoami')).rejects.toMatchObject({ code: 'DISTRO_NOT_RUNNING' })
+    // `wsl -d X -e sh -c` 探测绝不能先于门禁执行（否则隐式启动发行版）
+    expect(deps.runWsl).not.toHaveBeenCalled()
+    expect(deps.assertRunning).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('P0 门禁顺序：门禁通过后才探测（assertRunning → probeUserEnv）', async () => {
+    const order: string[] = []
+    const deps = makeDeps({
+      assertRunning: vi.fn(async () => {
+        order.push('assert')
+      }),
+      runWsl: vi.fn(async () => {
+        order.push('probe')
+        return { stdout: '/home/me\nme\n', stderr: '', code: 0 }
+      }),
+    })
+    const runner = createActionRunner(deps)
+    await runner.prepare('whoami')
+    expect(order).toEqual(['assert', 'probe'])
+  })
+
+  it('无需探测的动作不调用运行门禁（门禁只守探测这一条隐式启动路径）', async () => {
+    const deps = makeDeps({ assertRunning: vi.fn(async () => {}) })
+    const runner = createActionRunner(deps)
+    await runner.prepare('update-all', 'Ubuntu')
+    expect(deps.assertRunning).not.toHaveBeenCalled()
   })
 })
 

@@ -222,6 +222,76 @@ describe('自动更新服务（M7 §17）', () => {
     expect(updater.downloadUpdate).toHaveBeenCalledTimes(1)
   })
 
+  it('download 事件边界：percent 0 → 100 序列后状态为 downloaded（收尾以 update-downloaded 为准）', async () => {
+    const updater = makeUpdater()
+    const changes: UpdateState[] = []
+    const svc = createUpdateService({
+      logger,
+      currentVersion: '0.1.0',
+      isPackaged: true,
+      updater,
+      onChange: (s) => changes.push({ ...s }),
+    })
+    updater.checkForUpdates.mockImplementation(async () => {
+      updater.emit('update-available', { version: '2.0.0' })
+      return null
+    })
+    await svc.check()
+    updater.downloadUpdate.mockImplementation(async () => {
+      // 下载事件边界：从 0 到 100 全序列如实上报，不丢 0 帧也不提前跳完成
+      updater.emit('download-progress', { percent: 0 })
+      updater.emit('download-progress', { percent: 100 })
+      updater.emit('update-downloaded', { version: '2.0.0' })
+      return []
+    })
+    const state = await svc.download()
+    expect(state.status).toBe('downloaded')
+    expect(state.percent).toBe(100)
+    expect(state.version).toBe('2.0.0')
+
+    // downloading 帧单调不减且确实走过 0 → 100（首帧 0 来自 download() 起手的不确定→确定态）
+    const percents = changes
+      .filter((c) => c.status === 'downloading')
+      .map((c) => c.percent as number)
+    expect(percents[0]).toBe(0)
+    expect(percents.at(-1)).toBe(100)
+    for (let i = 1; i < percents.length; i++) {
+      expect(percents[i]!).toBeGreaterThanOrEqual(percents[i - 1]!)
+    }
+  })
+
+  it('install：quitAndInstall 抛错时异常原样抛给调用方、状态不被篡改（按实现如实锁定）', async () => {
+    const updater = makeUpdater()
+    const svc = createUpdateService({
+      logger,
+      currentVersion: '0.1.0',
+      isPackaged: true,
+      updater,
+    })
+    updater.checkForUpdates.mockImplementation(async () => {
+      updater.emit('update-available', { version: '2.0.0' })
+      return null
+    })
+    await svc.check()
+    updater.downloadUpdate.mockImplementation(async () => {
+      updater.emit('update-downloaded', { version: '2.0.0' })
+      return []
+    })
+    await svc.download()
+
+    // 实现无 try/catch：quitAndInstall 的异常同步冒泡给调用方（不吞错），状态保持 downloaded
+    updater.quitAndInstall.mockImplementationOnce(() => {
+      throw new Error('elevation denied')
+    })
+    expect(() => svc.install()).toThrow('elevation denied')
+    expect(svc.getState().status).toBe('downloaded')
+    expect(svc.getState().error).toBeUndefined()
+
+    // 失败未破坏状态机：重试仍会再次调用（由用户/调用方决定，不静默重试也不锁死）
+    svc.install()
+    expect(updater.quitAndInstall).toHaveBeenCalledTimes(2)
+  })
+
   it('初始状态可查询（update:status 用）；feedUrl 从 getFeedURL 回填（非幽灵字段）', async () => {
     const updater = makeUpdater()
     const svc = createUpdateService({

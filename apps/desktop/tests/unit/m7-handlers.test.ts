@@ -87,11 +87,11 @@ describe('update handlers（M7）', () => {
     await handlers.get(CH.updateInstall)!(ctx, undefined)
     expect(updater.install).toHaveBeenCalled()
 
-    // updater 缺失 → 明确错误（不静默、不半成品）
+    // updater 缺失 → 明确错误（不静默、不半成品）；review 0.1.2：错误码由 UNKNOWN 收敛为 TASK_FAILED
     const bare = collect(registerUpdateHandlers, makeCtx())
     for (const ch of [CH.updateCheck, CH.updateDownload, CH.updateInstall]) {
       await expect(bare.get(ch)!(makeCtx(), undefined)).rejects.toMatchObject({
-        code: 'UNKNOWN',
+        code: 'TASK_FAILED',
       })
     }
   })
@@ -179,5 +179,17 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
     )) as SignatureStatus
     expect(fallback).toMatchObject({ checked: false, signed: false })
     expect(fallback.smartscreenNote).toBe(SMARTSCREEN_NOTE)
+  })
+
+  it('app:signatureStatus 服务抛错 → 降级未检测态（不冒泡 UNKNOWN — review 0.1.2 根治）', async () => {
+    const status = vi.fn(async () => {
+      throw new Error('powershell 崩了')
+    })
+    const ctx = makeCtx({ signature: { status } })
+    const handlers = collect(registerAppHandlers, ctx)
+    const out = (await handlers.get(CH.appSignatureStatus)!(ctx, undefined)) as SignatureStatus
+    expect(out).toMatchObject({ checked: false, signed: false })
+    expect(out.detail).toContain('powershell 崩了')
+    expect(out.smartscreenNote).toBe(SMARTSCREEN_NOTE)
   })
 })

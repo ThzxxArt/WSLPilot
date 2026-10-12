@@ -10,7 +10,13 @@ beforeAll(() => {
 
 function key(
   k: string,
-  opts: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {},
+  opts: {
+    ctrlKey?: boolean
+    metaKey?: boolean
+    shiftKey?: boolean
+    altKey?: boolean
+    repeat?: boolean
+  } = {},
 ): Event {
   const e = new Event('keydown', { cancelable: true }) as Event & Record<string, unknown>
   e.key = k
@@ -18,6 +24,7 @@ function key(
   e.metaKey = !!opts.metaKey
   e.shiftKey = !!opts.shiftKey
   e.altKey = !!opts.altKey
+  e.repeat = !!opts.repeat
   return e
 }
 
@@ -110,6 +117,28 @@ describe('bindGlobalHotkeys', () => {
   it('未提供 handler 的快捷键安全忽略', () => {
     const off = bindGlobalHotkeys({}, target as never)
     expect(() => target.dispatchEvent(key('n', { ctrlKey: true }))).not.toThrow()
+    off()
+  })
+
+  it('长按重复事件（e.repeat）不连发（review 0.1.2）', () => {
+    const h = makeHandlers()
+    const off = bindGlobalHotkeys(h, target as never)
+    target.dispatchEvent(key('r', { ctrlKey: true, repeat: true }))
+    target.dispatchEvent(key('k', { ctrlKey: true, repeat: true }))
+    target.dispatchEvent(key('1', { ctrlKey: true, repeat: true }))
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(h.openPalette).not.toHaveBeenCalled()
+    expect(h.switchTab).not.toHaveBeenCalled()
+    off()
+  })
+
+  it('Ctrl+Shift+, 不触发设置（shift 判定补全 — review 0.1.2）', () => {
+    const h = makeHandlers()
+    const off = bindGlobalHotkeys(h, target as never)
+    target.dispatchEvent(key(',', { ctrlKey: true, shiftKey: true }))
+    expect(h.openSettings).not.toHaveBeenCalled()
+    target.dispatchEvent(key(',', { ctrlKey: true }))
+    expect(h.openSettings).toHaveBeenCalledTimes(1)
     off()
   })
 })

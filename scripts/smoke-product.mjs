@@ -35,6 +35,8 @@ for (const file of [mainPath, preloadPath]) {
 const req = createRequire(import.meta.url)
 const Module = req('module')
 const orig = Module._load
+/** preload 的 contextBridge.exposeInMainWorld 回调捕获（验证 API 真实暴露） */
+let exposed = null
 Module._load = function (request, _parent, _isMain) {
   if (request === 'electron') {
     class FakeWindow {
@@ -109,6 +111,17 @@ Module._load = function (request, _parent, _isMain) {
           workArea: { x: 0, y: 0, width: 1920, height: 1080 },
         }),
       },
+      // preload 产物顶层使用（review 0.1.2）：缺失会让 require 抛错 → 正是本冒烟要抓的断链
+      contextBridge: {
+        exposeInMainWorld(name, api) {
+          exposed = { name, api }
+        },
+      },
+      ipcRenderer: {
+        invoke: () => Promise.resolve(),
+        on() {},
+        removeListener() {},
+      },
     }
   }
   // node-pty 不存在于 CI 时给最小 stub
@@ -138,6 +151,24 @@ try {
   }
   console.log('[smoke-product] main loaded (runtime bootstrap err ok):', msg.slice(0, 120))
 }
+
+// 3) require preload（review 0.1.2）：preload 是渲染层唯一外部边界，
+// 顶层执行失败 = 窗口起来后 wslAPI 缺失、全应用白屏；与 main 不同，任何顶层错误都必须硬失败。
+try {
+  req(preloadPath)
+} catch (e) {
+  fail(`preload require failed: ${String(e && e.message)}`)
+}
+if (!exposed || exposed.name !== 'wslAPI') {
+  fail(`preload did not expose wslAPI via contextBridge (got: ${exposed?.name ?? 'none'})`)
+}
+// 形状抽检：关键命名空间必须存在（防止空壳 API 被暴露）
+for (const ns of ['config', 'distros', 'metrics', 'terminal', 'network', 'update', 'app']) {
+  if (!exposed.api || typeof exposed.api[ns] !== 'object' || exposed.api[ns] === null) {
+    fail(`preload wslAPI missing namespace: ${ns}`)
+  }
+}
+console.log('[smoke-product] preload module graph OK (wslAPI exposed)')
 
 console.log('[smoke-product] PASS')
 // require 已验证模块图；退出以免 Electron 生命周期钩子挂住

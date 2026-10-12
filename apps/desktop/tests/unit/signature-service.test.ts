@@ -94,4 +94,17 @@ describe('签名服务', () => {
     expect(s.smartscreenNote).toBe(SMARTSCREEN_NOTE)
     expect(logger.warn).toHaveBeenCalled()
   })
+
+  it('runTool 直接抛错 → 降级 checked:false + 原因（不得冒泡成 UNKNOWN — review 0.1.2 根治）', async () => {
+    const runTool = vi.fn(async () => {
+      throw new Error('spawn powershell.exe ENOENT')
+    })
+    const svc = createSignatureService({ logger, runTool, isWindows: true })
+    await expect(svc.status()).resolves.toMatchObject({
+      checked: false,
+      signed: false,
+      detail: expect.stringContaining('ENOENT'),
+      smartscreenNote: SMARTSCREEN_NOTE,
+    })
+  })
 })

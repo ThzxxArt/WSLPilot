@@ -208,4 +208,55 @@ describe('UsbipdService 操作', () => {
       suggestion: expect.stringContaining('winget install usbipd'),
     })
   })
+
+  it('--version 锚定 usbipd-win 前缀：不抓系统/日志里的无关版本号（review 0.1.2 根治）', async () => {
+    const tool = makeTool({ code: 0, stdout: 'Windows build 10.0.22631\nusbipd-win 2.4.1' })
+    const svc = createUsbipdService({ logger: logger(), runTool: tool.fn })
+    expect((await svc.status()).version).toBe('2.4.1')
+  })
+
+  it('bind 取消：abort 子进程并按 TASK_CANCELED 结算（review 0.1.2 根治）', async () => {
+    let canceled = false
+    const holder: { fn: (() => void) | null } = { fn: null }
+    const tool = vi.fn(
+      (_p: string, _a: string[], opts?: { signal?: AbortSignal }) =>
+        new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
+          opts?.signal?.addEventListener('abort', () =>
+            resolve({ stdout: '', stderr: 'aborted', code: -1 }),
+          )
+        }),
+    )
+    const svc = createUsbipdService({ logger: logger(), runTool: tool as never })
+    const ctl = makeCtl()
+    ctl.isCanceled = () => canceled
+    ctl.onCancel = (fn: () => void) => {
+      holder.fn = fn
+    }
+    const p = svc.bind('1-4', ctl)
+    await new Promise((r) => setTimeout(r, 0))
+    canceled = true
+    holder.fn?.()
+    await expect(p).rejects.toMatchObject({ code: 'TASK_CANCELED' })
+  })
+
+  it('bind/unbind/attach/detach 走同一串行队列：并发不重叠（review 0.1.2 根治）', async () => {
+    let active = 0
+    let maxActive = 0
+    const tool = vi.fn(async () => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await new Promise((r) => setTimeout(r, 5))
+      active--
+      return { stdout: '', stderr: '', code: 0 }
+    })
+    const svc = createUsbipdService({ logger: logger(), runTool: tool as never })
+    await Promise.all([
+      svc.bind('1-4', makeCtl()),
+      svc.unbind('1-4', makeCtl()),
+      svc.attach('2-1'),
+      svc.detach('2-1'),
+    ])
+    expect(maxActive).toBe(1)
+    expect(tool).toHaveBeenCalledTimes(4)
+  })
 })

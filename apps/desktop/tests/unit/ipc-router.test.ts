@@ -77,6 +77,8 @@ function makeDeps() {
       shutdown: vi.fn(async () => {}),
       setDefault: vi.fn(async () => {}),
       getVersion: vi.fn(async () => ({ raw: '', wslVersion: '', kernelVersion: '' })),
+      // review 0.1.2：fs/pty 门禁依赖（wsl 必填）
+      assertRunning: vi.fn(async () => {}),
       sampleMetrics: vi.fn(async () => ({
         memUsedKB: 0,
         memTotalKB: 0,

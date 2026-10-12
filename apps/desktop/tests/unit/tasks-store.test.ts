@@ -118,7 +118,8 @@ describe('useTasksStore', () => {
       status: 'failed',
     })
     expect(s.byId('a')?.status).toBe('failed')
-    expect(s.byId('a')?.error).toBe('炸了')
+    // 无 error 字段时用兜底文案，不把最后一条进度 message 当失败原因（review 0.1.2 根治）
+    expect(s.byId('a')?.error).toBe('任务执行失败')
 
     s.track({ taskId: 'b' }, { type: 'export', message: 'm' })
     s.applyProgress({
@@ -129,6 +130,58 @@ describe('useTasksStore', () => {
       status: 'canceled',
     })
     expect(s.byId('b')?.error).toBe('任务已取消')
+  })
+
+  it('失败原因消费 TaskProgress.error；终止 message 不再冒充（review 0.1.2 根治）', () => {
+    const s = useTasksStore()
+    s.track({ taskId: 'e1' }, { type: 'export', message: 'm' })
+    // 运行中最后一条 message 是进度文案
+    s.applyProgress({
+      taskId: 'e1',
+      type: 'export',
+      percent: 90,
+      message: '正在收尾',
+      status: 'running',
+    })
+    s.applyProgress({
+      taskId: 'e1',
+      type: 'export',
+      percent: null,
+      message: '导出结束',
+      status: 'failed',
+      error: '磁盘空间不足',
+    })
+    expect(s.byId('e1')?.error).toBe('磁盘空间不足')
+    expect(s.byId('e1')?.message).toBe('导出结束')
+  })
+
+  it('终态重复事件不刷新 finishedAt（结束时间不回拨）', () => {
+    vi.useFakeTimers()
+    try {
+      const s = useTasksStore()
+      s.track({ taskId: 'f1' }, { type: 'export', message: 'm' })
+      s.applyProgress({
+        taskId: 'f1',
+        type: 'export',
+        percent: 100,
+        message: '完成',
+        status: 'success',
+      })
+      const first = s.byId('f1')?.finishedAt
+      expect(first).toBeTruthy()
+      vi.advanceTimersByTime(5000)
+      // 迟到的重复终态事件：finishedAt 保持不变
+      s.applyProgress({
+        taskId: 'f1',
+        type: 'export',
+        percent: 100,
+        message: '完成',
+        status: 'success',
+      })
+      expect(s.byId('f1')?.finishedAt).toBe(first)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('caps log lines at MAX_TASK_LOGS', () => {

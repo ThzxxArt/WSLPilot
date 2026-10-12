@@ -59,6 +59,8 @@ function makeDeps() {
       shutdown: vi.fn(async () => {}),
       setDefault: vi.fn(async () => {}),
       getVersion: vi.fn(async () => ({ raw: '', wslVersion: '', kernelVersion: '' })),
+      // review 0.1.2：wsl 必填门禁依赖（ctx.wsl?. 静默失效形态已移除）
+      assertRunning: vi.fn(async () => {}),
       sampleMetrics: vi.fn(async () => ({
         memUsedKB: 0,
         memTotalKB: 0,
@@ -187,5 +189,17 @@ describe('pty IPC handlers', () => {
     await expect(
       wrapped.get(CH.ptyCreate)({}, { distro: '', cols: 80, rows: 24 }),
     ).rejects.toThrow()
+  })
+
+  it('pty:create 硬门禁：未运行发行版拒绝建会话（review 0.1.2 根治）', async () => {
+    const deps = makeDeps()
+    ;(deps.wsl as any).assertRunning = vi.fn(async () => {
+      throw new Error('发行版未运行')
+    })
+    const { wrapped } = register(makeCtx(), deps)
+    await expect(
+      wrapped.get(CH.ptyCreate)({}, { distro: 'Ubuntu', cols: 80, rows: 24 }),
+    ).rejects.toThrow('未运行')
+    expect(deps.pty.create).not.toHaveBeenCalled()
   })
 })

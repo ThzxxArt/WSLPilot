@@ -7,7 +7,10 @@ import {
 describe('终端输入分片（IPC 256KB 上限）', () => {
   it('小输入单片透传', () => {
     expect(chunkTerminalInput('ls -la\n')).toEqual(['ls -la\n'])
-    expect(chunkTerminalInput('')).toEqual([''])
+  })
+
+  it('空串返回空数组：不再发无意义 IPC（review 0.1.2 根治）', () => {
+    expect(chunkTerminalInput('')).toEqual([])
   })
 
   it('超限输入按 UTF-8 字节切分，每片不超上限', () => {

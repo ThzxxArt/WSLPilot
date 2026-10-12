@@ -175,6 +175,49 @@ describe('useNetworkStore', () => {
     expect(s.lastRemoved).toBeNull()
   })
 
+  it('并发连续 remove 两条规则都生效（写队列防 RMW 丢更新 — review 0.1.2 根治）', async () => {
+    let releaseFirst!: () => void
+    wslAPI.network.saveRules
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((r) => {
+            releaseFirst = r
+          }),
+      )
+      .mockResolvedValue({})
+    const s = useNetworkStore()
+    s.rules = [RULE, { ...RULE, id: 'dev-4000', listenPort: 4000 }]
+    const p1 = s.remove('dev-3000')
+    const p2 = s.remove('dev-4000')
+    // 等第一次落盘真正开始（挂起），再放行
+    await new Promise((r) => setTimeout(r, 0))
+    expect(wslAPI.network.saveRules).toHaveBeenCalledTimes(1)
+    releaseFirst()
+    await Promise.all([p1, p2])
+    // 两次删除都生效：第二次基于第一次的结果（而不是同一旧快照互相覆盖）
+    expect(s.rules).toHaveLength(0)
+    expect(wslAPI.network.saveRules).toHaveBeenCalledTimes(2)
+    expect(wslAPI.network.saveRules).toHaveBeenLastCalledWith([])
+  })
+
+  it('remove 返回被删快照；连续删除后各自撤销恢复各自（review 0.1.2 根治）', async () => {
+    wslAPI.network.saveRules.mockResolvedValue({})
+    const s = useNetworkStore()
+    s.rules = [RULE, { ...RULE, id: 'dev-4000', listenPort: 4000 }]
+    const r1 = await s.remove('dev-3000')
+    const r2 = await s.remove('dev-4000')
+    expect(r1?.id).toBe('dev-3000')
+    expect(r2?.id).toBe('dev-4000')
+    expect(s.lastRemoved?.id).toBe('dev-4000')
+    // 快照撤销只恢复自己的动作，不清掉其他人的撤销缓冲
+    await s.undoRestore(r1!)
+    expect(s.rules.map((r) => r.id)).toEqual(['dev-3000'])
+    expect(s.lastRemoved?.id).toBe('dev-4000')
+    await s.undoRestore(r2!)
+    expect(s.rules.map((r) => r.id).sort()).toEqual(['dev-3000', 'dev-4000'])
+    expect(s.lastRemoved).toBeNull()
+  })
+
   it('setEnabled 写回', async () => {
     wslAPI.network.saveRules.mockResolvedValue({})
     const s = useNetworkStore()
@@ -243,6 +286,32 @@ describe('useNetworkStore', () => {
     wslAPI.network.proxyApply.mockRejectedValue(new Error('perm'))
     const s = useNetworkStore()
     await expect(s.proxyApply('Ubuntu')).rejects.toBeTruthy()
+  })
+
+  it('proxyApply 的迟到脚本结果不覆盖后发起的 loadProxyState（代际守卫 — review 0.1.2 根治）', async () => {
+    const scriptA = { path: '/etc/profile.d/a.sh', exists: true, content: 'A' }
+    const scriptB = { path: '/etc/profile.d/b.sh', exists: true, content: 'B' }
+    let releaseApplyState!: (v: unknown) => void
+    wslAPI.network.proxyApply.mockResolvedValue({ distro: 'A' })
+    wslAPI.network.proxyState
+      // apply 内部那次 proxyState 查询挂起（模拟慢响应）
+      .mockReturnValueOnce(
+        new Promise((r) => {
+          releaseApplyState = r
+        }) as never,
+      )
+      .mockResolvedValueOnce(scriptB)
+    const s = useNetworkStore()
+    const pApply = s.proxyApply('A')
+    // 等 apply 走到挂起的 proxyState
+    await new Promise((r) => setTimeout(r, 0))
+    // 用户随后查看 B 发行版的脚本（后发起，应赢）
+    await s.loadProxyState('B')
+    expect(s.proxyScript).toEqual(scriptB)
+    // 放行 apply 的迟到结果：不得覆盖 B 的展示
+    releaseApplyState(scriptA)
+    await pApply
+    expect(s.proxyScript).toEqual(scriptB)
   })
 
   it('enabledRules getter', () => {

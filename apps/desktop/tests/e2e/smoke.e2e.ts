@@ -10,9 +10,9 @@
  * 隔离（review D-15/E-11 根治）：每次启动使用临时 userData（WSLPILOT_USER_DATA），
  * 不读写真实用户配置/日志/备份，也不受本机设置（强调色/侧栏折叠/语言）影响。
  */
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, _electron as electron, type Page } from '@playwright/test'
 import { join } from 'path'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 
 test.describe('WSLPilot 启动冒烟', () => {
@@ -74,6 +74,10 @@ test.describe('WSLPilot 启动冒烟', () => {
       await expect(window.getByText('端口转发', { exact: true })).toBeVisible({ timeout: 15_000 })
       await expect(window.getByText('代理配置', { exact: true })).toBeVisible({ timeout: 15_000 })
       await expect(window.getByText('新建规则', { exact: true })).toBeVisible({ timeout: 15_000 })
+      // 视觉掩码收窄的补偿断言（review 0.1.2）：被收窄区域的容器结构必须真实可见，
+      // 样式崩坏（而截图恰好被掩码）时在此处红
+      await expect(window.locator('.mirror-card')).toBeVisible({ timeout: 15_000 })
+      await expect(window.locator('.system-card')).toBeVisible({ timeout: 15_000 })
 
       // USB 设备页（M6 usbipd）：安装引导或设备表二者必有其一（静态文案，不依赖是否装了 usbipd）
       await nav.getByRole('button', { name: 'USB 设备', exact: true }).click()
@@ -81,7 +85,7 @@ test.describe('WSLPilot 启动冒烟', () => {
         timeout: 15_000,
       })
 
-      // 命令面板（M5 ⌘K）：全局快捷键唤起，Esc 关闭
+      // 命令面板（M5 ⌘K）：全局快捷键唤起 → 执行导航 → 空态 → Esc 关闭
       await window.keyboard.press('Control+KeyK')
       const paletteInput = window.locator('input[aria-label="命令面板搜索"]')
       await expect(paletteInput).toBeVisible({
@@ -91,7 +95,16 @@ test.describe('WSLPilot 启动冒烟', () => {
       await expect(window.locator('.palette-label', { hasText: '前往：驾驶舱' })).toBeVisible({
         timeout: 15_000,
       })
+      // 执行导航（review 0.1.2 补强）：此前只验证「能开、能空态」，未验证命令真正执行跳转
+      await paletteInput.fill('设置')
+      const settingsItem = window.locator('.palette-label', { hasText: '前往：设置' })
+      await expect(settingsItem).toBeVisible({ timeout: 15_000 })
+      await settingsItem.click()
+      await expect(window).toHaveTitle('设置 · WSLPilot', { timeout: 15_000 })
+      await expect(paletteInput).toBeHidden({ timeout: 15_000 })
       // 空态：无匹配时展示引导文案（不静默空白 —— 环境无关的确定性断言）
+      await window.keyboard.press('Control+KeyK')
+      await expect(paletteInput).toBeVisible({ timeout: 15_000 })
       await paletteInput.fill('zzz-no-such-command')
       await expect(window.getByText('没有匹配的命令', { exact: false })).toBeVisible({
         timeout: 15_000,
@@ -101,6 +114,56 @@ test.describe('WSLPilot 启动冒烟', () => {
       await expect(paletteInput).toBeHidden({ timeout: 15_000 })
     } finally {
       await app.close()
+      rmSync(userData, { recursive: true, force: true })
+    }
+  })
+
+  test('设置持久化闭环：修改后重启仍生效（review 0.1.2 补强）', async () => {
+    const userData = mkdtempSync(join(tmpdir(), 'wslpilot-e2e-persist-'))
+    const launch = () =>
+      electron.launch({
+        args: [join(__dirname, '../../out/main/index.js')],
+        env: { ...(process.env as Record<string, string>), WSLPILOT_USER_DATA: userData },
+      })
+    const openSettings = async (win: Page) => {
+      const nav = win.locator('aside.sidebar')
+      await nav.getByRole('button', { name: '设置', exact: true }).click()
+      const sw = win.locator('.setting-line', { hasText: '减弱动效' }).getByRole('switch')
+      await expect(sw).toBeVisible({ timeout: 15_000 })
+      return sw
+    }
+
+    // 第一次启动：打开「减弱动效」，等设置真正落盘（轮询 settings.jsonc 内容）
+    const app1 = await launch()
+    try {
+      const win = await app1.firstWindow({ timeout: 30_000 })
+      const sw = await openSettings(win)
+      await sw.click()
+      const configPath = join(userData, 'settings.jsonc')
+      await expect
+        .poll(
+          () => {
+            try {
+              return /"reduceMotion":\s*true/.test(readFileSync(configPath, 'utf8'))
+            } catch {
+              return false
+            }
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true)
+    } finally {
+      await app1.close()
+    }
+
+    // 第二次启动：同一 userData，开关应保持开启（落盘 → 读回 → 渲染全链路）
+    const app2 = await launch()
+    try {
+      const win = await app2.firstWindow({ timeout: 30_000 })
+      const sw = await openSettings(win)
+      await expect(sw).toHaveClass(/n-switch--active/, { timeout: 15_000 })
+    } finally {
+      await app2.close()
       rmSync(userData, { recursive: true, force: true })
     }
   })

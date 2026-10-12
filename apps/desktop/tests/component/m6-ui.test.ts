@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { NSwitch } from 'naive-ui'
+import { NSelect, NSwitch } from 'naive-ui'
 import type {
   DistroView,
   NetworkStatus,
@@ -95,6 +95,7 @@ const DevicesView = (await import('../../src/renderer/views/DevicesView.vue')).d
 const NetworkView = (await import('../../src/renderer/views/NetworkView.vue')).default
 
 const { createPinia, setActivePinia } = await import('pinia')
+const { useNetworkStore } = await import('../../src/renderer/stores/network')
 
 function distro(name: string): DistroView {
   return {
@@ -179,6 +180,23 @@ describe('MirrorModeCard', () => {
     })
     expect(w.text()).toContain('文件不存在')
   })
+
+  it('loading 时渲染骨架，不先闪推荐卡（review 0.1.2 根治）', () => {
+    const w = mount(MirrorModeCard, { props: { status: null, loading: true } })
+    expect(w.find('[data-testid="mirror-skeleton"]').exists()).toBe(true)
+    expect(w.text()).not.toContain('推荐开启镜像网络模式')
+    // 状态 tag 不闪：loading 时也走骨架
+    expect(w.find('.n-skeleton').exists()).toBe(true)
+  })
+
+  it('未知 mode 值走兜底文案（IPC 数据超枚举不崩 — review 0.1.2 根治）', () => {
+    const w = mount(MirrorModeCard, {
+      props: {
+        status: statusOf({ mode: 'weird-mode' as never }),
+      },
+    })
+    expect(w.text()).toContain('未知')
+  })
 })
 
 describe('PortForwardTable', () => {
@@ -250,6 +268,57 @@ describe('PortForwardTable', () => {
     await all!.trigger('click')
     expect(w.emitted('applyAll')).toHaveLength(1)
   })
+
+  it('停用规则的「应用」禁用；系统中无监听时「从系统移除」禁用（review 0.1.2 根治）', () => {
+    const w = mount(PortForwardTable, {
+      global: { stubs: { TransitionGroup: false } },
+      props: {
+        rules: [
+          { ...RULE, id: 'off-1', enabled: false, listenPort: 4000 },
+          { ...RULE, id: 'none-1', listenPort: 5000 },
+        ],
+        status: statusOf({
+          portProxy: [
+            {
+              listenAddress: '0.0.0.0',
+              listenPort: 3000,
+              connectAddress: '127.0.0.1',
+              connectPort: 3000,
+              kind: 'v4tov4',
+            },
+          ],
+        }),
+      },
+    })
+    const rows = w.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    // 停用规则：不单独应用
+    const applyOff = rows[0]!.findAll('button').find((b) => b.text().includes('应用'))!
+    expect(applyOff.attributes('disabled')).toBeDefined()
+    // state=none（系统无该监听）：无物可移除
+    const rmNone = rows[1]!.findAll('button').find((b) => b.text().includes('从系统移除'))!
+    expect(rmNone.attributes('disabled')).toBeDefined()
+    // 已应用规则仍可用
+    const applied = mount(PortForwardTable, {
+      global: { stubs: { TransitionGroup: false } },
+      props: {
+        rules: [RULE],
+        status: statusOf({
+          portProxy: [
+            {
+              listenAddress: '0.0.0.0',
+              listenPort: 3000,
+              connectAddress: '127.0.0.1',
+              connectPort: 3000,
+              kind: 'v4tov4',
+            },
+          ],
+        }),
+      },
+    })
+    const rmApplied = applied.findAll('button').find((b) => b.text().includes('从系统移除'))!
+    expect(rmApplied.attributes('disabled')).toBeUndefined()
+  })
 })
 
 describe('PortForwardForm', () => {
@@ -298,7 +367,28 @@ describe('PortForwardForm', () => {
     expect((emitted![0]![0] as PortForwardRule).id).toBe('dev-3000')
     // 编辑态保存必须交出原 id（upsert 据此重命名，而非静默另插一条）
     expect(emitted![0]![1]).toBe('dev-3000')
-    expect(w.emitted('update:show')![0]).toEqual([false])
+    // 受控关闭：save 不自行 close，等父级 upsert 成功后再关（失败保留表单 — review 0.1.2 根治）
+    expect(w.emitted('update:show')).toBeUndefined()
+  })
+
+  it('saving 期间按钮 loading 且不可重复提交（review 0.1.2 根治）', async () => {
+    const w = mount(PortForwardForm, {
+      props: {
+        show: true,
+        rule: RULE,
+        rules: [RULE],
+        distros: [distro('Ubuntu')],
+        saving: true,
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const save = findButton('保存修改') as HTMLButtonElement | null
+    expect(save).toBeTruthy()
+    expect(save!.disabled).toBe(true)
+    save!.click()
+    await flushPromises()
+    expect(w.emitted('save')).toBeUndefined()
   })
 
   it('编辑态改 id = 重命名：save 携带原 id 与新 id', async () => {
@@ -412,6 +502,79 @@ describe('ProxyPanel', () => {
     expect(w.emitted('inspect')).toHaveLength(1)
 
     expect(w.text()).toContain('已写入')
+  })
+
+  it('切换目标发行版立即隐藏旧脚本并触发重载（消除跨发行版串台 — review 0.1.2 根治）', async () => {
+    const w = mount(ProxyPanel, {
+      props: {
+        proxy,
+        distros: [distro('Ubuntu'), distro('Debian')],
+        windowsProxy: null,
+        proxyScript: {
+          path: '/etc/profile.d/wslpilot-proxy.sh',
+          exists: true,
+          content: '旧发行版脚本',
+        },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    expect(w.text()).toContain('旧发行版脚本')
+
+    const select = w.findComponent(NSelect)
+    await select.vm.$emit('update:value', 'Debian')
+    await flushPromises()
+    // 旧脚本立即隐藏 + 触发按新发行版重载
+    expect(w.text()).not.toContain('旧发行版脚本')
+    expect(w.emitted('inspect')!.at(-1)).toEqual(['Debian'])
+
+    // 新发行版结果到达 → 重新展示
+    await w.setProps({
+      proxyScript: {
+        path: '/etc/profile.d/wslpilot-proxy.sh',
+        exists: true,
+        content: '新发行版脚本',
+      },
+    })
+    await flushPromises()
+    expect(w.text()).toContain('新发行版脚本')
+  })
+
+  it('applying 期间整个操作区禁用（review 0.1.2 根治）', async () => {
+    const w = mount(ProxyPanel, {
+      props: {
+        proxy,
+        distros: [distro('Ubuntu')],
+        windowsProxy: null,
+        proxyScript: null,
+        applying: true,
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const save = w.findAll('button').find((b) => b.text().includes('保存配置'))!
+    const apply = w.findAll('button').find((b) => b.text().includes('写入代理脚本'))!
+    const clear = w.findAll('button').find((b) => b.text().includes('清除代理脚本'))!
+    const inspect = w.findAll('button').find((b) => b.text().includes('查看当前脚本'))!
+    for (const b of [save, apply, clear, inspect]) {
+      expect(b.attributes('disabled')).toBeDefined()
+    }
+  })
+
+  it('HTTP 代理形态非法时展示错误并禁用保存（review 0.1.2 根治）', async () => {
+    const w = mount(ProxyPanel, {
+      props: {
+        proxy: { useWindowsProxy: false, httpProxy: 'http://no-port', httpsProxy: '', noProxy: '' },
+        distros: [distro('Ubuntu')],
+        windowsProxy: null,
+        proxyScript: null,
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    expect(w.text()).toContain('格式应为 host:port')
+    const save = w.findAll('button').find((b) => b.text().includes('保存配置'))!
+    expect(save.attributes('disabled')).toBeDefined()
   })
 
   it('跟随 Windows 系统代理时展示 ProxyOverride（no_proxy 回退）摘要', () => {
@@ -584,31 +747,26 @@ describe('NetworkView', () => {
     expect(document.body.textContent).toContain('新建转发规则')
   })
 
-  it('应用单条规则先弹确认框（展示等价命令）', async () => {
-    wslAPI.network.listRules.mockResolvedValue([RULE])
-    wslAPI.network.getProxy.mockResolvedValue({
-      useWindowsProxy: false,
-      httpProxy: '',
-      httpsProxy: '',
-      noProxy: 'localhost',
-    })
-    wslAPI.network.status.mockResolvedValue(statusOf())
-    wslAPI.distros.list.mockResolvedValue([distro('Ubuntu')])
-
+  it('应用单条规则先弹确认框（展示等价命令 + 复制按钮 — review 0.1.2 根治）', async () => {
+    setupNetwork([RULE])
     const w = mount(NetworkView, { attachTo: document.body })
     await flushPromises()
 
-    const apply = w
-      .findAll('button')
-      .find((b) => b.text().trim() === '应用' && !b.attributes('disabled'))
-    await apply!.trigger('click')
+    await applyButton(w)!.trigger('click')
     await flushPromises()
-    expect(dialog.warning).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: '应用转发规则',
-        content: expect.stringContaining('netsh.exe interface portproxy add'),
-      }),
-    )
+
+    const call = dialog.warning.mock.calls.find(
+      (c) => (c[0] as { title?: string }).title === '应用转发规则',
+    )![0] as { content: () => unknown }
+    expect(call).toBeTruthy()
+    // content 是 render 函数：渲染后检查命令文本与复制按钮
+    const belt = mount({ render: () => call.content() as never })
+    expect(belt.text()).toContain('netsh.exe interface portproxy add')
+    const copy = belt.findAll('button').find((b) => b.text().includes('复制'))
+    expect(copy).toBeTruthy()
+    await copy!.trigger('click')
+    await flushPromises()
+    expect(message.success).toHaveBeenCalledWith('命令已复制')
   })
 
   it('load 失败展示错误横幅（不静默）', async () => {
@@ -731,6 +889,75 @@ describe('NetworkView', () => {
     await flushPromises()
     expect(wslAPI.network.saveRules).toHaveBeenLastCalledWith([RULE])
     expect(message.success).toHaveBeenCalledWith('已恢复规则')
+  })
+
+  it('连续删除两条规则：各自撤销恢复各自快照（review 0.1.2 根治）', async () => {
+    const RULE2 = { ...RULE, id: 'dev-4000', listenPort: 4000 }
+    setupNetwork([RULE, RULE2])
+    const captured: Array<{ action?: () => { props: { onClick: () => void } } }> = []
+    notification.warning.mockImplementation((opts: unknown) => {
+      captured.push(opts as { action?: () => { props: { onClick: () => void } } })
+      return { destroy: vi.fn() }
+    })
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    const store = useNetworkStore()
+
+    // 删第一条 → 删第二条（确认框自动回放）
+    let del = w.findAll('button').find((b) => b.text().includes('删除'))
+    await del!.trigger('click')
+    await flushPromises()
+    del = w.findAll('button').find((b) => b.text().includes('删除'))
+    await del!.trigger('click')
+    await flushPromises()
+    expect(store.rules).toHaveLength(0)
+    expect(captured).toHaveLength(2)
+
+    // 点第一条的撤销：恢复 A 而不是被 B 的 lastRemoved 覆盖
+    captured[0]!.action!().props.onClick()
+    await flushPromises()
+    expect(store.rules.map((r) => r.id)).toEqual(['dev-3000'])
+    // 点第二条的撤销：恢复 B
+    captured[1]!.action!().props.onClick()
+    await flushPromises()
+    expect(store.rules.map((r) => r.id).sort()).toEqual(['dev-3000', 'dev-4000'])
+  })
+
+  it('系统状态在页面可见时按 12s 轻量轮询（silent 不闪 loading — review 0.1.2 根治）', async () => {
+    vi.useFakeTimers()
+    try {
+      setupNetwork([RULE])
+      const w = mount(NetworkView, { attachTo: document.body })
+      await vi.advanceTimersByTimeAsync(20)
+      const before = wslAPI.network.status.mock.calls.length
+      await vi.advanceTimersByTimeAsync(12_000)
+      expect(wslAPI.network.status.mock.calls.length).toBeGreaterThan(before)
+      // silent 轮询不点亮 statusLoading
+      expect(useNetworkStore().statusLoading).toBe(false)
+      w.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('保存规则失败时编辑弹窗保留（受控关闭 — review 0.1.2 根治）', async () => {
+    setupNetwork([RULE])
+    wslAPI.network.saveRules.mockRejectedValueOnce(new Error('disk full'))
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    const edit = w.findAll('button').find((b) => b.text().includes('编辑'))
+    await edit!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('编辑转发规则')
+
+    const save = Array.from(document.body.querySelectorAll('button')).find((b) =>
+      (b.textContent ?? '').includes('保存修改'),
+    )!
+    save.click()
+    await flushPromises()
+    // 失败：弹窗保留（表单不丢），错误如实提示
+    expect(document.body.textContent).toContain('编辑转发规则')
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('disk full'))
   })
 
   it('写入代理脚本串行「保存配置 → 写入发行版」（不写旧代理 — review M-9）', async () => {

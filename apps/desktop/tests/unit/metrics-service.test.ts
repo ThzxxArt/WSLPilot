@@ -132,6 +132,26 @@ describe('sampleOverview', () => {
     expect(Object.keys(result.perDistro)).toHaveLength(2)
   })
 
+  it('sampledAt 取所有成功样本中的最新时刻（review 0.1.2 根治：不再取循环最后一个）', async () => {
+    const wsl: any = {
+      sampleMetrics: vi.fn(async (name: string) => ({
+        memUsedKB: 1,
+        memTotalKB: 2,
+        diskUsedKB: 1,
+        diskTotalKB: 2,
+        cpuPercent: 1,
+        sampledAt: name === 'A' ? '2026-10-10T12:00:05.000Z' : '2026-10-10T12:00:01.000Z',
+      })),
+    }
+    // A 先进入结果数组（Promise.all 顺序），B 是循环最后一个 —— 旧实现会错取 B 的旧时刻
+    const result = await sampleOverview(
+      wsl,
+      [distro('A', 'Running'), distro('B', 'Running')],
+      logger(),
+    )
+    expect(result.sampledAt).toBe('2026-10-10T12:00:05.000Z')
+  })
+
   it('sampleMetrics 抛 TASK_FAILED 时不进分母、不进 perDistro（失败样本零污染）', async () => {
     const wsl: any = {
       sampleMetrics: vi.fn(async (name: string) => {

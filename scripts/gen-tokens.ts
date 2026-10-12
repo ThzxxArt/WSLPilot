@@ -1,8 +1,14 @@
 /**
  * 设计令牌 → CSS 变量 / SCSS 生成脚本
  * 唯一事实源：packages/shared/src/tokens.ts
+ *
+ * 模式：
+ * - 默认：重新生成 packages/ui/src/styles/tokens.generated.scss
+ * - `--check`（review 0.1.2 根治）：内存生成全部输出并与磁盘产物逐字节比较，
+ *   漂移（改了 tokens.ts 未重新生成）打印 diff 摘要并 exit 1，一致 exit 0。
+ *   禁止以「先写再比」实现 —— 那就永远比得出相等。
  */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -92,7 +98,53 @@ ${toCssVars({ ...RADIUS, ...SHADOW, ...Z_INDEX, ...MOTION, ...TYPOGRAPHY }, '   
 }
 `
 
+/** 首个差异行的上下文摘要（行号 + 期望/实际），避免打印整文件 */
+function diffSummary(expected: string, actual: string): string {
+  const e = expected.split('\n')
+  const a = actual.split('\n')
+  const lines: string[] = []
+  const max = Math.max(e.length, a.length)
+  let first = -1
+  let count = 0
+  for (let i = 0; i < max; i++) {
+    if (e[i] !== a[i]) {
+      count++
+      if (first < 0) first = i
+      if (count <= 5) {
+        lines.push(`  L${i + 1} 期望: ${e[i] ?? '<缺失>'}`)
+        lines.push(`  L${i + 1} 实际: ${a[i] ?? '<缺失>'}`)
+      }
+    }
+  }
+  return `共 ${count} 行不一致（首个差异在第 ${first + 1} 行）:\n${lines.join('\n')}${
+    count > 5 ? `\n  …（仅显示前 5 处）` : ''
+  }`
+}
+
 async function main() {
+  const checkMode = process.argv.includes('--check')
+
+  if (checkMode) {
+    let actual: Buffer
+    try {
+      actual = await readFile(outPath)
+    } catch {
+      console.error(`[gen-tokens] --check 失败：产物不存在 ${outPath}，请先运行 npm run tokens`)
+      process.exit(1)
+    }
+    const expected = Buffer.from(scss, 'utf8')
+    if (Buffer.compare(expected, actual) === 0) {
+      console.log('[gen-tokens] --check OK：tokens.generated.scss 与 tokens.ts 逐字节一致')
+      return
+    }
+    console.error(
+      `[gen-tokens] --check 失败：tokens.generated.scss 与 tokens.ts 漂移。\n` +
+        `${diffSummary(scss, actual.toString('utf8'))}\n` +
+        `修复：运行 npm run tokens 重新生成并提交产物`,
+    )
+    process.exit(1)
+  }
+
   await mkdir(dirname(outPath), { recursive: true })
   await writeFile(outPath, scss, 'utf8')
   console.log(`[gen-tokens] wrote ${outPath}`)

@@ -1,9 +1,15 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { defineComponent, nextTick } from 'vue'
 import StatusDot from '@ui/components/StatusDot.vue'
 import Sparkline from '@ui/components/Sparkline.vue'
 import MetricCard from '@ui/components/MetricCard.vue'
+import ProgressRing from '@ui/components/ProgressRing.vue'
 import DistroCard from '@ui/components/DistroCard.vue'
+import { applyAccentToDom } from '@ui/index'
+import { buildThemeOverrides } from '@ui/naive'
+import { useReducedMotion } from '@ui/composables/useReducedMotion'
+import { accentMaps, primitiveGradients, radius, semanticLight, textScale } from '@ui/tokens'
 import type { DistroView } from '@wslpilot/shared'
 
 function distro(over: Partial<DistroView> = {}): DistroView {
@@ -118,6 +124,126 @@ describe('MetricCard', () => {
       await w.setProps({ value: 9 })
       await Promise.resolve()
       expect(w.text()).toContain('9')
+    } finally {
+      delete document.documentElement.dataset.reduceMotion
+    }
+  })
+
+  it('字符串数字（props 类型允许）不参与动画，直接展示（review 0.1.2）', async () => {
+    const w = mount(MetricCard, { props: { label: 'CPU', value: 0 } })
+    await w.setProps({ value: '42' })
+    // 若被错误送入 rAF 动画，首帧仍在起点（0），不会立即等于 42
+    expect(w.find('.metric-value').text()).toBe('42')
+  })
+
+  it('动画中途开启 reduced-motion：取消动画并立即落终值（review 0.1.2）', async () => {
+    document.documentElement.dataset.reduceMotion = 'false'
+    try {
+      const w = mount(MetricCard, { props: { label: 'x', value: 0 } })
+      await w.setProps({ value: 100 })
+      // 真实计时推进 ~80ms：动画在途中（480ms 档），未到终值
+      await new Promise((r) => setTimeout(r, 80))
+      expect(w.text()).not.toContain('100')
+      document.documentElement.dataset.reduceMotion = 'true'
+      // MutationObserver 回调 + watcher flush
+      await new Promise((r) => setTimeout(r, 20))
+      await nextTick()
+      expect(w.text()).toContain('100')
+    } finally {
+      delete document.documentElement.dataset.reduceMotion
+    }
+  })
+})
+
+describe('ProgressRing 尺寸守卫与渐变令牌（review 0.1.2）', () => {
+  it('stroke ≥ size 时半径 clamp 到 0（不产出负 r）', () => {
+    const w = mount(ProgressRing, { props: { percent: 50, size: 20, stroke: 20 } })
+    const r = Number(w.get('circle.value').attributes('r'))
+    expect(Number.isFinite(r)).toBe(true)
+    expect(r).toBe(0)
+    expect(w.get('circle.track').attributes('r')).toBe('0')
+    // 进度文本仍正常
+    expect(w.text()).toContain('50%')
+  })
+
+  it('默认渐变色停来自 shared PRIMITIVE_GRADIENTS.aurora（禁手写 hex）', () => {
+    const w = mount(ProgressRing, { props: { percent: 10 } })
+    const stops = w.findAll('linearGradient stop')
+    const from = stops[0]!.attributes('stop-color')!
+    const to = stops[1]!.attributes('stop-color')!
+    expect(primitiveGradients.aurora).toContain(from)
+    expect(primitiveGradients.aurora).toContain(to)
+  })
+})
+
+describe('theme-overrides 令牌化扩展（review 0.1.2）', () => {
+  const o = buildThemeOverrides('aurora')
+
+  it('common：pressed 由 ACCENT_MAPS hover 派生（不再复用 hover），字号/圆角引用令牌', () => {
+    expect(o.common!.primaryColorHover).toBe(accentMaps.aurora.accentHover)
+    expect(o.common!.primaryColorPressed).not.toBe(o.common!.primaryColorHover)
+    expect(o.common!.primaryColorPressed).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(o.common!.fontSize).toBe(textScale.body.size)
+    expect(o.Button!.borderRadiusMedium).toBe(radius.md)
+  })
+
+  it('Input/Select/Tag：边框/占位/主色与语义令牌一致', () => {
+    expect(o.Input!.borderFocus).toContain(accentMaps.aurora.accent)
+    expect(o.Input!.placeholderColor).toBe(semanticLight.textTertiary)
+    expect(o.Input!.border).toContain(semanticLight.borderDefault)
+    const selection = o.Select!.peers!.InternalSelection!
+    expect(selection.borderFocus).toContain(accentMaps.aurora.accent)
+    expect(selection.placeholderColor).toBe(semanticLight.textTertiary)
+    expect(o.Tag!.borderRadius).toBe(radius.sm)
+    expect(o.Tag!.color).toBe(semanticLight.bgSunken)
+    expect(o.Tag!.textColor).toBe(semanticLight.textSecondary)
+  })
+
+  it('Dropdown/Tooltip/Message：浮层与提示色令牌化', () => {
+    expect(o.Dropdown!.optionTextColorHover).toContain(accentMaps.aurora.accent)
+    expect(o.Dropdown!.dividerColor).toBe(semanticLight.borderSubtle)
+    expect(o.Tooltip!.textColor).toBe(semanticLight.textInverse)
+    expect(o.Message!.textColor).toBe(semanticLight.textPrimary)
+    expect(o.Message!.borderRadius).toBe(radius.md)
+  })
+})
+
+describe('applyAccentToDom（review 0.1.2）', () => {
+  it('切换窗口挂 data-accent-anim，结束后移除属性而非置 false', () => {
+    vi.useFakeTimers()
+    try {
+      applyAccentToDom('ocean')
+      const root = document.documentElement
+      expect(root.getAttribute('data-accent-anim')).toBe('true')
+      expect(root.dataset.accent).toBe('ocean')
+      expect(root.style.getPropertyValue('--color-accent')).toBe(accentMaps.ocean.accent)
+      vi.advanceTimersByTime(320)
+      expect(root.hasAttribute('data-accent-anim')).toBe(false)
+      expect(root.dataset.accentAnim).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('useReducedMotion 挂载对账（review 0.1.2）', () => {
+  it('setup 与 mounted 之间 DOM 变化在 onMounted 同步生效', async () => {
+    const Probe = defineComponent({
+      setup() {
+        const { reduced } = useReducedMotion()
+        return { reduced }
+      },
+      beforeMount() {
+        // 模拟挂载间隙设置变更（setup 已读到旧值，onMounted 必须先 update 对账）
+        document.documentElement.dataset.reduceMotion = 'true'
+      },
+      template: '<div class="probe">{{ reduced ? "reduced" : "normal" }}</div>',
+    })
+    try {
+      const w = mount(Probe)
+      await nextTick()
+      expect(w.get('.probe').text()).toBe('reduced')
+      w.unmount()
     } finally {
       delete document.documentElement.dataset.reduceMotion
     }

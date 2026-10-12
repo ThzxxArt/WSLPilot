@@ -112,9 +112,27 @@ let wslAPI: WslAPIMock
 
 const { createPinia, setActivePinia } = await import('pinia')
 const { useSettingsStore } = await import('../../src/renderer/stores/settings')
+const { resolveTerminalTheme } = await import('../../src/renderer/features/terminal/theme')
 const XtermPane = (await import('../../src/renderer/features/terminal/XtermPane.vue')).default
 const TerminalToolbar = (await import('../../src/renderer/features/terminal/TerminalToolbar.vue'))
   .default
+
+/** 相对亮度 / 对比度（WCAG 2.x） */
+function luminance(hex: string): number {
+  const n = Number.parseInt(hex.replace('#', ''), 16)
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const s = v / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  }) as [number, number, number]
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+function contrastRatio(a: string, b: string): number {
+  const la = luminance(a)
+  const lb = luminance(b)
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la]
+  return (hi + 0.05) / (lo + 0.05)
+}
 
 function lastTerm(): FakeTerm {
   const t = terms[terms.length - 1]
@@ -297,6 +315,82 @@ describe('XtermPane', () => {
     expect(t.disposed).toBe(true)
     expect(offData).toHaveBeenCalledTimes(1)
   })
+
+  it('host() 未决期间卸载：续体被 disposed 拦截，不创建 Terminal（review 0.1.2 竞态根治）', async () => {
+    let releaseHost!: (v: { platform: string; conptyBuild: number | null }) => void
+    wslAPI.terminal.host.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseHost = r
+      }),
+    )
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    // 订阅在同步段建立（卸载路径负责解绑）
+    const offData = wslAPI.terminal.onData.mock.results[0]!.value as () => void
+    w.unmount()
+    // 卸载后才放行 host()：续体不得再 new Terminal / open 空 host
+    releaseHost({ platform: 'win32', conptyBuild: 22621 })
+    await flushPromises()
+    expect(terms).toHaveLength(0)
+    expect(offData).toHaveBeenCalledTimes(1)
+  })
+
+  it('syncPtySize 单飞：并发尺寸同步只发一次 IPC（review 0.1.2 根治）', async () => {
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    let releaseResize!: () => void
+    wslAPI.terminal.resize.mockReturnValueOnce(
+      new Promise<void>((r) => {
+        releaseResize = r
+      }),
+    )
+    // 连发两次 resize：第二次复用第一次的在途同步，不重复上送
+    t.handlers.resize!({})
+    t.handlers.resize!({})
+    await flushPromises()
+    expect(wslAPI.terminal.resize).toHaveBeenCalledTimes(1)
+    releaseResize()
+    await flushPromises()
+  })
+
+  it('尺寸同步失败节流：同一失败只提示一次，成功后重置（review 0.1.2 根治）', async () => {
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    wslAPI.terminal.resize.mockRejectedValue(new Error('size down'))
+    t.handlers.resize!({})
+    await new Promise((r) => setTimeout(r, 350))
+    expect(message.error).toHaveBeenCalledTimes(1)
+    // 同一失败再次触发（输出自愈路径）：节流不重复提示
+    t.handlers.resize!({})
+    await new Promise((r) => setTimeout(r, 350))
+    expect(message.error).toHaveBeenCalledTimes(1)
+    // 成功同步一次 → 重置节流；后续新的失败可再次提示
+    wslAPI.terminal.resize.mockResolvedValue(undefined)
+    t.cols = 100
+    t.handlers.resize!({})
+    await flushPromises()
+    wslAPI.terminal.resize.mockRejectedValue(new Error('size down 2'))
+    t.cols = 101
+    t.handlers.resize!({})
+    await new Promise((r) => setTimeout(r, 350))
+    expect(message.error).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('终端主题对比度（4 个主题关键色对 — review 0.1.2 验收）', () => {
+  it('正文前景/背景对比度 ≥ 4.5:1（ANSI 彩色为装饰性例外，不参与断言）', () => {
+    const themes = [
+      { name: 'light（auto）', t: resolveTerminalTheme('auto') },
+      { name: 'contrast（custom）', t: resolveTerminalTheme('custom') },
+      { name: 'follow-app（aurora）', t: resolveTerminalTheme('follow-app', 'aurora') },
+      { name: 'follow-app（ocean）', t: resolveTerminalTheme('follow-app', 'ocean') },
+    ]
+    for (const { name, t } of themes) {
+      const ratio = contrastRatio(t.foreground!, t.background!)
+      expect(ratio, `${name} 对比度 ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
 })
 
 describe('TerminalToolbar 搜索事件面', () => {
@@ -328,5 +422,35 @@ describe('TerminalToolbar 搜索事件面', () => {
     )!
     next.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(w.emitted('searchNext')).toHaveLength(1)
+  })
+
+  it('字号到达边界时禁用 A+/A- 且按钮带 aria-label（review 0.1.2 根治）', () => {
+    const min = mount(TerminalToolbar, {
+      props: { canZoom: true, hasSession: true, fontSize: 8 },
+    })
+    const shrink = min.findAll('button').find((b) => b.text().includes('A-'))!
+    const grow = min.findAll('button').find((b) => b.text().includes('A+'))!
+    expect(shrink.attributes('aria-label')).toBe('缩小终端字号')
+    expect(grow.attributes('aria-label')).toBe('增大终端字号')
+    // 8 是下限：A- 禁用、A+ 可用
+    expect(shrink.attributes('disabled')).toBeDefined()
+    expect(grow.attributes('disabled')).toBeUndefined()
+
+    const max = mount(TerminalToolbar, {
+      props: { canZoom: true, hasSession: true, fontSize: 32 },
+    })
+    const shrink2 = max.findAll('button').find((b) => b.text().includes('A-'))!
+    const grow2 = max.findAll('button').find((b) => b.text().includes('A+'))!
+    // 32 是上限：A+ 禁用、A- 可用
+    expect(grow2.attributes('disabled')).toBeDefined()
+    expect(shrink2.attributes('disabled')).toBeUndefined()
+
+    // 无会话时 A+/A- 一律禁用（canZoom=false 优先）
+    const none = mount(TerminalToolbar, {
+      props: { canZoom: false, hasSession: false, fontSize: 16 },
+    })
+    const zoomBtns = none.findAll('button').filter((b) => /A[+-]/.test(b.text()))
+    expect(zoomBtns).toHaveLength(2)
+    for (const b of zoomBtns) expect(b.attributes('disabled')).toBeDefined()
   })
 })

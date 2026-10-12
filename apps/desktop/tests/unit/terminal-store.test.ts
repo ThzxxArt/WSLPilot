@@ -91,6 +91,65 @@ describe('useTerminalStore', () => {
     expect(s.canCreate).toBe(false)
   })
 
+  it('并发创建不同发行版不突破 maxSessions（TOCTOU 封死 — review 0.1.2 根治）', async () => {
+    wslAPI.terminal.maxSessions.mockResolvedValue(1)
+    let releaseCreate!: (v: unknown) => void
+    wslAPI.terminal.create.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseCreate = r
+      }) as never,
+    )
+    const s = useTerminalStore()
+    await s.loadLimits()
+    // 第一次创建挂在 await 上；第二次并发调用时名额已被「创建中」占用
+    const p1 = s.open('A')
+    const p2 = s.open('B')
+    expect(s.creatingDistros).toEqual(['A'])
+    expect(await p2).toBeNull()
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+
+    releaseCreate({ ptyId: 'id-a', distro: 'A', createdAt: 1 })
+    expect(await p1).toBe('id-a')
+    expect(s.sessions).toHaveLength(1)
+    // 创建完成后名额释放，状态可继续创建（已被 alive 计数拦住）
+    expect(s.creatingDistros).toEqual([])
+    expect(s.canCreate).toBe(false)
+  })
+
+  it('同发行版并发创建去重：create 只调一次（review 0.1.2 根治）', async () => {
+    let releaseCreate!: (v: unknown) => void
+    wslAPI.terminal.create.mockReturnValueOnce(
+      new Promise((r) => {
+        releaseCreate = r
+      }) as never,
+    )
+    const s = useTerminalStore()
+    await s.loadLimits()
+    const p1 = s.open('A')
+    const p2 = s.open('A')
+    // 第二个请求被 in-flight 集合拒绝（静默，不覆盖 lastError）
+    expect(await p2).toBeNull()
+    releaseCreate({ ptyId: 'id-a', distro: 'A', createdAt: 1 })
+    expect(await p1).toBe('id-a')
+    expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
+    expect(s.sessions).toHaveLength(1)
+    expect(s.lastError).toBeNull()
+    // 创建结束后同名发行版可再次打开（不是永久拒绝）
+    expect(s.creatingDistros).toEqual([])
+  })
+
+  it('create 失败后释放「创建中」名额（不卡死后续打开）', async () => {
+    wslAPI.terminal.create.mockRejectedValueOnce(new Error('ipc down'))
+    const s = useTerminalStore()
+    await s.loadLimits()
+    expect(await s.open('A')).toBeNull()
+    expect(s.creatingDistros).toEqual([])
+    expect(s.lastError).toBeTruthy()
+    // 失败后名额释放：下一次打开能真正再调 create
+    wslAPI.terminal.create.mockResolvedValueOnce({ ptyId: 'id-b', distro: 'A', createdAt: 2 })
+    expect(await s.open('A')).toBe('id-b')
+  })
+
   it('kill removes session and reassigns active', async () => {
     const s = useTerminalStore()
     await s.loadLimits()

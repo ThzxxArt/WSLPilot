@@ -79,6 +79,15 @@ describe('Kbd', () => {
     expect(w.findAll('kbd')).toHaveLength(1)
     expect(w.text()).toBe('Esc')
   })
+
+  it('空输入不渲染空 kbd/空壳（review 0.1.2）', () => {
+    const empty = mount(Kbd)
+    expect(empty.findAll('kbd')).toHaveLength(0)
+    expect(empty.find('.kbd').exists()).toBe(false)
+    const blank = mount(Kbd, { props: { keys: ['', '  '] } })
+    expect(blank.findAll('kbd')).toHaveLength(0)
+    expect(blank.find('.kbd').exists()).toBe(false)
+  })
 })
 
 describe('EmptyState', () => {

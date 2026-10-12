@@ -116,6 +116,14 @@ describe('app dialog handlers (M4 路径选择)', () => {
     expect(await call(handlers, ctx, CH.appPickOpenFile, {})).toBeNull()
   })
 
+  it('appOpenConfigDir：openPath 返回非空错误串 → IO_ERROR（review 0.1.2 根治）', async () => {
+    vi.mocked(shell.openPath).mockResolvedValueOnce('boom')
+    const { handlers, ctx } = register()
+    await expect(call(handlers, ctx, CH.appOpenConfigDir, undefined)).rejects.toMatchObject({
+      code: 'IO_ERROR',
+    })
+  })
+
   it('appOpenPath 只允许目录：文件/不存在路径拒绝，目录走 shell（review C10）', async () => {
     const { handlers, ctx } = register()
     const { mkdtemp, writeFile } = await import('node:fs/promises')

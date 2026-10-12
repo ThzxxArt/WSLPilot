@@ -31,6 +31,13 @@ vi.mock('naive-ui', async (importOriginal) => {
 
 const routerMock = { push: vi.fn() }
 vi.mock('vue-router', () => ({
+  createWebHashHistory: () => ({}),
+  createRouter: (opts: unknown) => ({
+    options: opts,
+    afterEach() {},
+    getRoutes: () => [],
+    install: () => {},
+  }),
   useRouter: () => routerMock,
   useRoute: () => ({ query: {}, name: 'dashboard' }),
   RouterView: { name: 'RouterView', template: '<div class="rv-stub" />' },
@@ -146,5 +153,81 @@ describe('App 壳装配', () => {
     expect(useTerminalStore().sessions.map((s) => s.ptyId)).toContain('alive1')
     // 恢复的会话在 store 中可被后续 TerminalView 消费
     expect(useTerminalStore().sessions[0]!.distro).toBe('Ubuntu')
+  })
+})
+
+describe('App 全局错误兜底（review 0.1.2）', () => {
+  it('window.wslAPI 缺失时渲染显式错误屏（不再全页静默失能）', async () => {
+    const saved = (window as { wslAPI?: unknown }).wslAPI
+    delete (window as { wslAPI?: unknown }).wslAPI
+    try {
+      const w = mount(App, { attachTo: document.body, global: { stubs } })
+      await flushPromises()
+      expect(w.find('.fatal-screen').exists()).toBe(true)
+      expect(w.text()).toContain('window.wslAPI 缺失')
+      expect(w.find('.fatal-reload').exists()).toBe(true)
+      expect(w.find('.pilot-shell').exists()).toBe(false)
+      // 缺失时不尝试任何桥接订阅（避免全 undefined 调用链炸在别处）
+      expect(wslAPI.config.onChanged).not.toHaveBeenCalled()
+    } finally {
+      ;(window as { wslAPI?: unknown }).wslAPI = saved
+    }
+  })
+
+  it('子组件未捕获错误 → onErrorCaptured 渲染降级错误面板（重载按钮）', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const Boom = {
+      name: 'Boom',
+      setup() {
+        throw new Error('渲染炸了')
+      },
+    }
+    try {
+      const w = mount(App, {
+        attachTo: document.body,
+        global: { stubs: { ...stubs, DefaultLayout: Boom } },
+      })
+      await flushPromises()
+      expect(w.find('.fatal-screen').exists()).toBe(true)
+      expect(w.text()).toContain('渲染炸了')
+      expect(w.find('.fatal-reload').exists()).toBe(true)
+      expect(errSpy).toHaveBeenCalled()
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+
+  it('main.ts errorHandler：console.error + wslAPI 可用性探测', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const main = await import('../../src/renderer/main')
+      const fakeApp = { config: {} as Record<string, unknown> }
+      main.installGlobalErrorHandling(
+        fakeApp as unknown as Parameters<typeof main.installGlobalErrorHandling>[0],
+      )
+      const handler = fakeApp.config.errorHandler as (
+        err: unknown,
+        instance: unknown,
+        info: string,
+      ) => void
+      expect(typeof handler).toBe('function')
+
+      handler(new Error('boom'), null, 'render')
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining('渲染层未捕获错误'),
+        expect.any(Error),
+        'render',
+      )
+
+      // wslAPI 缺失时给出显式诊断（错误屏之外的第二层探测）
+      const saved = (window as { wslAPI?: unknown }).wslAPI
+      delete (window as { wslAPI?: unknown }).wslAPI
+      errSpy.mockClear()
+      handler(new Error('boom'), null, 'render')
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('wslAPI 不可用'))
+      ;(window as { wslAPI?: unknown }).wslAPI = saved
+    } finally {
+      errSpy.mockRestore()
+    }
   })
 })

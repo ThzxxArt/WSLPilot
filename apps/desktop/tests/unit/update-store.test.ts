@@ -94,6 +94,63 @@ describe('useUpdateStore（M7 自动更新）', () => {
     expect(s.busy).toBe(false)
   })
 
+  it('check / download / install 的 reject 错误落地为 error 状态（不静默 — review 0.1.2）', async () => {
+    const s = useUpdateStore()
+    wslAPI.update.check.mockRejectedValueOnce(new Error('network down'))
+    await expect(s.check()).rejects.toThrow('network down')
+    expect(s.status).toBe('error')
+    expect(s.error).toBe('network down')
+
+    wslAPI.update.download.mockRejectedValueOnce(new Error('disk full'))
+    await expect(s.download()).rejects.toThrow('disk full')
+    expect(s.status).toBe('error')
+    expect(s.error).toBe('disk full')
+
+    wslAPI.update.install.mockRejectedValueOnce(new Error('elevation denied'))
+    await expect(s.install()).rejects.toThrow('elevation denied')
+    expect(s.status).toBe('error')
+    expect(s.error).toBe('elevation denied')
+  })
+
+  it('checkBusy / downloadBusy 独立（两个按钮互不闪 loading — review 0.1.2）', async () => {
+    let resolveCheck!: (v: UpdateState) => void
+    wslAPI.update.check.mockReturnValueOnce(new Promise<UpdateState>((r) => (resolveCheck = r)))
+    const s = useUpdateStore()
+    const p = s.check()
+    expect(s.checkBusy).toBe(true)
+    expect(s.downloadBusy).toBe(false)
+    resolveCheck(state({ status: 'not-available' }))
+    await p
+    expect(s.checkBusy).toBe(false)
+
+    let resolveDownload!: (v: UpdateState) => void
+    wslAPI.update.download.mockReturnValueOnce(
+      new Promise<UpdateState>((r) => (resolveDownload = r)),
+    )
+    const p2 = s.download()
+    expect(s.downloadBusy).toBe(true)
+    expect(s.checkBusy).toBe(false)
+    resolveDownload(state({ status: 'downloaded', percent: 100 }))
+    await p2
+    expect(s.downloadBusy).toBe(false)
+  })
+
+  it('attach 在 wslAPI.update 缺失时 no-op 且不抛（review 0.1.2 补测试）', () => {
+    const saved = wslAPI.update
+    ;(wslAPI as { update?: unknown }).update = undefined
+    try {
+      const s = useUpdateStore()
+      let off: (() => void) | undefined
+      expect(() => {
+        off = s.attach()
+      }).not.toThrow()
+      expect(typeof off).toBe('function')
+      expect(() => off!()).not.toThrow()
+    } finally {
+      ;(wslAPI as { update?: unknown }).update = saved
+    }
+  })
+
   it('install 成功与失败（失败向上抛）', async () => {
     wslAPI.update.install.mockResolvedValue(undefined)
     const s = useUpdateStore()

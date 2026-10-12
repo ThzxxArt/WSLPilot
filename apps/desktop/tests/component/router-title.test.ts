@@ -58,6 +58,14 @@ describe('router 路由表与标题', () => {
     expect(routes.find((r) => r.path === '/')?.redirect).toBe('/dashboard')
   })
 
+  it('未知路径有 catch-all 重定向（托盘导航/非法 hash 不白屏 — review 0.1.2）', () => {
+    const routes = (router as unknown as { options: { routes: Array<Record<string, unknown>> } })
+      .options.routes
+    const catchAll = routes.find((r) => String(r.path).includes('pathMatch'))
+    expect(catchAll, '缺少 catch-all 路由').toBeTruthy()
+    expect(catchAll!.redirect).toBe('/dashboard')
+  })
+
   it('afterEach 真实处理器：有 title → `标题 · WSLPilot`；无 title → 裸 WSLPilot', () => {
     expect(captured, 'router/index.ts 应注册 afterEach').toHaveLength(1)
     const after = captured[0]!

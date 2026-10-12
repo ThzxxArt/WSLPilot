@@ -181,4 +181,38 @@ describe('useWslConf', () => {
     // 慢保存晚到：不得把「已保存」的脏文本写回状态
     expect(conf.model.value.network.hostname).toBe('disk')
   })
+
+  it('save 成功后脏态与 diff/pendingChanges 归零（面板保存后的状态诚实）', async () => {
+    const api = makeApi()
+    const conf = useWslConf('Ubuntu', { api })
+    await conf.load()
+    conf.setField('network', 'hostname', 'saved')
+    expect(conf.isDirty.value).toBe(true)
+
+    await conf.save()
+    expect(conf.isDirty.value).toBe(false)
+    expect(conf.diff().every((d) => d.type === 'same')).toBe(true)
+    expect(conf.pendingChanges()).toEqual([])
+    // 基线已是保存后的磁盘内容：再次保存不产生新变更
+    await conf.save()
+    expect(api.write).toHaveBeenLastCalledWith(
+      'Ubuntu',
+      expect.stringContaining('hostname = saved'),
+    )
+  })
+
+  it('重新载入以磁盘为准并清除脏态（丢弃编辑后状态复位）', async () => {
+    const read = vi.fn(async () => SAMPLE)
+    const api = makeApi({ read })
+    const conf = useWslConf('Ubuntu', { api })
+    await conf.load()
+    conf.setField('network', 'hostname', 'dirty-local')
+    expect(conf.isDirty.value).toBe(true)
+
+    read.mockResolvedValueOnce('[network]\nhostname = disk-fresh\n')
+    await conf.load()
+    expect(conf.isDirty.value).toBe(false)
+    expect(conf.model.value.network.hostname).toBe('disk-fresh')
+    expect(conf.diff().every((d) => d.type === 'same')).toBe(true)
+  })
 })

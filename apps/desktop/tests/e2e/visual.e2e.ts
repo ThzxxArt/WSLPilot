@@ -45,15 +45,22 @@ function dynamicMasks(window: import('@playwright/test').Page) {
     window.locator('.empty-wrap'),
     // 网络页：系统真实转发表（条数与内容随机器变化）
     window.locator('.system-card .panel-title'),
-    window.locator('.system-card .table'),
+    // review 0.1.2：整表掩码收窄为数据行区域（tbody）—— 表头（监听/转发到/类型）与
+    // 边框是固定视觉系统，参与比对；容器定高（visual-stability.css）保证版式不漂移
+    window.locator('.system-card .table tbody'),
     window.locator('.system-card .empty-line'),
     // 网络页：端口转发表计数（规则来自用户配置）
     window.locator('.table-card .sub'),
     // 网络页：.wslconfig 真实路径（含用户名）
     window.locator('.mirror-card .sub code'),
-    // 网络页：镜像模式卡整体（状态随运行机器 .wslconfig 变化：CI runner 预配 mirrored、
-    // 本机为 NAT 引导卡——内容与高度都不同；整卡固定高度 + 掩码保证两状态等价）
-    window.locator('.mirror-card'),
+    // 网络页：镜像模式卡（状态随运行机器 .wslconfig 变化：CI runner 预配 mirrored、
+    // 本机为 NAT 引导卡）——review 0.1.2：整卡掩码收窄为具体动态元素：
+    // ① 状态徽章（模式标签）② 路径行（含条件「文件不存在」标签）③ 状态相关正文
+    // （推荐引导卡 / 已开启说明两种形态）。卡片标题、边框、背景为固定视觉系统，参与比对；
+    // 整卡定高（visual-stability.css 360px）保证两种形态下下方版式不位移。
+    window.locator('.mirror-card .head > .n-tag'),
+    window.locator('.mirror-card .sub'),
+    window.locator('.mirror-card .body'),
     // 网络页：页头摘要行（含「系统已生效 N 条」动态计数）
     window.locator('.page-header .sub'),
     // 网络页：Windows 系统代理状态（随机器变化）
