@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
-import { appError, createWslAPI, distro, bodyText, keydown, type WslAPIMock } from './support'
+import {
+  appError,
+  createWslAPI,
+  configGetImpl,
+  distro,
+  bodyText,
+  keydown,
+  type WslAPIMock,
+} from './support'
 
 enableAutoUnmount(afterEach)
 
@@ -55,7 +63,7 @@ beforeEach(() => {
   useCommandPalette().closePalette()
   document.body.innerHTML = ''
   routeMock.name = 'dashboard'
-  wslAPI.config.get.mockResolvedValue({})
+  wslAPI.config.get.mockImplementation(configGetImpl())
   wslAPI.config.set.mockResolvedValue({})
 })
 

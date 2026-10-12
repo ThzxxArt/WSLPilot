@@ -26,7 +26,9 @@ export function registerDistroHandlers(
 
   add(CH.distrosList, async (c): Promise<DistroView[]> => {
     const metaFile = await c.configService.load('distros')
-    const metaMap = new Map(metaFile.distros.map((d) => [d.name, d]))
+    // 大小写归一索引：WSL 名称不区分大小写，meta 命中必须同语义（review 根治 —
+    // 此前精确键匹配会让大小写不一致的条目元数据静默丢失）
+    const metaMap = new Map(metaFile.distros.map((d) => [d.name.toLowerCase(), d]))
     const views = await wsl.listWithMeta(metaMap)
     // 补齐 Lxss 深层信息（GUID/BasePath/DefaultUid）——`wsl -l -v` 本就不含这些字段。
     // 不补齐的话迁移向导会永远显示「注册表信息不可用」，而信息其实是可得的（review C-1）。

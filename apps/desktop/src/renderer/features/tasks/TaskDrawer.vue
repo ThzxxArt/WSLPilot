@@ -114,8 +114,11 @@ function clearFinished() {
             class="item"
             :class="{ active: selected?.taskId === t.taskId }"
             role="option"
+            tabindex="0"
             :aria-selected="selected?.taskId === t.taskId"
             @click="selectedId = t.taskId"
+            @keydown.enter.prevent="selectedId = t.taskId"
+            @keydown.space.prevent="selectedId = t.taskId"
           >
             <div class="item-line">
               <span class="item-title"

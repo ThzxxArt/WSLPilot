@@ -7,7 +7,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 - **技术栈**：TypeScript + Vue 3 + Electron（npm workspaces monorepo）
 - **持久化**：人类可读的 JSONC 配置文件（无数据库，可纳入 Git）
 - **设计系统**：浅色「极光」风格（四套强调色），完整动效基座，支持 `prefers-reduced-motion`
-- **当前版本**：`0.1.0`（M1–M7 全部交付）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
+- **当前版本**：`0.1.1`（M1–M7 全部交付；0.1.1 为质量收敛版——缺陷根治 + 测试诚实化，无新增功能）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
 
 ---
 
@@ -154,6 +154,8 @@ npm run smoke:product    # 产物冒烟（main 模块图完整性）
 质量基线：
 
 - **零恒真断言**：测试必须观测真实行为，改坏实现必红
+- **E2E / 视觉隔离**：实跑使用临时 `userData`（`WSLPILOT_USER_DATA`），不读写真实配置与日志，
+  也不受本机强调色 / 侧栏折叠 / 语言影响；`test:e2e` 含视觉回归，`test:visual` 仅跑视觉
 - **视觉回归**：截图基线按平台入库（`{arg}-{platform}.png`，linux / win32 各一套），`updateSnapshots: 'none'` 硬门禁——缺基线直接失败，禁止 CI 自动造基线放行；新增 / 更新截图用 `npx playwright test --grep @visual --update-snapshots=all` 并提交产物
 - **E2E 串行**：应用是单实例语义，`workers: 1` 防并行双开假红
 

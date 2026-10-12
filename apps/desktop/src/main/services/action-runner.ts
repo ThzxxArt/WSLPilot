@@ -98,7 +98,9 @@ export function createActionRunner(deps: ActionRunnerDeps): ActionRunner {
 
   function startupCwdOf(distro: string): string {
     const file = deps.configService.loadSync('distros')
-    const meta = file.distros.find((d) => d.name === distro)
+    // WSL 名称不区分大小写：大小写不一致时启动目录不得静默丢回 '~'（review 根治）
+    const lower = distro.toLowerCase()
+    const meta = file.distros.find((d) => d.name.toLowerCase() === lower)
     return meta?.startupCwd?.trim() || '~'
   }
 

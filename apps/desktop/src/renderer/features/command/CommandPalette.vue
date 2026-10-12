@@ -404,12 +404,16 @@ onMounted(() => {
         <div id="palette-results" class="palette-list" role="listbox" aria-label="命令结果">
           <template v-if="recents.length">
             <div class="palette-group" role="presentation">最近使用</div>
+            <!-- 最近使用是主列表的快捷镜像：对辅助技术隐藏（否则同一命令被读作两个 option），
+                 tabindex=-1 不参与键盘焦点循环；键盘/读屏导航走下方主列表 -->
             <button
               v-for="cmd in recents"
               :id="`palette-item-recent-${cmd.id}`"
               :key="`recent-${cmd.id}`"
               class="palette-item"
               role="option"
+              aria-hidden="true"
+              tabindex="-1"
               :aria-selected="false"
               @click="execute(cmd)"
             >

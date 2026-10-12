@@ -28,11 +28,17 @@ export function spawnWslTask(
     let watchdogKilled = false
     const tail: string[] = []
     let handle: { kill(): void } | null = null
+    /** 看门狗 kill 无响应时的兜底定时器（done 统一清理，防定时器泄漏） */
+    let watchdogFallback: NodeJS.Timeout | null = null
 
     const done = (fn: () => void) => {
       if (settled) return
       settled = true
       clearInterval(watchdog)
+      if (watchdogFallback) {
+        clearTimeout(watchdogFallback)
+        watchdogFallback = null
+      }
       fn()
     }
 
@@ -42,19 +48,23 @@ export function spawnWslTask(
       ctl.log(`命令 ${WATCHDOG_IDLE_MS / 60000} 分钟无输出，判定挂死并终止`)
       watchdogKilled = true
       handle?.kill()
-      // kill 会同步触发 onExit → settleAfterExit；此处兜底（kill 无响应时）
-      setTimeout(() => {
-        done(() =>
-          rejectPromise(
-            createAppError('TASK_FAILED', {
-              message: '命令长时间无响应，已自动终止',
-              detail: tail.join('\n'),
-              rawCommand,
-              suggestion: '请检查 WSL 服务状态（wsl --status）后重试',
-            }),
-          ),
-        )
-      }, 100)
+      // kill 可能同步触发 onExit → settleAfterExit 已结算；此兜底只在仍未结算时挂
+      // （避免给已完成任务留一个无人管理的 100ms 定时器）
+      if (!settled) {
+        watchdogFallback = setTimeout(() => {
+          watchdogFallback = null
+          done(() =>
+            rejectPromise(
+              createAppError('TASK_FAILED', {
+                message: '命令长时间无响应，已自动终止',
+                detail: tail.join('\n'),
+                rawCommand,
+                suggestion: '请检查 WSL 服务状态（wsl --status）后重试',
+              }),
+            ),
+          )
+        }, 100)
+      }
     }, 30_000)
     ;(watchdog as unknown as { unref?: () => void }).unref?.()
 

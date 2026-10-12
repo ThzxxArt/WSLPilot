@@ -52,5 +52,9 @@ describe('生产壳 provider 链（真 naive-ui）', () => {
     await flushPromises()
     // NetworkView setup 走完（useNotification 不抛）且渲染出镜像卡标题
     expect(wrapper.text()).toContain('网络模式')
+    // 健康路径断言：真实 network 契约（support.createWslAPI 已补命名空间）下不得落错误态
+    expect(wslAPI.network.status).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('端口转发')
+    expect(wrapper.text()).not.toContain('读取失败')
   }, 60_000) // 真 naive 全家桶 + 真 App/NetworkView 挂载是重量级用例（单跑 ~22s）；60s 防合跑负载下假超时
 })

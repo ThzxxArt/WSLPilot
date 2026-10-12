@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -55,10 +55,39 @@ describe('atomicWrite', () => {
     expect((await fs.stat(file)).isDirectory()).toBe(true)
   })
 
-  it('rename EPERM 时重试一次后成功', async () => {
+  it('rename EPERM 时重试一次后成功（真实注入 EPERM — review 假信心根治）', async () => {
     const file = join(dir, 'retry.jsonc')
-    await atomicWrite(file, 'first')
-    await atomicWrite(file, 'second')
-    expect(await fs.readFile(file, 'utf8')).toBe('second')
+    const realRename = fs.rename.bind(fs)
+    const spy = vi
+      .spyOn(fs, 'rename')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }),
+      )
+      .mockImplementation(realRename as never)
+    try {
+      await atomicWrite(file, 'ok-after-retry')
+      expect(await fs.readFile(file, 'utf8')).toBe('ok-after-retry')
+      // 第一次 EPERM、第二次真实 rename：必须恰好重试一次
+      expect(spy).toHaveBeenCalledTimes(2)
+      const entries = await fs.readdir(dir)
+      expect(entries.filter((e) => e.includes('.tmp'))).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('非 EPERM 的 rename 失败不重试，且清理 tmp 并向上抛', async () => {
+    const file = join(dir, 'hard-fail.jsonc')
+    const spy = vi
+      .spyOn(fs, 'rename')
+      .mockRejectedValueOnce(Object.assign(new Error('ENOSPC: no space left'), { code: 'ENOSPC' }))
+    try {
+      await expect(atomicWrite(file, 'v')).rejects.toThrow('ENOSPC')
+      expect(spy).toHaveBeenCalledTimes(1)
+      const entries = await fs.readdir(dir)
+      expect(entries.filter((e) => e.includes('.tmp'))).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

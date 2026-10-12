@@ -29,7 +29,6 @@ describe('设计令牌单源一致性', () => {
 
   it('accent primary colors match accentMaps', () => {
     for (const [name, map] of Object.entries(ACCENT_MAPS)) {
-      if (name === 'custom') continue
       expect(ACCENT_PRIMARY[name as keyof typeof ACCENT_PRIMARY]).toBe(map.accent)
     }
   })
@@ -47,6 +46,11 @@ describe('设计令牌单源一致性', () => {
 describe('死 token 已根治（源侧）', () => {
   it('SPACING 不再导出（space-* 全仓零消费）', () => {
     expect('SPACING' in tokensNs).toBe(false)
+  })
+
+  it('ACCENT_MAPS 不含 custom 幽灵键（占位枚举已移除）', () => {
+    expect('custom' in ACCENT_MAPS).toBe(false)
+    expect(Object.keys(ACCENT_MAPS).sort()).toEqual(['aurora', 'forest', 'ocean', 'sunset'])
   })
 
   it('SHADOW 只剩 utilities.scss 有消费的 xs/md', () => {
@@ -70,6 +74,13 @@ describe('死 token 已根治（gen-tokens 生成物与源一致）', () => {
     expect(scss).not.toContain('--shadow-glow')
     expect(scss).not.toContain('--glass-border')
     expect(scss).not.toMatch(/--z-(base|dropdown|sticky|drawer|modal|tooltip|command)/)
+  })
+
+  it('生成物不含幽灵 gradient-custom（与唯一事实源逐一对账 — review 根治）', () => {
+    expect(scss).not.toContain('gradient-custom')
+    const sourceKeys = Object.keys(PRIMITIVE_GRADIENTS).sort()
+    const generated = [...scss.matchAll(/--gradient-([a-z]+):/g)].map((m) => m[1]!).sort()
+    expect(generated).toEqual(sourceKeys)
   })
 
   it('存活 token 仍在生成物里（shadow-xs/md、z-toast、glass-bg/blur）', () => {

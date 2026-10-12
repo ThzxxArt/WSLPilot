@@ -182,6 +182,12 @@ watch(
     await reload()
   },
 )
+
+/**
+ * 供父级（DistroDetailModal 关窗守卫）调用：有脏编辑时弹确认。
+ * 没有这层暴露，用户在「文件」页未保存编辑时直接关弹窗，修改会静默丢失（review 根治）。
+ */
+defineExpose({ confirmDiscard })
 </script>
 
 <template>

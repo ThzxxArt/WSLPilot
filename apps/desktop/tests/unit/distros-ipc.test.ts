@@ -97,7 +97,7 @@ function makeDeps() {
           state: 'Running',
           version: 2,
           isDefault: true,
-          meta: map.get('Ubuntu') ?? null,
+          meta: map.get('ubuntu') ?? null,
         },
       ]),
       start: vi.fn(async () => {}),
@@ -213,6 +213,15 @@ describe('distros + meta IPC handlers', () => {
     const list = await wrapped.get(CH.distrosList)({})
     expect(deps.wsl.listWithMeta).toHaveBeenCalled()
     expect(list[0].meta.alias).toBe('主力')
+  })
+
+  it('distros:list 的 meta 索引按小写归一（大小写不一致也命中，review 根治）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    await wrapped.get(CH.distrosList)({})
+    const passedMap = deps.wsl.listWithMeta.mock.calls[0]![0] as Map<string, unknown>
+    expect([...passedMap.keys()]).toEqual(['ubuntu'])
+    expect(passedMap.get('ubuntu')).toMatchObject({ alias: '主力' })
   })
 
   /**

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
-import { NCheckbox, NRadioGroup } from 'naive-ui'
+import { NCheckbox, NRadioGroup, NSelect } from 'naive-ui'
 import { appError, createWslAPI, distro, findButton, bodyText, type WslAPIMock } from './support'
 
 enableAutoUnmount(afterEach)
@@ -50,7 +50,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   setActivePinia(createPinia())
   document.body.innerHTML = ''
-  wslAPI.config.get.mockResolvedValue({})
+  // 不覆写 config.get：support 的默认实现即真实契约形状（本文件组件不消费它）
   wslAPI.distros.list.mockResolvedValue([])
   wslAPI.io.listBackups.mockResolvedValue([])
   wslAPI.update.status.mockResolvedValue({ status: 'idle', currentVersion: '0.1.0' })
@@ -114,6 +114,26 @@ describe('SettingsView 签名与诊断', () => {
       expect.objectContaining({ general: expect.objectContaining({ accent: 'sunset' }) }),
     )
     expect(message.success).toHaveBeenCalledWith(expect.stringContaining('日落 Sunset'))
+  })
+
+  it('打开配置目录失败给错误提示（不静默、不产生未处理拒绝）', async () => {
+    wslAPI.app.openConfigDir.mockRejectedValueOnce(new Error('shell 打不开'))
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    findButton(w, '打开配置目录')!.element.click()
+    await flushPromises()
+    expect(wslAPI.app.openConfigDir).toHaveBeenCalled()
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('shell 打不开'))
+  })
+
+  it('浏览备份目录失败给错误提示（pickDirectory 拒绝不静默）', async () => {
+    wslAPI.app.pickDirectory.mockRejectedValueOnce(new Error('对话框异常'))
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    findButton(w, '浏览…')!.element.click()
+    await flushPromises()
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('对话框异常'))
+    expect(wslAPI.config.set).not.toHaveBeenCalled()
   })
 
   it('浏览备份目录选中后落盘；取消选择则不写', async () => {
@@ -296,5 +316,111 @@ describe('BackupView 备份列表', () => {
     await flushPromises()
     expect(w.find('.backups-error').exists()).toBe(false)
     expect(wslAPI.io.listBackups).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('SettingsView 设置 setter 覆盖面（落盘参数逐项对账）', () => {
+  function lineOf(label: string): HTMLElement | null {
+    return (
+      (Array.from(document.body.querySelectorAll<HTMLElement>('.setting-line')).find((el) =>
+        (el.textContent ?? '').includes(label),
+      ) as HTMLElement | undefined) ?? null
+    )
+  }
+
+  async function clickSwitch(label: string) {
+    const line = lineOf(label)
+    expect(line, `找不到设置行：${label}`).toBeTruthy()
+    const sw = line!.querySelector<HTMLElement>('.n-switch')
+    expect(sw, `设置行内没有开关：${label}`).toBeTruthy()
+    sw!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+  }
+
+  function selectInLine(w: ReturnType<typeof mount>, label: string) {
+    return (
+      w
+        .findAllComponents(NSelect)
+        .find((c) =>
+          (c.element as HTMLElement).closest('.setting-line')?.textContent?.includes(label),
+        ) ?? null
+    )
+  }
+
+  async function pickSelect(w: ReturnType<typeof mount>, label: string, value: unknown) {
+    const sel = selectInLine(w, label)
+    expect(sel, `找不到下拉：${label}`).toBeTruthy()
+    sel!.vm.$emit('update:value', value)
+    await flushPromises()
+  }
+
+  it('减弱动效 / 开机自启 / 破坏性确认 / 显示等价命令行 / 自动更新 开关落盘', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+
+    await clickSwitch('减弱动效')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      general: { reduceMotion: true },
+    })
+
+    await clickSwitch('开机自启')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      general: { launchAtLogin: true },
+    })
+
+    await clickSwitch('破坏性操作二次确认')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      advanced: { confirmDestructive: false },
+    })
+
+    await clickSwitch('显示等价命令行')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      advanced: { showRawCommand: true },
+    })
+
+    await clickSwitch('启动时自动检查更新')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      advanced: { autoUpdate: false },
+    })
+    void w
+  })
+
+  it('组件语言 / 关闭行为 / 日志级别 / 终端主题 / 备份格式 下拉落盘', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+
+    await pickSelect(w, '组件语言', 'en-US')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      general: { locale: 'en-US' },
+    })
+
+    await pickSelect(w, '关闭窗口时', 'quit')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      general: { closeBehavior: 'quit' },
+    })
+
+    await pickSelect(w, '日志级别', 'debug')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      advanced: { logLevel: 'debug' },
+    })
+
+    await pickSelect(w, '终端主题', 'follow-app')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      terminal: { theme: 'follow-app' },
+    })
+
+    await pickSelect(w, '默认格式', 'vhd')
+    expect(wslAPI.config.set).toHaveBeenCalledWith('settings', {
+      backup: { format: 'vhd' },
+    })
+  })
+
+  it('配置标签支持 Space 激活（role=button 键盘规范 — 与 TitleBar 同款）', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    const tag = w.findAll('.config-tag').find((t) => t.text().includes('distros.jsonc'))!
+    tag.element.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+    await flushPromises()
+    expect(wslAPI.config.openExternal).toHaveBeenCalledWith('distros')
   })
 })

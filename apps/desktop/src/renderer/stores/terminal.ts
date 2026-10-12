@@ -63,6 +63,22 @@ function adoptOrphan(id: string): void {
   orphanIds.delete(id)
 }
 
+/**
+ * @internal 仅供测试：重置/观测模块级会话缓冲状态。
+ * 这些 Map 刻意放在响应式系统之外（高吞吐输出不得触发整树重渲染），
+ * 但用例间必须可隔离，且「孤儿限额淘汰」必须可被真实断言（review 假信心根治）。
+ */
+export const __terminalBuffersForTest = {
+  reset(): void {
+    buffers.clear()
+    pendingExits.clear()
+    orphanIds.clear()
+  },
+  bufferCount: (): number => buffers.size,
+  orphanCount: (): number => orphanIds.size,
+  has: (id: string): boolean => buffers.has(id),
+}
+
 export const useTerminalStore = defineStore('terminal', {
   state: () => ({
     sessions: [] as TerminalSession[],
@@ -224,14 +240,13 @@ export const useTerminalStore = defineStore('terminal', {
       if (!buffers.has(id)) rememberOrphan(id)
       let buf = (buffers.get(id) ?? '') + chunk
       if (buf.length > BUFFER_LIMIT) {
-        // 按码点边界截断，避免劈开代理对（评审 M1）
-        let slice = buf.slice(buf.length - BUFFER_LIMIT)
-        // 向前跳过残缺代理对
-        const first = slice.charCodeAt(0)
-        if (first >= 0xd800 && first <= 0xdbff) {
-          slice = slice.slice(1)
-        }
-        buf = slice
+        // 按码点边界截断：若截断起点落在「低位代理」上，说明其高位代理已被切掉，
+        // 必须再跳过一位，否则缓冲以孤立低代理开头（渲染/导出出伪字符 — review 根治）。
+        // 起点是高代理时配对的低位在 slice 内，保留即可（旧实现错删高代理，反而留孤立低代理）。
+        let start = buf.length - BUFFER_LIMIT
+        const first = buf.charCodeAt(start)
+        if (first >= 0xdc00 && first <= 0xdfff) start += 1
+        buf = buf.slice(start)
       }
       buffers.set(id, buf)
     },

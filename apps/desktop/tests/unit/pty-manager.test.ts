@@ -285,6 +285,26 @@ describe('PtyManager', () => {
     await expect(pty.waitExit('missing')).rejects.toMatchObject({ code: 'TASK_FAILED' })
   })
 
+  it('会话已退出后 waitExit 返回缓存退出码而非「会话不存在」假失败（review M-10 回归钉）', async () => {
+    const info = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+    procs[0]!.emitExit(5)
+    // 会话已从活动表删除：必须读退出码缓存
+    await expect(pty.waitExit(info.ptyId)).resolves.toBe(5)
+  })
+
+  it('退出码缓存 64 条 LRU：最旧被淘汰后 waitExit 如实拒绝', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 65; i++) {
+      const info = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
+      ids.push(info.ptyId)
+      procs[i]!.emitExit(i)
+    }
+    // 最新一条仍在缓存
+    await expect(pty.waitExit(ids[64]!)).resolves.toBe(64)
+    // 最旧一条已被 LRU 淘汰：如实拒绝（不谎报退出码）
+    await expect(pty.waitExit(ids[0]!)).rejects.toMatchObject({ code: 'TASK_FAILED' })
+  })
+
   it('kill 即使 onExit 不触发也结算等待者（取消卡死根治 — review M7）', async () => {
     const info = pty.createCommand({ distro: 'U', program: '/bin/true', args: [] })
     const p = pty.waitExit(info.ptyId)

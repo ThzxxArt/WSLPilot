@@ -76,13 +76,18 @@ jobs:
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
+            apps/desktop/release/latest.yml
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # latest.yml 是 electron-updater 的更新清单，必须随资产发布（否则自动更新不可用）
           files: |
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
-          generate_release_notes: true
+            apps/desktop/release/latest.yml
+          # 发布说明由维护者在 Release 上撰写（详细中文）；
+          # 不生成/覆盖 body —— 动作对已存在 Release 在 body 缺失时保留原正文
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

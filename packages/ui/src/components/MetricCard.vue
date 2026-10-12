@@ -152,6 +152,7 @@ const hasHistory = computed(() => (props.history?.length ?? 0) >= 2)
     transform: scale(1);
     opacity: 0.55;
   }
+
   100% {
     transform: scale(2.4);
     opacity: 0;

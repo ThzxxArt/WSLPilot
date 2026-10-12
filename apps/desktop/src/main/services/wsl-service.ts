@@ -31,6 +31,34 @@ export function normalizeState(raw: string): WslState {
   return 'Unknown'
 }
 
+/**
+ * 在 `wsl --list` 输出中精确查找发行版（大小写不敏感，WSL 名称语义）。
+ * 必须按解析后的名单精确比对：子串匹配会把 `Ubuntu-22.04` 误判为 `Ubuntu` 已注册，
+ * 导致安装任务在真正开始前假结算（review 根治）。
+ *
+ * 兼容两种真实输出形态（同一函数是唯一解析入口）：
+ * - `wsl --list --verbose` 表格：`parseDistroList` 提取 NAME 列
+ * - `wsl --list` 简单列表：逐行剥默认标记/「(默认)(Default)」后缀后精确比对
+ *   （真实输出形如 `Ubuntu-22.04 (Default)` / `Ubuntu-22.04（默认）`）
+ */
+export function listContainsDistro(stdout: string, target: string): boolean {
+  const lower = String(target ?? '')
+    .trim()
+    .toLowerCase()
+  if (!lower) return false
+  if (parseDistroList(stdout).some((d) => d.name.toLowerCase() === lower)) return true
+  // 简单列表形态兜底（原实现用整段子串匹配，既有前缀误判又依赖输出形态；此处逐行精确比对）
+  for (const rawLine of String(stdout ?? '').split(/\r?\n/)) {
+    let line = rawLine.replace(/^\uFEFF/, '').trim()
+    if (!line) continue
+    if (/[:：]$/.test(line)) continue // 说明行（如「适用于 Linux 的 Windows 子系统分发版:」）
+    if (line.startsWith('*')) line = line.slice(1).trim()
+    line = line.replace(/\s*[（(]\s*(默认|default)\s*[)）]\s*$/i, '').trim()
+    if (line.toLowerCase() === lower) return true
+  }
+  return false
+}
+
 export interface WslStatus {
   raw: string
   wslVersion: string
@@ -157,8 +185,11 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
 
     async listWithMeta(metaByName) {
       const runtime = await list()
+      // 大小写归一索引：WSL 发行版名不区分大小写，meta 命中必须同语义，
+      // 否则 WSL 回报大小写与 distros.jsonc 不一致时别名/置顶等元数据静默丢失（review 根治）
+      const byLower = new Map([...metaByName].map(([k, v]) => [k.toLowerCase(), v]))
       return runtime.map((rt) => {
-        const meta = metaByName.get(rt.name)
+        const meta = byLower.get(rt.name.toLowerCase())
         return {
           ...rt,
           meta: meta ?? {
@@ -395,16 +426,18 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       }
 
       /**
-       * 完成判定（review「永远进行中」根治）：
+       * 完成判定（review「永远进行中」+「前缀误判」双根治）：
        * `wsl --install` 装完会拉起发行版**首启会话并挂住不退出** → 任务永远跑着。
        * 三层收敛：① `--no-launch` 装完即退（常规路径）；② 老 WSL 不识别该开关 → 去掉重试；
        * ③ 进程仍挂时以「目标发行版已注册」（wsl --list 可观测）为完成信号结算任务。
+       * 注册信号只在**安装前不存在**时启用：装前已存在时目标会立刻命中，
+       * 不得据此假结算（否则真安装还没开始就被判完成）。
        */
-      const isRegistered = async (): Promise<boolean> => {
+      const isTargetRegistered = async (): Promise<boolean> => {
         if (!target) return false
         try {
           const r = await runWsl(['--list'])
-          return r.code === 0 && r.stdout.toLowerCase().includes(target.toLowerCase())
+          return r.code === 0 && listContainsDistro(r.stdout, target)
         } catch {
           return false
         }
@@ -421,12 +454,14 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
             err = e
           },
         )
-        if (target) {
+        // 安装前基线：记录目标是否已注册（决定注册信号是否启用）
+        const preExisting = target ? await isTargetRegistered() : false
+        if (target && !preExisting) {
           while (!finished) {
             // 与进程退出竞速：退出即刻返回（不空等一个轮询周期）
             await Promise.race([p, new Promise((r) => setTimeout(r, 4000))])
             if (finished) break
-            if (await isRegistered()) {
+            if (await isTargetRegistered()) {
               ctl.log(`检测到 ${target} 已注册，安装完成（尾随的首启会话不再等待）`)
               void p.catch(() => {})
               return

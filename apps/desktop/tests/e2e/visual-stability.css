@@ -1,0 +1,44 @@
+/**
+ * 视觉回归「稳定化注入样式」（仅截图期由 toHaveScreenshot 的 stylePath 生效，不改生产样式）。
+ *
+ * 背景（win32 基线真实比对暴露的耦合）：
+ * - 问候语（早上好/下午好/晚上好）随时段变化、hero 统计行随 WSL 版本/发行版数量/内核变化、
+ *   设置页版本号随版本变化、网络页系统转发表随真实系统变化 —— 属动态内容，已由 mask 覆盖；
+ * - 但 mask 的填色区域取元素盒尺寸：文本宽度/卡片行数变化会让 mask 边界与下方布局整体漂移，
+ *   即使内容被盖住也会产生像素差（mask 边缘红边、下方面板位移）。
+ * 因此这里在截图期把「动态内容的盒」固定成稳定尺寸：
+ * - 动态文本元素宽度铺满容器（宽度不再随内容变化）
+ * - 指标值/提示固定高度（换行高度差消除）
+ * - 发行版卡片网格固定高度（数量变化不再导致下方版式位移）
+ */
+
+/* 动态文本：宽度随容器固定（消除 mask 边界随内容漂移） */
+.greeting,
+.hero .sub,
+.metric-value,
+.metric-hint,
+.system-card .panel-title,
+.system-card .table,
+.system-card .empty-line,
+.table-card .sub,
+.mirror-card .sub code,
+.proxy-card .hint {
+  width: 100% !important;
+}
+
+/* 指标数值/提示固定高度（数值文本换行与否不改变版面高度） */
+.metric-value {
+  height: 34px;
+  overflow: hidden;
+}
+
+.metric-hint {
+  height: 18px;
+  overflow: hidden;
+}
+
+/* 发行版卡片网格固定高度：0–2 行卡片都占同一高度，下方「快捷操作」不再位移 */
+.cards {
+  height: 380px;
+  overflow: hidden;
+}

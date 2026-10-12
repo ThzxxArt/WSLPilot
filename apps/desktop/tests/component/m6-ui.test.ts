@@ -16,7 +16,28 @@ const message = {
   error: vi.fn(),
   info: vi.fn(),
 }
-const dialog = { warning: vi.fn(), error: vi.fn(), info: vi.fn(), success: vi.fn() }
+let dialogResult: 'positive' | 'negative' | 'close' = 'positive'
+const dialog = {
+  /**
+   * 可编程回放：确认后真实执行 onPositiveClick（此前纯 vi.fn() 永不回放，
+   * NetworkView 的 应用/删除/代理系列动作链路从未在组件层执行过 — review 假信心根治）。
+   */
+  warning: vi.fn(
+    (opts: {
+      onPositiveClick?: () => void | Promise<void>
+      onNegativeClick?: () => void
+      onClose?: () => void
+    }) => {
+      if (dialogResult === 'positive') return opts.onPositiveClick?.()
+      if (dialogResult === 'negative') opts.onNegativeClick?.()
+      else opts.onClose?.()
+      return undefined
+    },
+  ),
+  error: vi.fn(),
+  info: vi.fn(),
+  success: vi.fn(),
+}
 const notification = { warning: vi.fn(), success: vi.fn(), error: vi.fn(), info: vi.fn() }
 
 vi.mock('naive-ui', async (importOriginal) => {
@@ -121,6 +142,7 @@ function statusOf(over: Partial<NetworkStatus> = {}): NetworkStatus {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  dialogResult = 'positive'
   setActivePinia(createPinia())
   // NModal 会 teleport 到 body：清空上一用例残留，避免 findButton 命中旧节点
   document.body.innerHTML = ''
@@ -315,6 +337,25 @@ describe('PortForwardForm', () => {
     expect(save).toBeTruthy()
     expect(save!.disabled).toBe(true)
   })
+
+  it('新建保存路径：创建规则携带表单值且不携带原 id', async () => {
+    const w = mount(PortForwardForm, {
+      props: { show: true, rule: null, rules: [], distros: [distro('Ubuntu')] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const create = findButton('创建规则')
+    expect(create).toBeTruthy()
+    create!.click()
+    await flushPromises()
+    const emitted = w.emitted('save')
+    expect(emitted).toHaveLength(1)
+    const rule = emitted![0]![0] as PortForwardRule
+    expect(rule.id).toBe('dev-3000')
+    expect(rule.distro).toBe('Ubuntu')
+    expect(rule.protocol).toBe('tcp')
+    expect(emitted![0]![1]).toBeUndefined()
+  })
 })
 
 describe('ProxyPanel', () => {
@@ -450,7 +491,8 @@ describe('DevicesView', () => {
     const attachSwitch = rows[0]!.findAllComponents(NSwitch)[1]!
     await attachSwitch.vm.$emit('update:value', true)
     await flushPromises()
-    expect(wslAPI.devices.attach).toHaveBeenCalled()
+    // 参数契约：busId 必须正确、未选目标发行版时传 undefined（不是空串 / 错位）
+    expect(wslAPI.devices.attach).toHaveBeenCalledWith('1-2', undefined)
   })
 
   it('load 失败展示错误态而非「没有发现 USB 设备」', async () => {
@@ -630,5 +672,89 @@ describe('NetworkView', () => {
     await flushPromises()
     expect(message.warning).toHaveBeenCalledWith('没有启用中的转发规则')
     expect(dialog.warning).not.toHaveBeenCalled()
+  })
+
+  function setupNetwork(rules: PortForwardRule[], status = statusOf()) {
+    wslAPI.network.listRules.mockResolvedValue(rules)
+    wslAPI.network.getProxy.mockResolvedValue({
+      useWindowsProxy: false,
+      httpProxy: '',
+      httpsProxy: '',
+      noProxy: 'localhost',
+    })
+    wslAPI.network.status.mockResolvedValue(status)
+    wslAPI.distros.list.mockResolvedValue([distro('Ubuntu')])
+  }
+
+  function applyButton(w: ReturnType<typeof mount>) {
+    return w.findAll('button').find((b) => b.text().trim() === '应用' && !b.attributes('disabled'))
+  }
+
+  it('应用单条规则确认后真实执行 network.apply 并刷新状态（dialog 回放 — review 假信心根治）', async () => {
+    setupNetwork([RULE])
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    const statusCallsBefore = wslAPI.network.status.mock.calls.length
+    await applyButton(w)!.trigger('click')
+    await flushPromises()
+    expect(wslAPI.network.apply).toHaveBeenCalledWith('dev-3000')
+    expect(message.success).toHaveBeenCalledWith(expect.stringContaining('已提交应用'))
+    expect(wslAPI.network.status.mock.calls.length).toBeGreaterThan(statusCallsBefore)
+  })
+
+  it('应用确认框取消则不执行', async () => {
+    setupNetwork([RULE])
+    dialogResult = 'negative'
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    await applyButton(w)!.trigger('click')
+    await flushPromises()
+    expect(dialog.warning).toHaveBeenCalled()
+    expect(wslAPI.network.apply).not.toHaveBeenCalled()
+  })
+
+  it('删除规则确认后落盘，并通过通知撤销恢复', async () => {
+    setupNetwork([RULE])
+    let captured: { action?: () => { props: { onClick: () => void } } } | null = null
+    notification.warning.mockImplementationOnce((opts: unknown) => {
+      captured = opts as { action?: () => { props: { onClick: () => void } } }
+      return { destroy: vi.fn() }
+    })
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    const del = w.findAll('button').find((b) => b.text().includes('删除'))
+    await del!.trigger('click')
+    await flushPromises()
+    expect(wslAPI.network.saveRules).toHaveBeenCalledWith([])
+    expect(captured).toBeTruthy()
+    captured!.action!().props.onClick()
+    await flushPromises()
+    expect(wslAPI.network.saveRules).toHaveBeenLastCalledWith([RULE])
+    expect(message.success).toHaveBeenCalledWith('已恢复规则')
+  })
+
+  it('写入代理脚本串行「保存配置 → 写入发行版」（不写旧代理 — review M-9）', async () => {
+    setupNetwork([])
+    const w = mount(NetworkView, { attachTo: document.body })
+    await flushPromises()
+    const httpInput = w
+      .findAll('input')
+      .find((i) => (i.attributes('placeholder') ?? '').includes('7890'))
+    expect(httpInput).toBeTruthy()
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(httpInput!.element, 'http://127.0.0.1:12345')
+    httpInput!.element.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    const applyBtn = w.findAll('button').find((b) => b.text().includes('写入代理脚本'))
+    await applyBtn!.trigger('click')
+    await flushPromises()
+    expect(wslAPI.network.saveProxy).toHaveBeenCalledWith(
+      expect.objectContaining({ httpProxy: 'http://127.0.0.1:12345' }),
+    )
+    const saveOrder = wslAPI.network.saveProxy.mock.invocationCallOrder[0]!
+    const applyOrder = wslAPI.network.proxyApply.mock.invocationCallOrder[0]!
+    expect(saveOrder).toBeLessThan(applyOrder)
+    expect(wslAPI.network.proxyApply).toHaveBeenCalledWith('Ubuntu')
   })
 })

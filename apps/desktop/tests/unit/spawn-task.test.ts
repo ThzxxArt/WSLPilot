@@ -98,6 +98,48 @@ describe('spawnWslTask', () => {
     })
   })
 
+  it('spawnFn 同步抛错 → reject 且不残留定时器（catch 分支 — review）', async () => {
+    const spawn = (() => {
+      throw new Error('sync boom')
+    }) as unknown as SpawnWslFn
+    await expect(spawnWslTask(['x'], makeCtl(), logger(), spawn)).rejects.toThrow('sync boom')
+  })
+
+  it('看门狗 kill 无响应时 100ms 兜底 reject，且定时器被清理（review 根治）', async () => {
+    vi.useFakeTimers()
+    try {
+      // kill 不触发 onExit：模拟 ConPTY 卡死/进程无法回收
+      const spawn = (() => ({ kill: vi.fn() })) as unknown as SpawnWslFn
+      const promise = spawnWslTask(['x'], makeCtl(), logger(), spawn)
+      const assertion = expect(promise).rejects.toMatchObject({
+        code: 'TASK_FAILED',
+        message: expect.stringContaining('无响应'),
+      })
+      await vi.advanceTimersByTimeAsync(11 * 60 * 1000)
+      await assertion
+      // watchdog interval + 100ms 兜底 timer 都必须被 done 清理（不来清理则泄漏）
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('非零退出时 tail 只保留最后 20 行（detail 不无界增长）', async () => {
+    let optsRef: { onLine: (l: string) => void; onExit: (c: number) => void } | null = null
+    const spawn = ((_a: string[], opts: never) => {
+      optsRef = opts
+      return { kill: vi.fn() }
+    }) as unknown as SpawnWslFn
+    const settled = spawnWslTask(['x'], makeCtl(), logger(), spawn).catch((e) => e)
+    for (let i = 1; i <= 25; i++) optsRef!.onLine(`line-${i}`)
+    optsRef!.onExit(1)
+    const err = await settled
+    const kept = String(err.detail).split('\n')
+    expect(kept).toHaveLength(20)
+    expect(kept[0]).toContain('line-6')
+    expect(kept[19]).toContain('line-25')
+  })
+
   it('watchdog kills hung command after idle timeout', async () => {
     vi.useFakeTimers()
     try {
@@ -117,6 +159,8 @@ describe('spawnWslTask', () => {
       await vi.advanceTimersByTimeAsync(11 * 60 * 1000)
       await assertion
       expect(killed).toBe(true)
+      // kill 同步触发退出即结算：不得再残留无人管理的兜底/看门狗定时器
+      expect(vi.getTimerCount()).toBe(0)
     } finally {
       vi.useRealTimers()
     }

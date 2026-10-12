@@ -5,6 +5,7 @@ import {
   runWslWithStdin,
   parseDistroList,
   decodeWslOutput,
+  detectWslEncoding,
   getRawCommand,
   spawnWsl,
   type WslExecResult,
@@ -252,6 +253,137 @@ describe('spawnWsl', () => {
 
     expect(errors[0].message).toBe('spawn fail')
     expect(exits).toEqual([-1])
+  })
+})
+
+describe('spawnWsl 流式解码自适应（`-e` UTF-8 / 内建 UTF-16LE）', () => {
+  beforeEach(() => {
+    mockSpawn.mockReset()
+  })
+
+  function fakeChild() {
+    const fake: any = new EventEmitter()
+    fake.stdout = new EventEmitter()
+    fake.stderr = new EventEmitter()
+    fake.kill = vi.fn()
+    mockSpawn.mockReturnValue(fake)
+    return fake
+  }
+
+  function collect(onLine: (l: string) => void) {
+    const lines: string[] = []
+    const exits: number[] = []
+    spawnWsl(['-d', 'U', '-e', 'sh'], {
+      onLine: (l) => {
+        lines.push(l)
+        onLine(l)
+      },
+      onExit: (c) => exits.push(c),
+      onError: () => {},
+    })
+    return { lines, exits }
+  }
+
+  it('UTF-8 输出（headless 动作 / WSL_UTF8=1）逐行正确解码，不再两两并成汉字', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    fake.stdout.emit('data', Buffer.from('中文日志行1\n中文日志行2\n', 'utf8'))
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['中文日志行1', '中文日志行2'])
+  })
+
+  it('UTF-8 多字节字符被块边界劈开时由解码器拼接完整', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    const payload = Buffer.from('开工👉done\n', 'utf8')
+    // 5 字节处劈开：恰好落在「工」（3 字节）与「开」之间？——取固定偏移确保劈开多字节
+    const cut = 2
+    fake.stdout.emit('data', payload.subarray(0, cut))
+    fake.stdout.emit('data', payload.subarray(cut))
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['开工👉done'])
+  })
+
+  it('UTF-16LE 输出跨块且块边界为奇数长度时仍正确', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    const payload = Buffer.from('NAME STATE\nVERSION\n', 'utf16le')
+    fake.stdout.emit('data', payload.subarray(0, 5)) // 奇数长度切分
+    fake.stdout.emit('data', payload.subarray(5))
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['NAME STATE', 'VERSION'])
+  })
+
+  it('UTF-16LE 带 BOM：BOM 不进入首行', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    const payload = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from('VERSION 2\n', 'utf16le'),
+    ])
+    fake.stdout.emit('data', payload)
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['VERSION 2'])
+  })
+
+  it('UTF-8 带 BOM：同样剥离', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    const payload = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('hello\n', 'utf8')])
+    fake.stdout.emit('data', payload)
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['hello'])
+  })
+
+  it('首块不足 4 字节时等待阈值再判定，不误判编码', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    fake.stdout.emit('data', Buffer.from('ab', 'utf8'))
+    fake.stdout.emit('data', Buffer.from('cd\n', 'utf8'))
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['abcd'])
+  })
+
+  it('stdout / stderr 各自独立探测（一 UTF-16 一 UTF-8 不串台）', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    fake.stdout.emit('data', Buffer.from('out line\n', 'utf16le'))
+    fake.stderr.emit('data', Buffer.from('err line\n', 'utf8'))
+    fake.emit('close', 1)
+
+    expect(lines).toContain('out line')
+    expect(lines).toContain('err line')
+  })
+
+  it('flush 输出无换行尾段，不丢尾数据', () => {
+    const fake = fakeChild()
+    const { lines } = collect(() => {})
+    fake.stdout.emit('data', Buffer.from('head\ntail-no-newline', 'utf8'))
+    fake.emit('close', 0)
+
+    expect(lines).toEqual(['head', 'tail-no-newline'])
+  })
+})
+
+describe('detectWslEncoding（编码探测唯一事实源）', () => {
+  it('BOM 优先：FF FE → utf16le；EF BB BF → utf8', () => {
+    expect(detectWslEncoding(Buffer.from([0xff, 0xfe, 0x61, 0x00]))).toBe('utf16le')
+    expect(detectWslEncoding(Buffer.from([0xef, 0xbb, 0xbf, 0x61]))).toBe('utf8')
+  })
+
+  it('无 BOM：奇数位大量 NUL → utf16le；否则 utf8', () => {
+    expect(detectWslEncoding(Buffer.from('NAME', 'utf16le'))).toBe('utf16le')
+    expect(detectWslEncoding(Buffer.from('NAME', 'utf8'))).toBe('utf8')
+  })
+
+  it('短样本（<4 字节）不武断判 utf16le', () => {
+    expect(detectWslEncoding(Buffer.from([0x61, 0x00]))).toBe('utf8')
   })
 })
 

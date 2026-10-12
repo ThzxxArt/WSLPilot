@@ -26,7 +26,7 @@ import {
 } from '../../src/main/services/io-service'
 import type { TaskControl, TaskRunner } from '../../src/main/services/task-runner'
 import { createTaskRunner } from '../../src/main/services/task-runner'
-import type { DistroRuntime } from '@wslpilot/shared'
+import type { DistroRuntime, ElevationOpResult, ElevationRequest } from '@wslpilot/shared'
 
 function logger() {
   return {
@@ -104,6 +104,7 @@ function makeDeps(opts: {
   basePath?: string
   spawn?: SpawnWslFn
   config?: ReturnType<typeof makeConfig>
+  elevation?: { runOne: (req: ElevationRequest) => Promise<ElevationOpResult> }
 }) {
   return {
     logger: logger(),
@@ -116,6 +117,7 @@ function makeDeps(opts: {
     },
     configService: opts.config ?? makeConfig(),
     spawnFn: opts.spawn,
+    ...(opts.elevation ? { elevation: opts.elevation } : {}),
   }
 }
 
@@ -518,6 +520,28 @@ describe('IoService.runImport', () => {
     expect(calls[0]).toEqual(['--import', 'New', installDir, archive, '--version', '1'])
   })
 
+  it('导入命令成功但未检测到新发行版 → TASK_FAILED（不谎报完成 — review）', async () => {
+    const archive = join(srcDir, 'a.tar')
+    await fs.writeFile(archive, Buffer.alloc(100))
+    const io = createIoService(makeDeps({ distros: [], spawn: makeSpawnFn([], () => ({})) }))
+    await expect(
+      io.runImport(
+        {
+          name: 'New',
+          installPath: installDir,
+          archivePath: archive,
+          format: 'tar',
+          version: 2,
+          inPlace: false,
+        },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({
+      code: 'TASK_FAILED',
+      message: expect.stringContaining('未检测到新发行版'),
+    })
+  })
+
   it('imports in-place for vhdx without install path', async () => {
     const vhdx = join(srcDir, 'disk.vhdx')
     await fs.writeFile(vhdx, Buffer.alloc(50))
@@ -894,6 +918,89 @@ describe('IoService.runMove', () => {
         makeCtl([]) as never,
       ),
     ).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+  })
+
+  it('拒绝把发行版迁移进自己的子目录（包含关系 — review M-7）', async () => {
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: distroDir,
+        spawn: makeSpawnFn([], () => ({})),
+        config: makeConfig({ autoBackupBeforeDestructive: false }),
+      }),
+    )
+    await expect(
+      io.runMove(
+        { name: 'Ubuntu', path: join(distroDir, 'sub'), terminateFirst: false },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({ code: 'IO_ERROR', message: expect.stringContaining('包含关系') })
+  })
+
+  it('直接执行权限不足 → 提权助手执行 wsl.move 成功（M7 链路回归）', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      code: 1,
+      lines: ['Access is denied', 'The requested operation requires elevation'],
+    }))
+    const elevation = {
+      runOne: vi.fn(async (): Promise<ElevationOpResult> => ({
+        op: 'wsl.move',
+        ok: true,
+        code: 0,
+        stdout: '',
+        stderr: '',
+      })),
+    }
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: distroDir,
+        spawn,
+        config: makeConfig({ autoBackupBeforeDestructive: false }),
+        elevation,
+      }),
+    )
+    const ctl = makeCtl([])
+    const target = join(targetParent, 'Ubuntu')
+    await io.runMove({ name: 'Ubuntu', path: target, terminateFirst: false }, ctl)
+    expect(elevation.runOne).toHaveBeenCalledWith({
+      op: 'wsl.move',
+      params: { name: 'Ubuntu', path: target },
+    })
+    const logs = (ctl.log as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])
+    expect(logs.some((l) => String(l).includes('迁移完成'))).toBe(true)
+  })
+
+  it('提权助手执行失败 → PERMISSION_DENIED 且附等价命令建议（M7 链路回归）', async () => {
+    const spawn = makeSpawnFn([], () => ({ code: 1, lines: ['Access is denied'] }))
+    const elevation = {
+      runOne: vi.fn(async (): Promise<ElevationOpResult> => ({
+        op: 'wsl.move',
+        ok: false,
+        code: 1,
+        stdout: '',
+        stderr: 'denied',
+      })),
+    }
+    const io = createIoService(
+      makeDeps({
+        distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+        basePath: distroDir,
+        spawn,
+        config: makeConfig({ autoBackupBeforeDestructive: false }),
+        elevation,
+      }),
+    )
+    await expect(
+      io.runMove(
+        { name: 'Ubuntu', path: join(targetParent, 'Ubuntu'), terminateFirst: false },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      suggestion: expect.stringContaining('管理员终端'),
+    })
   })
 })
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -190,6 +190,55 @@ describe('ConfigService', () => {
     expect(conflict).not.toBeNull()
     expect(conflict!.fileKey).toBe('settings')
     expect(conflict!.detail).toContain('外部')
+  })
+
+  it('外部改坏（JSONC 解析失败）→ conflict 指明解析失败，不静默采纳坏配置', async () => {
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    await new Promise((r) => setTimeout(r, 100))
+    await fs.writeFile(join(dir, 'settings.jsonc'), '{ 坏文件', 'utf8')
+
+    let conflict: { detail: string } | null = null
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 25))
+      conflict = svc.getConflict('settings')
+      if (conflict) break
+    }
+    expect(conflict).not.toBeNull()
+    expect(conflict!.detail).toContain('解析失败')
+  })
+
+  it('外部改成像等价内容（仅加注释）→ 自动吸收，不弹冲突', async () => {
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    await new Promise((r) => setTimeout(r, 100))
+    const filePath = join(dir, 'settings.jsonc')
+    const text = await fs.readFile(filePath, 'utf8')
+    await fs.writeFile(filePath, `// 外部只加了注释\n${text}`, 'utf8')
+    // 等 watch 走完（含 awaitWriteFinish 稳定窗）
+    await new Promise((r) => setTimeout(r, 400))
+    expect(svc.getConflict('settings')).toBeNull()
+    const s = await svc.load('settings')
+    expect(s.general.accent).toBe('aurora')
+  })
+
+  it('notify 单个监听器抛错不阻断其余监听器（review 容错）', async () => {
+    await svc.patch('settings', { general: { accent: 'aurora' } })
+    await new Promise((r) => setTimeout(r, 100))
+    const second = vi.fn()
+    svc.onChange('settings', () => {
+      throw new Error('listener boom')
+    })
+    svc.onChange('settings', second)
+    await fs.writeFile(
+      join(dir, 'settings.jsonc'),
+      JSON.stringify({ $schemaVersion: 2, general: { accent: 'sunset' } }),
+      'utf8',
+    )
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 25))
+      if (svc.getConflict('settings')) break
+    }
+    expect(svc.getConflict('settings')).not.toBeNull()
+    expect(second).toHaveBeenCalled()
   })
 
   it('冲突未决时 patch/update/replace 拒绝写（不吞外部修改）', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@wslpilot/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "WSLPilot 主应用（Electron main / preload / renderer）",
   "license": "MIT",

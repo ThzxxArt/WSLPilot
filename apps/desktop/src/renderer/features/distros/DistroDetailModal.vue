@@ -48,6 +48,8 @@ const lastTask = ref<{ type: string; distro: string; status: string; finishedAt:
 )
 /** wsl.conf 面板（切发行版 / 关窗的未保存守卫入口） */
 const confPanel = ref<InstanceType<typeof WslConfPanel> | null>(null)
+/** 文件面板（关窗的未保存守卫入口 — 文件页同样不得静默丢编辑） */
+const filePanel = ref<InstanceType<typeof FileBrowserPanel> | null>(null)
 
 const distro = computed(() => distros.byName(props.distroName))
 /** 运行状态单一事实源：按钮组严格状态驱动（review 停/启按钮错位根治） */
@@ -93,10 +95,12 @@ async function loadDetail() {
   }
 }
 
-/** 关窗守卫：wsl.conf 有未保存修改时先确认（与 FileBrowserPanel 同语义） */
+/** 关窗守卫：wsl.conf / 文件页有未保存修改时都先确认（两处同语义，绝不静默丢编辑） */
 async function requestClose() {
-  const ok = (await confPanel.value?.confirmDiscard()) ?? true
-  if (!ok) return
+  const confOk = (await confPanel.value?.confirmDiscard()) ?? true
+  if (!confOk) return
+  const fileOk = (await filePanel.value?.confirmDiscard()) ?? true
+  if (!fileOk) return
   emit('update:show', false)
 }
 
@@ -476,7 +480,7 @@ async function saveMeta() {
 
       <!-- 文件 -->
       <n-tab-pane name="files" tab="文件">
-        <FileBrowserPanel :distro-name="distroName" />
+        <FileBrowserPanel ref="filePanel" :distro-name="distroName" />
       </n-tab-pane>
     </n-tabs>
   </n-modal>

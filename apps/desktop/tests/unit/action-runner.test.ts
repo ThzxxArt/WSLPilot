@@ -149,6 +149,14 @@ describe('actionRunner.prepare', () => {
     expect(p.rawCommand).not.toContain('${')
   })
 
+  it('startupCwd 大小写不一致仍命中（WSL 名称不区分大小写 — review 根治）', async () => {
+    const runner = createActionRunner(makeDeps())
+    const p = await runner.prepare('open-code', 'UBUNTU')
+    expect(p.distro).toBe('UBUNTU')
+    expect(p.cwd).toBe('/home/me/proj')
+    expect(p.rawCommand).toContain('--cd /home/me/proj')
+  })
+
   it('prepare 日志 rawCommand 含完整动作参数（可复制执行，非半截 wsl.exe -d）', async () => {
     const deps = makeDeps()
     const runner = createActionRunner(deps)

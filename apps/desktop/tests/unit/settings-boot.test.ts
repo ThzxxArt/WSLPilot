@@ -3,7 +3,12 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { readBootSettings, DEFAULT_BOOT_SETTINGS } from '../../src/main/settings-boot'
+import {
+  readBootSettings,
+  resolveUserDataOverride,
+  ensureUserDataDir,
+  DEFAULT_BOOT_SETTINGS,
+} from '../../src/main/settings-boot'
 
 describe('readBootSettings（启动早期设置）', () => {
   let dir: string
@@ -59,5 +64,45 @@ describe('readBootSettings（启动早期设置）', () => {
       'utf8',
     )
     expect(readBootSettings(dir).hardwareAcceleration).toBe(false)
+  })
+})
+
+describe('resolveUserDataOverride（E2E 隔离）', () => {
+  it('未设置 / 空白 → null（不改变默认 userData）', () => {
+    expect(resolveUserDataOverride({})).toBeNull()
+    expect(resolveUserDataOverride({ WSLPILOT_USER_DATA: '' })).toBeNull()
+    expect(resolveUserDataOverride({ WSLPILOT_USER_DATA: '   ' })).toBeNull()
+  })
+
+  it('设置后返回 trim 过的路径', () => {
+    expect(resolveUserDataOverride({ WSLPILOT_USER_DATA: '  /tmp/wslpilot-e2e  ' })).toBe(
+      '/tmp/wslpilot-e2e',
+    )
+  })
+})
+
+describe('ensureUserDataDir（app.setPath 前置条件）', () => {
+  let dir: string
+
+  beforeEach(async () => {
+    dir = join(tmpdir(), `wslpilot-ensure-${randomUUID()}`)
+    await fs.mkdir(dir, { recursive: true })
+  })
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('递归创建不存在的目录并返回原路径（含多级）', async () => {
+    const nested = join(dir, 'a', 'b', 'userdata')
+    const ret = ensureUserDataDir(nested)
+    expect(ret).toBe(nested)
+    expect((await fs.stat(nested)).isDirectory()).toBe(true)
+  })
+
+  it('已存在时幂等（不抛）', async () => {
+    const nested = join(dir, 'again')
+    ensureUserDataDir(nested)
+    expect(() => ensureUserDataDir(nested)).not.toThrow()
   })
 })

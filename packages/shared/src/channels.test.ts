@@ -65,18 +65,15 @@ describe('IPC 契约一致性（review M1）', () => {
     expect(() => parseIpcArgs(CH.distrosList, ['a', 'b'])).toThrow(/只接受 1 个参数/)
   })
 
-  it('预留通道（契约先行、未实现）显式受控，禁止静默扩大（review M2）', () => {
-    // 为什么当前无预留通道：契约四方对账（ipc-router.test.ts
-    // 「handler 注册表与 INVOKE_CHANNELS 集合相等」）已强制每个 INVOKE_CHANNELS 都有真实
-    // handler 注册，preload 侧由 preload-contract.test 的全方法面零漂移守护——
-    // 「有契约但 handler/preload 未实现」的预留通道在结构上不再可能存在。
-    // 若将来确需契约先行预留，必须显式登记到 RESERVED（清单即声明，本用例随之变红提醒更新），
-    // 禁止用空循环假装校验（RESERVED 为空时 for 循环体永不执行 — 死分支假信心，已根治）。
-    const RESERVED = new Set<string>([])
-    expect(
-      [...RESERVED].sort(),
-      '预留通道清单必须保持为空（新增预留需显式登记并更新本用例）',
-    ).toEqual([])
+  it('void 清单不得有陈旧条目（否则会把后来带参的通道错误豁免 schema 校验）', () => {
+    // 预留通道说明：契约四方对账（ipc-router.test.ts「handler 注册表与 INVOKE_CHANNELS
+    // 集合相等」+ preload-contract 全方法面）已强制「有契约必有实现」，
+    // 「有契约但 handler/preload 未实现」的预留通道在结构上不再可能存在，
+    // 故当前无预留清单；将来若确需契约先行预留，必须先在本清单显式登记并同步四方。
+    const invoke = new Set<string>(INVOKE_CHANNELS as readonly string[])
+    for (const ch of VOID_INVOKE_CHANNELS) {
+      expect(invoke.has(ch), `void 清单包含不存在于 INVOKE_CHANNELS 的陈旧通道: ${ch}`).toBe(true)
+    }
   })
 
   it('metrics 通道族 = sample（单发行版）+ overview（全局）两通道，禁止合并回单通道双返回形状', () => {

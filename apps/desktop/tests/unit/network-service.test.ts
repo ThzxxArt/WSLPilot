@@ -6,7 +6,12 @@ import {
   type NetworkConfigReader,
 } from '../../src/main/services/network-service'
 import type { TaskControl } from '../../src/main/services/task-runner'
-import type { NetworkConfig, PortForwardRule } from '@wslpilot/shared'
+import type {
+  ElevationRequest,
+  ElevationRunResult,
+  NetworkConfig,
+  PortForwardRule,
+} from '@wslpilot/shared'
 
 function logger() {
   return {
@@ -520,6 +525,75 @@ describe('NetworkService.applyAll', () => {
     // 第一条规则：show（触发取消信号）→ add 前的 throwIfCanceled 抛出，不再往下
     expect(calls).toHaveLength(1)
     expect(calls[0]).toContain('show')
+  })
+
+  it('批量提权部分失败（delete 成 / add 败）→ 回滚恢复旧监听并计入失败（review 根治）', async () => {
+    const rule = { ...RULES[0]!, id: 'r1', listenPort: 3000, connectPort: 3000 }
+    const tool = makeTool([
+      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 9999' }, // show：旧监听指向不同端口
+      { code: 1, stderr: 'Access is denied.' }, // delete 提权（延迟）
+      { code: 1, stderr: 'Access is denied.' }, // add 提权（延迟）
+      { code: 0 }, // 回滚：恢复旧监听
+    ])
+    const elevation = {
+      runOne: vi.fn(),
+      run: vi.fn(async (reqs: readonly ElevationRequest[]): Promise<ElevationRunResult> => ({
+        canceled: false,
+        results: reqs.map((r, i) => ({
+          op: r.op,
+          ok: i === 0, // delete（idx 0）成功、add（idx 1）失败
+          code: i === 0 ? 0 : 1,
+          stdout: '',
+          stderr: i === 0 ? '' : 'denied',
+        })),
+      })),
+    }
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader([rule]),
+      runTool: tool.fn,
+      elevation,
+    })
+    const ctl = makeCtl()
+    const err: any = await svc.applyAll(ctl).catch((e) => e)
+    expect(err.code).toBe('TASK_FAILED')
+    // 合并一次 UAC：delete + add 两个请求
+    expect(elevation.run).toHaveBeenCalledTimes(1)
+    const reqs = elevation.run.mock.calls[0]![0] as readonly { op: string }[]
+    expect(reqs.map((r) => r.op)).toEqual(['netsh.portproxy.delete', 'netsh.portproxy.add'])
+    // 回滚：第 4 次工具调用恢复旧监听（connectport=9999）
+    expect(tool.calls[3]!.args).toContain('connectport=9999')
+    const logLines = (ctl.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join('\n')
+    expect(logLines).toContain('旧监听已恢复')
+  })
+
+  it('批量提权 UAC 取消 → 待执行项全记失败，汇总可见（不静默）', async () => {
+    const rule = { ...RULES[0]!, id: 'r1', listenPort: 3000, connectPort: 3000 }
+    const tool = makeTool([
+      { code: 0, stdout: '0.0.0.0 3000 127.0.0.1 9999' },
+      { code: 1, stderr: 'Access is denied.' }, // delete → defer
+      { code: 1, stderr: 'Access is denied.' }, // add → defer
+    ])
+    const elevation = {
+      runOne: vi.fn(),
+      run: vi.fn(async (): Promise<ElevationRunResult> => ({ canceled: true, results: [] })),
+    }
+    const svc = createNetworkService({
+      logger: logger(),
+      configService: configReader([rule]),
+      runTool: tool.fn,
+      elevation,
+    })
+    const ctl = makeCtl()
+    const err: any = await svc.applyAll(ctl).catch((e) => e)
+    expect(err.code).toBe('TASK_FAILED')
+    expect(err.message).toContain('成功 0 条')
+    const logLines = (ctl.log as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join('\n')
+    expect(logLines).toContain('已取消管理员授权')
   })
 })
 

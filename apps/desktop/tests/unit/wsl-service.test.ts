@@ -9,7 +9,11 @@ vi.mock('@wslpilot/kit', async (importOriginal) => {
   }
 })
 
-import { createWslService, normalizeState } from '../../src/main/services/wsl-service'
+import {
+  createWslService,
+  normalizeState,
+  listContainsDistro,
+} from '../../src/main/services/wsl-service'
 import { runWsl, spawnWsl } from '@wslpilot/kit'
 
 function logger() {
@@ -36,6 +40,40 @@ describe('normalizeState', () => {
     expect(normalizeState('Installing')).toBe('Installing')
     expect(normalizeState('')).toBe('Unknown')
     expect(normalizeState('weird')).toBe('Unknown')
+  })
+})
+
+describe('listContainsDistro（精确名单匹配 — 拒绝前缀误判）', () => {
+  const verbose = 'NAME STATE VERSION\r\n* Ubuntu-22.04  Running  2\r\n  Debian  Stopped  1'
+  const simpleEn = 'Windows Subsystem for Linux Distributions:\nUbuntu-22.04 (Default)\nDebian\n'
+  const simpleZh = '适用于 Linux 的 Windows 子系统分发版:\nUbuntu-22.04（默认）\nDebian\n'
+
+  it('verbose 表格：精确命中（大小写不敏感）', () => {
+    expect(listContainsDistro(verbose, 'Ubuntu-22.04')).toBe(true)
+    expect(listContainsDistro(verbose, 'ubuntu-22.04')).toBe(true)
+    expect(listContainsDistro(verbose, '  Debian  ')).toBe(true)
+  })
+
+  it('真实 `wsl --list` 简单列表（(Default)/(默认) 后缀）：精确命中', () => {
+    expect(listContainsDistro(simpleEn, 'Ubuntu-22.04')).toBe(true)
+    expect(listContainsDistro(simpleEn, 'ubuntu-22.04')).toBe(true)
+    expect(listContainsDistro(simpleEn, 'Debian')).toBe(true)
+    expect(listContainsDistro(simpleZh, 'Ubuntu-22.04')).toBe(true)
+    expect(listContainsDistro(simpleZh, 'debian')).toBe(true)
+  })
+
+  it('前缀不误判：Ubuntu-22.04 在列 ≠ Ubuntu 已装（两种形态）', () => {
+    expect(listContainsDistro(verbose, 'Ubuntu')).toBe(false)
+    expect(listContainsDistro(verbose, 'ubuntu')).toBe(false)
+    expect(listContainsDistro(simpleEn, 'Ubuntu')).toBe(false)
+    expect(listContainsDistro(simpleZh, 'Ubuntu')).toBe(false)
+  })
+
+  it('空目标 / 未注册返回 false', () => {
+    expect(listContainsDistro(verbose, '')).toBe(false)
+    expect(listContainsDistro(verbose, 'Arch')).toBe(false)
+    expect(listContainsDistro('NAME STATE VERSION', 'Ubuntu')).toBe(false)
+    expect(listContainsDistro(simpleEn, 'Arch')).toBe(false)
   })
 })
 
@@ -114,6 +152,29 @@ describe('WslService', () => {
       expect(views[0]!.meta?.alias).toBe('主力')
       expect(views[1]!.meta?.alias).toBe('')
       expect(views[1]!.meta?.name).toBe('Alpine')
+    })
+
+    it('meta 键大小写不一致仍命中（不静默丢元数据 — review 根治）', async () => {
+      ;(runWsl as any).mockResolvedValue(ok('NAME STATE VERSION\n* UBUNTU  Running  2'))
+      const meta = new Map([
+        [
+          'ubuntu',
+          {
+            name: 'ubuntu',
+            alias: '主力',
+            tags: ['work'],
+            color: '#E95420',
+            icon: 'ubuntu',
+            note: '',
+            startupCwd: '/home/me',
+            pinned: true,
+            quickActions: [],
+          },
+        ],
+      ])
+      const views = await svc.listWithMeta(meta)
+      expect(views[0]!.meta?.alias).toBe('主力')
+      expect(views[0]!.meta?.pinned).toBe(true)
     })
   })
 
@@ -335,15 +396,68 @@ describe('WslService', () => {
     it('install 完成判定：进程挂住不退但发行版已注册 → 任务结算成功（review「永远进行中」根治）', async () => {
       // wsl --install 装完拉起首启会话挂住：onExit 永不触发
       ;(spawnWsl as any).mockImplementation(() => ({ kill: vi.fn() }))
-      // 第一次 list 查询即返回已注册（runWsl mock）
-      ;(runWsl as any).mockResolvedValue(
-        ok('  NAME      STATE      VERSION\n* Ubuntu    Running     2'),
-      )
+      // 真实 `wsl --list`（非 verbose）输出形态：Ubuntu (默认)
+      let listCalls = 0
+      ;(runWsl as any).mockImplementation(async (args: string[]) => {
+        if (args[0] === '--list') {
+          listCalls++
+          return listCalls === 1
+            ? ok('适用于 Linux 的 Windows 子系统分发版:')
+            : ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu (默认)')
+        }
+        return { stdout: '', stderr: '', code: 0 }
+      })
       const started = Date.now()
       await svc.install('Ubuntu', ctl as never)
       // 4s 轮询周期内收敛（未无限等待）
       expect(Date.now() - started).toBeLessThan(15_000)
       const reports = (ctl.report.mock as { calls: unknown[][] }).calls
+      expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
+    })
+
+    it('install 前缀碰撞：只有 Ubuntu-22.04 在列时不判 Ubuntu 已装，直到进程真正退出', async () => {
+      ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
+        // 进程挂住一轮轮询（4s）后模拟真实退出：期间前缀相似项不得触发结算
+        setTimeout(() => o.onExit(0), 4200)
+        return { kill: vi.fn() }
+      })
+      ;(runWsl as any).mockImplementation(async (args: string[]) => {
+        if (args[0] === '--list') {
+          // 真实简单列表形态（中文默认后缀）
+          return ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu-22.04（默认）')
+        }
+        return { stdout: '', stderr: '', code: 0 }
+      })
+      const logs: string[] = []
+      const ctl2 = { ...ctl, report: vi.fn(), log: (l: string) => logs.push(l) }
+      await svc.install('Ubuntu', ctl2 as never)
+      // 全程不得出现「已注册」假结算
+      expect(logs.some((l) => l.includes('已注册'))).toBe(false)
+      const reports = (ctl2.report.mock as { calls: unknown[][] }).calls
+      expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
+    }, 15_000)
+
+    it('install 装前已存在（精确命中）：注册信号不启用，等待进程退出结算', async () => {
+      let captured: { onExit: (c: number) => void } | null = null
+      ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
+        captured = o
+        setTimeout(() => o.onExit(0), 30)
+        return { kill: vi.fn() }
+      })
+      // 基线即精确存在：不得把「已存在」当完成信号提前结算
+      ;(runWsl as any).mockImplementation(async (args: string[]) => {
+        if (args[0] === '--list') {
+          // 真实简单列表形态（英文默认后缀）
+          return ok('Windows Subsystem for Linux Distributions:\nUbuntu (Default)')
+        }
+        return { stdout: '', stderr: '', code: 0 }
+      })
+      const logs: string[] = []
+      const ctl2 = { ...ctl, report: vi.fn(), log: (l: string) => logs.push(l) }
+      await svc.install('Ubuntu', ctl2 as never)
+      expect(captured).not.toBeNull()
+      expect(logs.some((l) => l.includes('已注册'))).toBe(false)
+      const reports = (ctl2.report.mock as { calls: unknown[][] }).calls
       expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
     })
 

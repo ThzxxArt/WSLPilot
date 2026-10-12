@@ -14,13 +14,16 @@ const wslAPI = {
 }
 ;(globalThis as any).window = { wslAPI }
 
-const { useTerminalStore } = await import('../../src/renderer/stores/terminal')
+const { useTerminalStore, __terminalBuffersForTest } =
+  await import('../../src/renderer/stores/terminal')
 const { createPinia, setActivePinia } = await import('pinia')
 
 describe('useTerminalStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    // 模块级缓冲/孤儿记账必须逐用例隔离（否则前例数据污染后例 — review 假信心根治）
+    __terminalBuffersForTest.reset()
     wslAPI.terminal.maxSessions.mockResolvedValue(3)
     wslAPI.terminal.create.mockImplementation(async (o: any) => ({
       ptyId: `id-${Math.random().toString(16).slice(2)}`,
@@ -39,7 +42,10 @@ describe('useTerminalStore', () => {
     expect(s.sessions).toHaveLength(1)
     expect(s.activeId).toBe(id)
     expect(s.active?.distro).toBe('Ubuntu')
-    expect(wslAPI.terminal.create).toHaveBeenCalled()
+    // IPC 参数契约：create 必须带 distro 与 cols/rows（默认 80×24，由 ipc-schema 约束）
+    expect(wslAPI.terminal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ distro: 'Ubuntu', cols: 80, rows: 24 }),
+    )
   })
 
   it('open 拒绝未运行发行版：不建会话、给行动指引（review 启动只能走启动按钮）', async () => {
@@ -167,18 +173,32 @@ describe('useTerminalStore', () => {
     expect(s.sessions[0]!.alive).toBe(true)
   })
 
-  it('buffer slice keeps surrogate pairs whole (review M1)', async () => {
+  it('buffer 截断起点落在低位代理时跳过，不留孤立代理（review M1 真回归钉）', async () => {
     const s = useTerminalStore()
     const id = await s.open('U')
-    // 🎉 = 2 UTF-16 units；灌超 200KB 触发截断
-    s.appendOutput(id!, 'x'.repeat(200 * 1024 - 1))
-    s.appendOutput(id!, '🎉') // 临界写入代理对
-    s.appendOutput(id!, 'y'.repeat(100))
+    const LIMIT = 200 * 1024
+    // '😀' 占 2 个 UTF-16 单元；总长 LIMIT+1 → 截断起点 = 1（正落在低位代理上）
+    s.appendOutput(id!, '😀' + 'x'.repeat(LIMIT - 1))
     const buf = s.getBuffer(id!)
-    expect(buf.length).toBeLessThanOrEqual(200 * 1024)
-    // 截断后开头不得是孤立高代理
-    const c = buf.charCodeAt(0)
-    expect(c < 0xd800 || c > 0xdbff).toBe(true)
+    expect(buf.length).toBeLessThanOrEqual(LIMIT)
+    const first = buf.charCodeAt(0)
+    // 起点被修正：不得以孤立低位代理开头
+    expect(first >= 0xdc00 && first <= 0xdfff).toBe(false)
+    expect(buf.startsWith('x')).toBe(true)
+  })
+
+  it('buffer 截断起点落在高位代理时保留完整配对（不误删高代理）', async () => {
+    const s = useTerminalStore()
+    const id = await s.open('U')
+    const LIMIT = 200 * 1024
+    // 'a' + '😀' + x…；总长 LIMIT+1 → 截断起点 = 1（正落在高位代理上，低位在 slice 内）
+    s.appendOutput(id!, 'a😀' + 'x'.repeat(LIMIT - 2))
+    const buf = s.getBuffer(id!)
+    const first = buf.charCodeAt(0)
+    const second = buf.charCodeAt(1)
+    expect(first >= 0xd800 && first <= 0xdbff).toBe(true)
+    expect(second >= 0xdc00 && second <= 0xdfff).toBe(true)
+    expect(buf.startsWith('😀')).toBe(true)
   })
 
   it('buffer 移出响应式系统：getBuffer 读取，removeLocal 清理', async () => {
@@ -234,17 +254,25 @@ describe('useTerminalStore', () => {
     await expect(s.recover()).resolves.toBeUndefined()
   })
 
-  it('孤儿缓冲限额淘汰，且绝不触碰已收编会话的缓冲', () => {
+  it('孤儿缓冲限额淘汰真实发生（orphanCount 上限 + 最旧被移除），已收编会话不受影响', () => {
     const s = useTerminalStore()
     // 先收编一个"长寿"会话（插入序最旧）
-    const kept = `kept-${Math.random().toString(16).slice(2)}`
+    const kept = 'kept-session'
     s.adopt(kept, { distro: 'Ubuntu' })
     s.appendOutput(kept, 'precious')
 
     // 灌入超过上限的孤儿输出（从不 adopt）
+    const orphanIds: string[] = []
     for (let i = 0; i < 24; i++) {
-      s.appendOutput(`orphan-${i}-${Math.random().toString(16).slice(2)}`, 'x')
+      const id = `orphan-${i}`
+      orphanIds.push(id)
+      s.appendOutput(id, 'x')
     }
+    // 真淘汰：孤儿记账不超过上限，最旧 8 个被移除、最新保留
+    expect(__terminalBuffersForTest.orphanCount()).toBeLessThanOrEqual(16)
+    expect(__terminalBuffersForTest.has(orphanIds[0]!)).toBe(false)
+    expect(__terminalBuffersForTest.has(orphanIds[7]!)).toBe(false)
+    expect(__terminalBuffersForTest.has(orphanIds[23]!)).toBe(true)
     // 存活会话缓冲不被误删
     expect(s.getBuffer(kept)).toBe('precious')
   })

@@ -3,6 +3,7 @@ import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
 import {
   appError,
   createWslAPI,
+  configGetImpl,
   distro,
   findButton,
   findBodyButton,
@@ -90,7 +91,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   setActivePinia(createPinia())
   document.body.innerHTML = ''
-  wslAPI.config.get.mockResolvedValue({})
+  wslAPI.config.get.mockImplementation(configGetImpl())
   wslAPI.distros.list.mockResolvedValue([])
   wslAPI.terminal.list.mockResolvedValue([])
   wslAPI.distros.listOnline.mockResolvedValue(['Ubuntu', 'Debian'])

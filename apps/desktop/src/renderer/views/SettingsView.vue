@@ -83,12 +83,19 @@ async function onAccentChange(name: AccentName) {
 }
 
 function openConfigDir() {
-  void window.wslAPI.app.openConfigDir()
+  // 失败必须可见：主进程 shell.openPath 出错时不得静默（也不产生 unhandledRejection）
+  void window.wslAPI.app.openConfigDir().catch((e: unknown) => {
+    message.error(errorLine(e, '打开配置目录失败'))
+  })
 }
 
 async function browseBackupDir() {
-  const picked = await window.wslAPI.app.pickDirectory()
-  if (picked) await settings.setBackupDefaultDir(picked)
+  try {
+    const picked = await window.wslAPI.app.pickDirectory()
+    if (picked) await settings.setBackupDefaultDir(picked)
+  } catch (e) {
+    message.error(errorLine(e, '选择备份目录失败'))
+  }
 }
 
 /** 文本输入防抖落盘（review M8）：停止输入 400ms 后写，失败回滚并提示 */
@@ -630,6 +637,7 @@ async function exportDiagnostics() {
           tabindex="0"
           @click="openConfigFile(f.key)"
           @keydown.enter="openConfigFile(f.key)"
+          @keydown.space.prevent="openConfigFile(f.key)"
         >
           {{ f.label }}
         </n-tag>

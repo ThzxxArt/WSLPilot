@@ -4,6 +4,7 @@ import type { WslAction } from '@wslpilot/shared'
 import {
   appError,
   createWslAPI,
+  configGetImpl,
   distro,
   findBodyButton,
   bodyText,
@@ -78,7 +79,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   useCommandPalette().closePalette()
   document.body.innerHTML = ''
-  wslAPI.config.get.mockResolvedValue({})
+  wslAPI.config.get.mockImplementation(configGetImpl())
   wslAPI.distros.registryDetail.mockResolvedValue({ values: {} })
   wslAPI.meta.get.mockResolvedValue(null)
 })
@@ -184,7 +185,20 @@ describe('DistroDetailModal 注册表与动作面', () => {
     await flushPromises()
     findBodyButton('保存元数据')!.click()
     await flushPromises()
-    expect(wslAPI.meta.set).toHaveBeenCalledWith(expect.objectContaining({ name: 'Ubuntu' }))
+    expect(wslAPI.meta.set).toHaveBeenCalledWith(
+      // 全字段契约（9 项）：不留「只断 name，其余字段错位也全绿」的假信心
+      expect.objectContaining({
+        name: 'Ubuntu',
+        alias: '',
+        tags: [],
+        color: '',
+        icon: 'linux',
+        note: '',
+        startupCwd: '~',
+        pinned: false,
+        quickActions: [],
+      }),
+    )
     expect(message.success).toHaveBeenCalledWith('元数据已保存')
 
     findBodyButton('编辑元数据')!.click()

@@ -34,8 +34,13 @@ async function resolve(fileKey: string, action: ConflictAction) {
 
 onMounted(() => {
   off = window.wslAPI?.config.onConflict((payload) => {
-    const ignore = () => {
-      void resolve(payload.fileKey, 'ignore')
+    // resolve 必须幂等：naive 真实交互中 onEsc 与 onClose 可能先后触发同一次关闭，
+    // 不设守卫会把「暂不处理」执行两次（review 根治）
+    let resolved = false
+    const doResolve = (action: ConflictAction) => {
+      if (resolved) return
+      resolved = true
+      void resolve(payload.fileKey, action)
     }
     dialog.warning({
       title: '配置文件已被外部修改',
@@ -45,13 +50,13 @@ onMounted(() => {
       closable: true,
       maskClosable: false,
       closeOnEsc: true,
-      onClose: ignore,
-      onEsc: ignore,
+      onClose: () => doResolve('ignore'),
+      onEsc: () => doResolve('ignore'),
       onPositiveClick: () => {
-        void resolve(payload.fileKey, 'reload')
+        doResolve('reload')
       },
       onNegativeClick: () => {
-        void resolve(payload.fileKey, 'overwrite')
+        doResolve('overwrite')
       },
     })
   })

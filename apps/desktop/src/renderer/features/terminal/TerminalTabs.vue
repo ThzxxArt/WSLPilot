@@ -51,6 +51,8 @@ function onTabMouseDown(e: MouseEvent, index: number) {
     if (s) emit('close', s.ptyId)
     return
   }
+  // 拖拽排序只认左键：右键（button 2）等其余按键不得触发标签重排（review 根治）
+  if (e.button !== 0) return
   // 拖拽排序：每次成功交换后重置起点（评审 I4）
   let startX = e.clientX
   let dragged = index

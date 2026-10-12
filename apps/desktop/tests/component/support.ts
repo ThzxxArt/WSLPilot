@@ -4,10 +4,27 @@
  * 各 *.test.ts 仍自行声明 naive-ui / vue-router mock（vi.mock 工厂需与使用方同文件）。
  */
 import { vi } from 'vitest'
-import type { DistroView, WslAction } from '@wslpilot/shared'
+import { defaultConfig, type ConfigKey, type DistroView, type WslAction } from '@wslpilot/shared'
 
 export function appError(msg: string) {
   return { code: 'TASK_FAILED', message: msg, recoverable: true }
+}
+
+/**
+ * config.get 的契约形状实现（唯一事实源：defaultConfig 按 key 返回完整 ConfigMap）。
+ * 用途：① createWslAPI 的默认实现；② 各用例 beforeEach 显式复位 ——
+ * `vi.clearAllMocks()` 不恢复实现，用例内自定义实现会泄漏到后续用例；
+ * 复位为真实契约形状也保证「settings.load 成功路径」在组件层真实可走（review mock 撒谎根治）。
+ */
+export function configGetImpl() {
+  return async (fileKey?: ConfigKey) => {
+    if (!fileKey) return {}
+    try {
+      return defaultConfig(fileKey)
+    } catch {
+      return {}
+    }
+  }
 }
 
 /** window.wslAPI 全量 mock：默认全部成功 / 空数据，用例内按需覆写 */
@@ -32,7 +49,10 @@ export function createWslAPI() {
       close: vi.fn(async () => {}),
     },
     config: {
-      get: vi.fn(async () => ({})),
+      /** 与真实 preload 契约同形状：按 key 返回完整 ConfigMap（默认值唯一事实源 defaultConfig），
+       *  不再返回 `{}` —— 否则 App/DefaultLayout 的 settings.load 会在类型错误中静默失败，
+       *  「load 成功路径」从未被任何组件用例真实覆盖（review mock 撒谎根治） */
+      get: vi.fn(configGetImpl()),
       set: vi.fn(async () => ({})),
       openExternal: vi.fn(async () => {}),
       onChanged: vi.fn((_cb: (p: { fileKey: string }) => void) => vi.fn()),
@@ -100,6 +120,46 @@ export function createWslAPI() {
     wslconf: {
       read: vi.fn(async () => '[automount]\nenabled = true\n'),
       write: vi.fn(async () => ({ terminated: false })),
+    },
+    /** 网络（真实 preload 契约有该命名空间；此前缺失导致 NetworkView 用例全在错误态下跑） */
+    network: {
+      status: vi.fn(async () => ({
+        wslconfigPath: 'C:\\Users\\me\\.wslconfig',
+        wslconfigExists: false,
+        mode: 'unknown',
+        modeRaw: '',
+        mirrorRecommended: true,
+        portProxy: [],
+        windowsProxy: null,
+      })),
+      apply: vi.fn(async () => ({ taskId: 'n-apply' })),
+      applyAll: vi.fn(async () => ({ taskId: 'n-apply-all' })),
+      remove: vi.fn(async () => ({ taskId: 'n-remove' })),
+      proxyApply: vi.fn(async (distro: string) => ({ distro })),
+      proxyClear: vi.fn(async (distro: string) => ({ distro })),
+      proxyState: vi.fn(async () => ({
+        path: '/etc/profile.d/wslpilot-proxy.sh',
+        exists: false,
+        content: '',
+      })),
+      listRules: vi.fn(async () => []),
+      saveRules: vi.fn(async () => ({})),
+      getProxy: vi.fn(async () => ({
+        useWindowsProxy: false,
+        httpProxy: '',
+        httpsProxy: '',
+        noProxy: 'localhost,127.0.0.1',
+      })),
+      saveProxy: vi.fn(async () => ({})),
+    },
+    /** USB 设备（真实 preload 契约有该命名空间） */
+    devices: {
+      status: vi.fn(async () => ({ installed: false, version: '' })),
+      list: vi.fn(async () => []),
+      bind: vi.fn(async () => ({ taskId: 'd-bind' })),
+      unbind: vi.fn(async () => ({ taskId: 'd-unbind' })),
+      attach: vi.fn(async () => {}),
+      detach: vi.fn(async () => {}),
     },
     fs: {
       readDir: vi.fn(async () => []),

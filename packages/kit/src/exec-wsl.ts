@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { StringDecoder } from 'node:string_decoder'
 import type { ToolResult } from './run-tool'
 
 const execFileAsync = promisify(execFile)
@@ -12,28 +13,123 @@ export interface WslExecOptions {
   encoding?: 'utf16' | 'utf8' | 'auto'
 }
 
+/** wsl.exe 输出的两种形态（唯一事实源，判断逻辑见 detectWslEncoding） */
+export type WslStreamEncoding = 'utf16le' | 'utf8'
+
 /**
- * wsl.exe 输出编码自适应（review 指标全零根治）：
+ * wsl.exe 输出编码探测（唯一事实源，一次性解码与流式解码共用）：
  * - wsl 内建命令（--list/--version 等）输出 UTF-16LE
  * - `-e <cmd>` 透传 Linux 程序 stdout 时是 UTF-8（现代 Windows 11 / WSL）
- * 固定按 utf16le 解码会把 UTF-8 字节两两并成汉字乱码（"MEM:" → 䕍㩍…），下游解析全灭。
- * 识别策略：UTF-16LE 文本的 ASCII 区段奇数位必为 0x00（或带 BOM FF FE）；否则按 UTF-8。
+ * - 环境变量 WSL_UTF8=1 时内建命令也会改为 UTF-8
+ * 识别策略：BOM（FF FE → UTF-16LE；EF BB BF → UTF-8）优先；
+ * 否则看 UTF-16LE 文本的 ASCII 区段奇数位是否大量为 0x00；都不满足按 UTF-8。
+ */
+export function detectWslEncoding(sample: Buffer): WslStreamEncoding {
+  if (sample.length >= 2 && sample[0] === 0xff && sample[1] === 0xfe) return 'utf16le'
+  if (sample.length >= 3 && sample[0] === 0xef && sample[1] === 0xbb && sample[2] === 0xbf) {
+    return 'utf8'
+  }
+  const end = sample.length - (sample.length % 2)
+  let nulAtOdd = 0
+  for (let i = 1; i < end; i += 2) if (sample[i] === 0x00) nulAtOdd++
+  const utf16Like = end >= 4 && nulAtOdd >= Math.floor(end / 2) * 0.3
+  return utf16Like ? 'utf16le' : 'utf8'
+}
+
+/**
+ * 整段解码（execFile 路径）。固定 utf16le 解码会把 UTF-8 字节两两并成汉字乱码
+ * （"MEM:" → 䕍㩍…），下游解析全灭 —— 必须先探测再解。
  */
 export function decodeWslOutput(b?: Buffer | string | null): string {
   if (!b) return ''
   const buf = Buffer.isBuffer(b) ? b : Buffer.from(b as string)
   if (buf.length === 0) return ''
-  const hasBom = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe
   const sample = buf.subarray(0, Math.min(buf.length, 128))
-  let nulAtOdd = 0
-  for (let i = 1; i < sample.length; i += 2) if (sample[i] === 0x00) nulAtOdd++
-  const utf16Like =
-    hasBom || (sample.length >= 4 && nulAtOdd >= Math.floor(sample.length / 2) * 0.3)
-  if (utf16Like) {
+  const enc = detectWslEncoding(sample)
+  if (enc === 'utf16le') {
+    const hasBom = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe
     const body = hasBom ? buf.subarray(2) : buf
     return body.toString('utf16le').replace(/\0/g, '')
   }
   return buf.toString('utf8')
+}
+
+/**
+ * 流式行解码器（spawn 路径唯一实现）：
+ * - 首块缓冲到达探测阈值（BOM 完整或 ≥4 字节）后锁定编码，此后不再改判
+ * - 用 StringDecoder 处理跨块的残缺字节（UTF-8 多字节序列 / UTF-16 半单元）
+ * - 逐行 emit；flush 时输出最后一行残段（不丢尾数据）
+ *
+ * 修复的真相：此前 spawnWsl 固定 utf16le 解码，而 headless 自定义动作
+ * （`wsl -d X -e program`）与 WSL_UTF8=1 环境的输出是 UTF-8 —— 日志两两并成
+ * 汉字乱码、换行被吞，用户看到的是不可读的任务日志。
+ */
+export function createLineStreamDecoder(onLine: (line: string) => void): {
+  push(chunk: Buffer): void
+  flush(): void
+} {
+  let decoder: StringDecoder | null = null
+  let pending = Buffer.alloc(0)
+  let lineBuf = ''
+
+  const emitText = (text: string): void => {
+    if (!text) return
+    lineBuf += text
+    const lines = lineBuf.split(/\r?\n/)
+    lineBuf = lines.pop() ?? ''
+    for (const line of lines) onLine(line)
+  }
+
+  /** 剥离 BOM（与探测结果对应的形态） */
+  const stripBom = (buf: Buffer, enc: WslStreamEncoding): Buffer => {
+    if (enc === 'utf16le' && buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+      return buf.subarray(2)
+    }
+    if (
+      enc === 'utf8' &&
+      buf.length >= 3 &&
+      buf[0] === 0xef &&
+      buf[1] === 0xbb &&
+      buf[2] === 0xbf
+    ) {
+      return buf.subarray(3)
+    }
+    return buf
+  }
+
+  const lockIn = (enc: WslStreamEncoding): void => {
+    decoder = new StringDecoder(enc)
+    const rest = stripBom(pending, enc)
+    pending = Buffer.alloc(0)
+    emitText(decoder.write(rest))
+  }
+
+  return {
+    push(chunk: Buffer) {
+      if (decoder) {
+        emitText(decoder.write(chunk))
+        return
+      }
+      pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk])
+      // 探测阈值：BOM 完整即可判定；否则需 ≥4 字节（与 detectWslEncoding 的判据一致）
+      const bom16 = pending.length >= 2 && pending[0] === 0xff && pending[1] === 0xfe
+      const bom8 =
+        pending.length >= 3 && pending[0] === 0xef && pending[1] === 0xbb && pending[2] === 0xbf
+      if (!bom16 && !bom8 && pending.length < 4) return
+      lockIn(detectWslEncoding(pending.subarray(0, Math.min(pending.length, 128))))
+    },
+    flush() {
+      if (decoder) {
+        emitText(decoder.end())
+      } else if (pending.length > 0) {
+        // 流结束仍未达探测阈值：兜底解出剩余数据（绝不静默丢尾）
+        lockIn(detectWslEncoding(pending))
+        if (decoder) emitText((decoder as StringDecoder).end())
+      }
+      if (lineBuf.trim() !== '') onLine(lineBuf)
+      lineBuf = ''
+    },
+  }
 }
 
 /**
@@ -78,7 +174,7 @@ export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise
 /**
  * 执行 wsl.exe 并向 stdin 写入内容（UTF-8，Linux 侧语义）。
  * 用于 `wsl -d <name> -u root -e tee /etc/wsl.conf` 这类「内容走 stdin、不经 shell 拼接」的写入（M5）。
- * 约束：input ≤ 4MB；输出仍按 UTF-16LE 解码。
+ * 约束：input ≤ 4MB；输出按 decodeWslOutput 自适应解码（UTF-16LE / UTF-8 双形态）。
  */
 export async function runWslWithStdin(
   args: string[],
@@ -203,41 +299,11 @@ export function spawnWsl(args: string[], opts: SpawnWslOptions): { kill: () => v
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-  // stdout / stderr 各自缓冲，避免交错时把半行拼接；
-  // UTF-16LE 按 2 字节对解码，残缺字节留到下一块，防长输出劈字。
-  const makeHandler = () => {
-    let pending = Buffer.alloc(0)
-    let lineBuf = ''
-    let first = true
-    return {
-      push(chunk: Buffer) {
-        pending = pending.length === 0 ? Buffer.from(chunk) : Buffer.concat([pending, chunk])
-        const usable = pending.length - (pending.length % 2)
-        if (usable <= 0) return
-        let text = pending.subarray(0, usable).toString('utf16le').replace(/\0/g, '')
-        pending = pending.subarray(usable)
-        if (first) {
-          first = false
-          text = text.replace(/^\uFEFF/, '')
-        }
-        lineBuf += text
-        const lines = lineBuf.split(/\r?\n/)
-        lineBuf = lines.pop() ?? ''
-        for (const line of lines) opts.onLine(line)
-      },
-      flush() {
-        if (pending.length > 0) {
-          // 残缺 1 字节无法构成 UTF-16 单元，丢弃（review m8）
-          pending = Buffer.alloc(0)
-        }
-        if (lineBuf.trim() !== '') opts.onLine(lineBuf)
-        lineBuf = ''
-      },
-    }
-  }
-
-  const onStdout = makeHandler()
-  const onStderr = makeHandler()
+  // stdout / stderr 各自使用独立的流式解码器：编码按流首块探测并锁定
+  // （内建命令 UTF-16LE、`-e` 透传 UTF-8、WSL_UTF8=1 全局 UTF-8），
+  // 跨块残缺字节由 StringDecoder 内部处理，行拆分见 createLineStreamDecoder。
+  const onStdout = createLineStreamDecoder(opts.onLine)
+  const onStderr = createLineStreamDecoder(opts.onLine)
 
   child.stdout?.on('data', (c: Buffer) => onStdout.push(c))
   child.stderr?.on('data', (c: Buffer) => onStderr.push(c))

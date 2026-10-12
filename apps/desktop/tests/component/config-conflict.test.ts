@@ -128,6 +128,24 @@ describe('ConflictResolver', () => {
     )
   })
 
+  it('Esc 与 Close 双回调只 resolve 一次（幂等守卫 — review 根治）', async () => {
+    mount(ConflictResolver)
+    let captured: { onEsc?: () => void; onClose?: () => void } | null = null
+    dialog.warning.mockImplementationOnce((opts: unknown) => {
+      captured = opts as { onEsc?: () => void; onClose?: () => void }
+    })
+    captureConflictHandler()({ fileKey: 'settings', detail: 'diff' })
+    await flushPromises()
+    expect(captured).toBeTruthy()
+    // 真实 naive 一次关闭可能先后触发 onEsc 与 onClose：resolve 必须幂等
+    captured!.onEsc?.()
+    captured!.onClose?.()
+    captured!.onEsc?.()
+    await flushPromises()
+    expect(wslAPI.config.resolveConflict).toHaveBeenCalledTimes(1)
+    expect(wslAPI.config.resolveConflict).toHaveBeenCalledWith('settings', 'ignore')
+  })
+
   it('处理冲突失败必须报错提示（不静默）', async () => {
     mount(ConflictResolver)
     wslAPI.config.resolveConflict.mockRejectedValueOnce(new Error('写回失败'))
@@ -164,6 +182,33 @@ describe('WslConfPanel 保存与错误面', () => {
     await flushPromises()
     expect(w.find('p.error').exists()).toBe(true)
     expect(w.text()).toContain('sudo 不够')
+  })
+
+  it('未运行发行版不发起读取（读取绝不隐式启动 — review 状态门禁）', async () => {
+    useDistrosStore().items = [
+      { name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: false, meta: null } as never,
+    ]
+    mount(WslConfPanel, { props: { distroName: 'Ubuntu' }, attachTo: document.body })
+    await flushPromises()
+    expect(wslAPI.wslconf.read).not.toHaveBeenCalled()
+    expect(bodyText()).toContain('发行版未运行')
+  })
+
+  it('差异预览渲染 +/- 行内容（不只弹个框）', async () => {
+    await mountDirty()
+    findBodyButton('预览并保存')!.click()
+    await flushPromises()
+    const modal = Array.from(document.body.querySelectorAll('.diff-line'))
+    expect(modal.length).toBeGreaterThan(0)
+    // 至少存在一条新增或删除行（首字段开关被翻转）
+    const types = modal.map((el) =>
+      el.classList.contains('add') ? 'add' : el.classList.contains('del') ? 'del' : 'same',
+    )
+    expect(types.some((t) => t === 'add' || t === 'del')).toBe(true)
+    const changed = modal.find(
+      (el) => el.classList.contains('add') || el.classList.contains('del'),
+    )!
+    expect(['+', '-']).toContain(changed.querySelector('.sign')!.textContent!.trim())
   })
 
   it('预览并保存 → 确认写入调用 wslconf.write 并提示已保存', async () => {

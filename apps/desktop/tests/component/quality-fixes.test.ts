@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
 import { NRadioGroup, NSelect } from 'naive-ui'
-import type { DistroView, WslAction } from '@wslpilot/shared'
+import { defaultConfig, type ConfigKey, type DistroView, type WslAction } from '@wslpilot/shared'
 
 // 每个用例后自动卸载（teleport 到 body 的内容随之摘除，杜绝跨用例 DOM 污染）
 enableAutoUnmount(afterEach)
@@ -127,7 +127,7 @@ const wslAPI = {
     write: vi.fn(async () => ({ terminated: false })),
   },
   fs: {
-    readDir: vi.fn(async () => []),
+    readDir: vi.fn(async (): Promise<Array<Record<string, unknown>>> => []),
     read: vi.fn(async () => ({ text: '', sizeBytes: 0, truncated: false, binary: false })),
     write: vi.fn(async () => {}),
     revealInExplorer: vi.fn(async () => {}),
@@ -239,7 +239,15 @@ beforeEach(() => {
     distro({ name: 'Ubuntu', state: 'Running' }),
     distro({ name: 'Debian', state: 'Running' }),
   ]
-  wslAPI.config.get.mockResolvedValue({})
+  // 诚实契约形状复位：按 key 返回完整 ConfigMap（同时清掉用例内自定义实现的泄漏）
+  wslAPI.config.get.mockImplementation(async (fileKey?: ConfigKey) => {
+    if (!fileKey) return {}
+    try {
+      return defaultConfig(fileKey)
+    } catch {
+      return {}
+    }
+  })
   wslAPI.wslconf.read.mockResolvedValue('[automount]\nenabled = true\n')
   wslAPI.distros.list.mockResolvedValue([])
   wslAPI.actions.list.mockResolvedValue([])
@@ -337,6 +345,35 @@ describe('A8 TerminalTabs 新建下拉同步', () => {
     await flushPromises()
     expect(w.findComponent(NSelect).props('value')).toBe('Debian')
   })
+
+  it('拖拽排序只认左键：右键横移不重排（review 根治）', async () => {
+    const sessions = [
+      { ptyId: 'p1', title: 'A', distro: 'A', createdAt: 0, alive: true },
+      { ptyId: 'p2', title: 'B', distro: 'B', createdAt: 0, alive: true },
+    ]
+    const w = mount(TerminalTabs, {
+      props: { sessions, activeId: 'p1', maxSessions: 10, distroOptions: [], defaultDistro: '' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const tabs = Array.from(document.body.querySelectorAll<HTMLElement>('.tab'))
+    expect(tabs).toHaveLength(2)
+
+    // 右键按下 + 大幅横移 → 不得 emit reorder
+    tabs[0]!.dispatchEvent(new MouseEvent('mousedown', { button: 2, clientX: 100, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await flushPromises()
+    expect(w.emitted('reorder')).toBeUndefined()
+
+    // 左键按下 + 大幅横移 → 正常重排（真实行为保留）
+    tabs[0]!.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: 100, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await flushPromises()
+    expect(w.emitted('reorder')).toBeTruthy()
+    expect(w.emitted('reorder')![0]).toEqual([0, 1])
+  })
 })
 
 describe('A7 TaskDrawer 选中项失效回退', () => {
@@ -386,6 +423,60 @@ describe('A7 TaskDrawer 选中项失效回退', () => {
     expect(document.body.querySelector('.detail-title')?.textContent).toContain('导入恢复')
     const active = bodyItems().find((li) => li.classList.contains('active'))
     expect(active!.textContent).toContain('m11')
+  })
+
+  it('取消成功路径给成功提示（此前只覆盖了失败面）', async () => {
+    const tasks = useTasksStore()
+    tasks.applyProgress({
+      taskId: 'live-1',
+      type: 'export',
+      distro: 'Ubuntu',
+      percent: 50,
+      message: '导出中',
+      status: 'running',
+    })
+    mount(TaskDrawer, { props: { show: true }, attachTo: document.body })
+    await flushPromises()
+    findBodyButton('取消')!.click()
+    await flushPromises()
+    expect(wslAPI.task.cancel).toHaveBeenCalledWith('live-1')
+    expect(message.success).toHaveBeenCalledWith('已请求取消任务')
+  })
+
+  it('任务列表键盘可达：Enter/Space 选中（role=option 的 a11y 闭环）', async () => {
+    const tasks = useTasksStore()
+    tasks.applyProgress({
+      taskId: 'k1',
+      type: 'export',
+      distro: 'U',
+      percent: 100,
+      message: '旧任务',
+      status: 'success',
+    })
+    tasks.applyProgress({
+      taskId: 'k2',
+      type: 'import',
+      distro: 'U',
+      percent: 100,
+      message: '新任务',
+      status: 'success',
+    })
+    tasks.entries.forEach((e, i) => (e.startedAt = 1000 + i))
+    mount(TaskDrawer, { props: { show: true }, attachTo: document.body })
+    await flushPromises()
+    const items = bodyItems() // 最新在前：items[1] = 旧任务 k1
+    expect(items[1]!.getAttribute('tabindex')).toBe('0')
+    items[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(items[1]!.classList.contains('active')).toBe(true)
+    expect(document.body.querySelector('.detail-title')?.textContent).toContain('导出备份')
+  })
+
+  it('空任务列表展示空态，且不存在选中详情', async () => {
+    mount(TaskDrawer, { props: { show: true }, attachTo: document.body })
+    await flushPromises()
+    expect(bodyText()).toContain('暂无任务')
+    expect(document.body.querySelector('.detail-title')).toBeNull()
   })
 })
 
@@ -558,6 +649,60 @@ describe('A9 DistroDetailModal', () => {
     expect(w.emitted('update:show')).toBeUndefined()
   })
 
+  it('文件页有脏编辑时关窗同样先确认（不再静默丢文件编辑 — review 根治）', async () => {
+    wslAPI.fs.readDir.mockResolvedValue([
+      { name: 'a.txt', path: '/a.txt', isDirectory: false, size: 3, modifiedAt: 't' },
+    ])
+    wslAPI.fs.read.mockResolvedValue({ text: 'abc', sizeBytes: 3, truncated: false, binary: false })
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      // 文件面板与 wsl.conf 面板都用真实组件（被测对象）；动作面板 stub
+      global: { stubs: { ActionsPanel: true } },
+    })
+    await flushPromises()
+
+    // 切到「文件」页 → 打开文件 → 编辑出脏态
+    const fileTab = Array.from(document.body.querySelectorAll('.n-tabs-tab')).find((el) =>
+      (el.textContent ?? '').includes('文件'),
+    )
+    expect(fileTab).toBeTruthy()
+    ;(fileTab as HTMLElement).click()
+    await flushPromises()
+
+    const entry = document.body.querySelector<HTMLButtonElement>('.entry')
+    expect(entry).toBeTruthy()
+    entry!.click()
+    await flushPromises()
+
+    const ta = document.body.querySelector<HTMLTextAreaElement>('.editor-textarea')
+    expect(ta).toBeTruthy()
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    setter.call(ta!, 'abcd')
+    ta!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    // 关窗：必须走文件页脏编辑确认（留在此页 → 不关闭）
+    dialogResult = false
+    const closeBtn = document.body.querySelector<HTMLButtonElement>(
+      '.detail-modal .n-card-header__close',
+    )
+    expect(closeBtn).toBeTruthy()
+    closeBtn!.click()
+    await flushPromises()
+    expect(dialog.warning).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '放弃未保存的修改？' }),
+    )
+    expect(w.emitted('update:show')).toBeUndefined()
+
+    // 确认放弃后才允许关闭
+    dialogResult = true
+    closeBtn!.click()
+    await flushPromises()
+    expect(w.emitted('update:show')).toBeTruthy()
+    expect(w.emitted('update:show')!.at(-1)).toEqual([false])
+  })
+
   it('编辑元数据：打开表单调用 meta.get 读「当前」元数据预填（不用列表快照旧数据）', async () => {
     useDistrosStore().items = [
       distro({ meta: { ...distro().meta!, alias: '快照别名', note: '快照备注' } }),
@@ -718,6 +863,27 @@ describe('A4 CommandPalette', () => {
       path: '/distros',
       query: { focus: 'Ubuntu', detail: 'Ubuntu' },
     })
+  })
+
+  it('最近使用区块渲染；重复项对辅助技术隐藏（aria-hidden/tabindex=-1）且点击可执行', async () => {
+    wslAPI.config.get.mockImplementation(async (key?: string) =>
+      key === 'uiState' ? { recentCommands: ['nav-dashboard'] } : {},
+    )
+    await openPalette()
+    const groups = Array.from(document.body.querySelectorAll('.palette-group')).map(
+      (g) => g.textContent,
+    )
+    expect(groups).toContain('最近使用')
+    const recentBtn = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('.palette-item'),
+    ).find((b) => (b.textContent ?? '').includes('前往：驾驶舱'))
+    expect(recentBtn).toBeTruthy()
+    // 与主列表不重复暴露 option（读屏不会读两遍），且不参与键盘焦点循环
+    expect(recentBtn!.getAttribute('aria-hidden')).toBe('true')
+    expect(recentBtn!.getAttribute('tabindex')).toBe('-1')
+    recentBtn!.click()
+    await flushPromises()
+    expect(routerMock.push).toHaveBeenCalledWith('/dashboard')
   })
 })
 

@@ -22,7 +22,7 @@ import { createDiagnosticsService } from './services/diagnostics-service'
 import { createSignatureService } from './services/signature-service'
 import { createElevationClient } from './elevation/client'
 import { createUpdateService } from './updater/auto-update'
-import { readBootSettings } from './settings-boot'
+import { readBootSettings, resolveUserDataOverride, ensureUserDataDir } from './settings-boot'
 import { isQuitting, markQuitting } from './app-state'
 
 let bootstrapLogger: Logger | null = null
@@ -39,6 +39,18 @@ function installGlobalGuards(getLogger: () => Logger | null): void {
       error: reason instanceof Error ? (reason.stack ?? reason.message) : String(reason),
     })
   })
+}
+
+// E2E / 测试隔离：userData 可经环境变量重定向（必须在单实例锁与 ready 之前生效；
+// ensureUserDataDir 先建目录 —— app.setPath 对不存在的目录会抛错）。
+// 覆写失败不阻断启动（真实用户不应被测试钩子弄崩）：回退默认 userData 并留痕。
+const userDataOverride = resolveUserDataOverride(process.env)
+if (userDataOverride) {
+  try {
+    app.setPath('userData', ensureUserDataDir(userDataOverride))
+  } catch (e) {
+    console.error('[wslpilot] WSLPILOT_USER_DATA 覆写失败，回退默认 userData：', e)
+  }
 }
 
 // 单实例锁 —— 败者直接退出，不注册任何 bootstrap（M10）

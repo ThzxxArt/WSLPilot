@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
-import { createWslAPI, type WslAPIMock } from './support'
+import { defaultConfig, type AppSettings } from '@wslpilot/shared'
+import { createWslAPI, configGetImpl, type WslAPIMock } from './support'
 
 enableAutoUnmount(afterEach)
 
@@ -57,9 +58,19 @@ beforeEach(() => {
   setActivePinia(createPinia())
   document.body.innerHTML = ''
   document.documentElement.dataset.reduceMotion = ''
-  wslAPI.config.get.mockResolvedValue({})
+  // 诚实契约形状复位（load 成功路径真实可走；显式失败用例自行 mockRejectedValue）
+  wslAPI.config.get.mockImplementation(configGetImpl())
   wslAPI.terminal.list.mockResolvedValue([])
 })
+
+/** 构造 settings.jsonc 载入内容（经 config.get 走真实 load 路径） */
+function settingsWith(patch: Partial<AppSettings['general']>) {
+  const base = defaultConfig('settings')
+  return async (fileKey?: string) => {
+    if (fileKey === 'settings') return { ...base, general: { ...base.general, ...patch } }
+    return fileKey ? defaultConfig(fileKey as never) : {}
+  }
+}
 
 describe('App 壳装配', () => {
   it('settings.load 失败也走出 loading（finally 保证），shell 正常渲染', async () => {
@@ -93,18 +104,20 @@ describe('App 壳装配', () => {
     for (const off of offs) expect(off).toHaveBeenCalledTimes(1)
   })
 
-  it('reducedMotion 设置写入 html dataset', async () => {
-    useSettingsStore().reduceMotion = true
+  it('reducedMotion 设置写入 html dataset（经 settings.jsonc 载入）', async () => {
+    wslAPI.config.get.mockImplementation(settingsWith({ reduceMotion: true }))
     mount(App, { attachTo: document.body, global: { stubs } })
     await flushPromises()
     expect(document.documentElement.dataset.reduceMotion).toBe('true')
   })
 
-  it('locale=en-US 选择英文 locale（导航/托盘回调走 router.push）', async () => {
-    useSettingsStore().locale = 'en-US'
+  it('locale=en-US 从 settings.jsonc 载入（导航/托盘回调走 router.push）', async () => {
+    wslAPI.config.get.mockImplementation(settingsWith({ locale: 'en-US' }))
     const w = mount(App, { attachTo: document.body, global: { stubs } })
     await flushPromises()
+    // 真实 load 路径：store 的 locale 来自 settings.jsonc，而非「载入失败后手工残留值」
     expect(useSettingsStore().locale).toBe('en-US')
+    expect(useSettingsStore().loaded).toBe(true)
 
     // 托盘导航回调
     const navCb = wslAPI.app.onNavigate.mock.calls[0]![0] as (p: string) => void

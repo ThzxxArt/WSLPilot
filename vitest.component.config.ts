@@ -40,10 +40,9 @@ export default defineConfig({
         'apps/desktop/src/renderer/main.ts',
       ],
       // ★ 硬门禁：低于阈值 CI 直接失败。
-      // per-glob 两档（review 禁止虚高摆拍）——UI 加入分母后全量 functions 50.59%
-      // 达不到 70%，故拆两档；每档 = 实测值 −2pp 向下取整的诚实地板（防止回归即可）。
-      // 实测（2026-10，187+7 用例）：ui 98.21/90.35/83.33；renderer 86.63/82.44/49.63。
-      // UI 测试将持续补齐、地板随之上调 —— 见 docs/testing.md 覆盖率一节。
+      // per-glob 两档（review 禁止虚高摆拍）——每档 = 实测值 −2pp 向下取整的诚实地板（防回归即可）。
+      // 实测（2026-10，0.1.1：221 用例）：ui 98.25/90.76/83.33；renderer 87.90/82.51/54.69。
+      // UI 测试持续补齐、地板随之抬升（renderer 地板已从 84/80/47 → 85/80/52）——见 docs/testing.md。
       thresholds: {
         'packages/ui/src/components/**': {
           lines: 96,
@@ -52,10 +51,10 @@ export default defineConfig({
           functions: 81,
         },
         'apps/desktop/src/renderer/**': {
-          lines: 84,
-          statements: 84,
+          lines: 85,
+          statements: 85,
           branches: 80,
-          functions: 47,
+          functions: 52,
         },
       },
     },

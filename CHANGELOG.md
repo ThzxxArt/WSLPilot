@@ -5,24 +5,53 @@
 
 > **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
 
-## [Unreleased]
+## [0.1.1] - 2026-10-12
 
 ### Notes
 
+- **0.1.1 为质量收敛版**：0.1.0 后全部修复正式发版 + 全量深读发现的 9 处缺陷根治 + 测试诚实化与盲区补齐，
+  无新增功能；功能增量（引导页 / `.wslconfig` 编辑 / 文件双栏等）留待 0.2.0。
 - 配置冲突三选语义：**重载**=采用磁盘、**覆盖**=写回应用内状态、**暂不处理**=保留应用内状态并清标记。
   三者在 UI 全部可达（关闭 X / Esc = 暂不处理），0.1.0 时 UI 只暴露前两者的缺口已补齐。
 - 备份文件名非法字符改 `%XX` 转义（不再是统一 `_`）：`a*b` 与 `a_b` 属不同备份文件族，轮转互不误删。
 - 代理配置支持「全空 = 不配置代理」的关闭态保存；`general.theme` 幽灵字段与 `accent: custom` 占位枚举已移除
   （浅色是产品策略而非配置项）。
+- E2E / 视觉回归使用临时 `userData`（`WSLPILOT_USER_DATA`）：基线与冒烟不再受本机配置影响、
+  也不读写真实用户数据。
+- 0.1.1 x64 安装包（NSIS setup + portable）已由 Windows 原生工具链打包（WSL 经 interop 驱动），
+  `win-unpacked` 原生启动冒烟通过；`win32` 视觉基线硬比对通过。
 
 ### Fixed
 
+- **fix: headless 动作日志乱码根治 — spawnWsl 流式解码双形态**（`-e` 透传 UTF-8 / 内建 UTF-16LE / `WSL_UTF8=1`）
+  - **根因**：流式 `spawnWsl` 固定按 UTF-16LE 解码，而 `wsl -d X -e program`（headless 自定义动作）与
+    `WSL_UTF8=1` 环境的输出是 UTF-8 —— 日志两两并成汉字、换行被吞，任务抽屉里全程不可读
+  - **修复**：首块探测（BOM / 奇数位 NUL 结构）锁定编码 + `StringDecoder` 处理跨块残缺字节与半行；
+    与整段解码共用 `detectWslEncoding` 唯一事实源；stdout/stderr 各自独立探测
+  - 补 UTF-8 / UTF-16LE / BOM / 奇数切分 / 小首块等待 / 半行 flush 用例 9 条
+- **fix: 安装完成判定前缀误判根治**
+  - **根因**：`wsl --list` 输出用 `includes(target)` 子串匹配 —— 已有 `Ubuntu-22.04` 时安装 `Ubuntu`
+    会在安装真正开始前假结算「完成」并吞掉仍在进行的安装进程
+  - **修复**：`parseDistroList` 精确名单匹配（大小写不敏感、兼容 `wsl --list` 简单列表与
+    `--verbose` 表格两种真实输出形态）+ 安装前基线名单（装前已存在时不启用注册信号，只信进程退出）；
+    补前缀碰撞、装前已存在回归用例
+- **fix: 元数据合并大小写归一**（`distros:list` meta 索引 / `listWithMeta` / 动作 `startupCwd`）——
+  WSL 回报大小写与 distros.jsonc 不一致时，别名 / 置顶 / 启动目录不再静默丢失
+- **fix: 设置页两处 IPC 失败不再静默**：打开配置目录 / 浏览备份目录补 catch + 错误 Toast（不产生未处理拒绝）
+- **fix: 详情弹窗关窗同时守卫「文件」页脏编辑**（此前只守 wsl.conf，文件页未保存修改静默丢失）
+- **fix: 终端标签右键不再触发拖拽重排**（拖拽只认左键；中键关闭语义不变）
+- **fix: 配置冲突 resolve 幂等**（naive 一次关闭可能先后触发 onEsc/onClose，「暂不处理」不再重复执行）
+- **fix: spawn-task 看门狗兜底定时器统一清理**（kill 无响应分支的 100ms 兜底 timer 不再泄漏）
+- **fix: 终端缓冲截断代理对逻辑修正**（起点为孤立低位代理时跳过；起点为高位代理时保留完整配对 ——
+  旧实现方向相反，会把完整配对删成孤立低代理）
+- **fix: 移除幽灵设计令牌 `gradient-custom`**（生成物与唯一事实源逐一对账并加防回归断言）
+- **fix: MetricCard 关键帧样式补空行**（`npm run lint` 全量复核在 0.1.1 转红的既有 stylelint 违规，根治）
 - **fix: 打开详情弹框即启动发行版根治 — 隐式启动全面封杀**（用户实测反馈）
   - **根因**：`wsl -d X -e …` 会把停着的发行版拉起来（WSL 语义）——详情弹框随挂载的
     wsl.conf 面板（display-directive=show）直接 `cat /etc/wsl.conf`，一开弹框就启动了发行版
   - **状态门禁双层**：渲染层（wsl.conf/文件面板未运行不读取、启动后自动载入、按钮同门禁）
-    + **主进程硬闸** `wsl.assertRunning`——metrics 采样 / wslconf 读写 / fs 读写 / 自定义动作 /
-    终端建会话五个「进发行版跑命令」入口全部先验运行状态，未运行报 DISTRO_NOT_RUNNING + 指引
+    - **主进程硬闸** `wsl.assertRunning`——metrics 采样 / wslconf 读写 / fs 读写 / 自定义动作 /
+      终端建会话五个「进发行版跑命令」入口全部先验运行状态，未运行报 DISTRO_NOT_RUNNING + 指引
   - 新增「未运行拒绝读/写/采样/开会话」测试钉；夹具全量对齐 Running 语义
 - **fix: 发行版按钮语义统一 + 终端状态门禁**（用户实测反馈）
   - **颜色**：「启动」统一蓝色（此前用发行版品牌色覆盖 primary，每个发行版一个色）、「停止」统一红色；
@@ -157,12 +186,37 @@
     `.glass/.pilot-body/.pilot-content` 全部移除或接线（`meta.title` 接 document.title）
   - **文案**：发行版页「点击卡片可启停」改为真实交互描述；文件编辑器上限提示改为真实常量；E2E 侧栏文案漂移（`备份与迁移`→`备份迁移`）修复
 
+### Added
+
+- **测试诚实化与盲区补测（0.1.1）**：约 30 条新用例 + 5 条假信心用例重写
+  - 假信心清零：EPERM 重试真实注入（`vi.spyOn(rename)`）、代理对用例构造可达、预留通道路径恒真断言移除、
+    孤儿缓冲淘汰真断言 + 模块级状态逐用例隔离、组件 mock 契约补全（`config.get` 返回完整 ConfigMap、
+    `network`/`devices` 命名空间、dialog 确认可回放 —— 此前 NetworkView 确认链路组件层从未执行）
+  - 盲区补齐：迁移提权成功/失败、批量提权回滚旧监听与 UAC 取消、导入后置检查、嵌套迁移拒绝、
+    chokidar 解析失败 / 等价吸收 / 监听器容错三态、wsl.conf 未运行门禁与 diff 渲染、
+    SettingsView 关键 setter 落盘逐项对账、TaskDrawer 取消成功 / 键盘选择 / 空态、
+    命令面板最近使用渲染、PortForwardForm 新建保存、NetworkView 确认后真实执行与代理串行
+- **E2E 隔离与冒烟补强**：临时 `userData`（`WSLPILOT_USER_DATA`）隔离（不读写真实配置、不受本机设置影响）；
+  冒烟补发行版页与文档标题断言；侧栏定位收敛 `aside.sidebar`
+  （真实 WSL 环境下页面同名按钮不再触发 strict-mode 冲突）；Linux 视觉基线在隔离后复跑一致
+- **视觉回归稳定化（双平台基线重生成）**：动态源全量 mask 补全（时段问候语 / hero 统计行 /
+  系统转发表 / Windows 代理状态 / `.wslconfig` 真实路径 / 版本号）+ 截图期盒尺寸固定
+  （`visual-stability.css`：动态文本宽度铺满、指标值固定高度、卡片网格固定高度）——
+  根治「内容变化 → mask 边界漂移 / 下方版式位移」造成的视觉假红；
+  win32 基线在 Windows 侧重新生成并硬比对通过，linux 基线同步重生成
+
 ### Changed
 
+- 无障碍：任务抽屉列表项键盘可达（Enter/Space 选中）；设置页配置标签支持 Space 激活；
+  命令面板「最近使用」对辅助技术隐藏重复项（`aria-hidden` + `tabindex=-1`，不再重复暴露 option）
+- 组件覆盖率地板随实测上调：renderer 84/80/47 → **85/80/52**（实测 87.90/82.51/54.69，221 用例）
+- docs/testing.md 基线同步（单测 95.7/88.0/95.3；组件两档实测与地板更新）
 - `general.theme` 从 settings.jsonc 移除（产品策略「只用亮色」不是可写配置）；`accent` 枚举去掉无实现的 `custom`
 
 ### Security
 
+- 测试诚实化：5 条恒真 / 不可达用例重写为可失败断言（EPERM 重试、代理对截断、预留通道、
+  孤儿淘汰、NetworkView 确认链路）——改坏实现必红
 - 测试补齐提权委托链（4 服务）、M7 handler 体、preload 退订/降级契约、备份命名碰撞等回归——
   此前多处「断言不观测行为」的假信心用例已改为可观测断言
 

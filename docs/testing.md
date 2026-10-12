@@ -82,7 +82,12 @@ renderer 的 `.ts`（stores / composables / features 纯逻辑）**不进组件�
 Playwright 截图对比（`npm run test:visual`，`@visual` 标签）：驾驶舱 / 设置 / 网络 / 命令面板
 关键页面浅色主题渲染一致性。
 
-- 动画禁用 + 动态区（指标数字 / 迷你图 / 时钟 / 发行版列表）mask，基线只锁视觉系统（布局、令牌、间距、字号）
+- 动画禁用 + **动态源全量 mask**：时段问候语、hero 统计行（WSL 版本/发行版数量/内核）、
+  指标数字与提示、迷你图、时钟、发行版卡片区、系统转发表、Windows 代理状态、
+  `.wslconfig` 真实路径、设置页版本号（每项都对应真实动态源，新增动态源必须登记）
+- **截图期盒尺寸稳定化**（`tests/e2e/visual-stability.css`，仅 `stylePath` 注入、不改生产样式）：
+  动态文本宽度铺满、指标值固定高度、卡片网格固定高度——消除「内容变化 → mask 边界漂移 /
+  下方版式位移」造成的假红
 - 基线位于 `apps/desktop/tests/e2e/__screenshots__/`，按平台分文件（`{arg}-{platform}.png`，linux/win32 各一套）随仓库入库
 - `updateSnapshots: 'none'`——**缺基线直接红**，禁止 CI 自动造基线放行（review 假门禁根治）；
   新增/更新截图用例在目标平台跑 `npx playwright test --grep @visual --update-snapshots=all` 并提交生成的基线
@@ -92,7 +97,11 @@ Playwright 截图对比（`npm run test:visual`，`@visual` 标签）：驾驶�
 
 Playwright + Electron（`electron.launch`，Windows）——一次实跑 **smoke + 视觉回归**（`*.e2e.ts` 全量，含 `@visual`）：
 
-- smoke：启动、窗口显示、侧栏导航（驾驶舱 / 终端 / 备份迁移 / 设置 / 网络 / 设备）与命令面板关键元素可见性
+- smoke：启动、窗口显示、侧栏导航（驾驶舱 / 发行版 / 终端 / 备份迁移 / 设置 / 网络 / 设备）与命令面板关键元素可见性
+- **隔离**：每次启动使用临时 `userData`（`WSLPILOT_USER_DATA` 环境变量，主进程在单实例锁前应用），
+  不读写真实用户配置/日志/备份，也不受本机强调色 / 侧栏折叠 / 语言影响（review E2E 隔离根治）
+- **定位策略**：侧栏导航一律收敛到 `aside.sidebar` 内定位——页面内容可能出现同名按钮
+  （发行版卡片的「终端」），全局 `getByRole` 在真实 WSL 环境下会 strict-mode 冲突
 - visual：见上节视觉回归（截图比对，基线在 `__screenshots__/`）
 
 ## 运行
@@ -119,26 +128,26 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（0.1.0 / M1–M7 交付后）**：单测 Lines 94%+ / Branches 87%+ / Functions 95%+。
+**当前基线（0.1.1 / 0.1.0 后全量修复）**：单测 Lines 95.7% / Branches 88.0% / Functions 95.3%。
 
 ### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
 
-UI 层加入分母后全量 functions 实测 50.59%，达不到 70% —— 若强行保持 70 会假红。
-故按 vitest `thresholds` 的 per-glob 拆两档，每档为**实测值减 2 个百分点向下取整**的
-诚实地板（只防回归、不虚高摆拍）：
+UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` 的 per-glob 拆两档，
+每档为**实测值减 2 个百分点向下取整**的诚实地板（只防回归、不虚高摆拍）：
 
 | 分母                                    | Lines  | Statements | Branches | Functions |
 | --------------------------------------- | ------ | ---------- | -------- | --------- |
-| `packages/ui/src/components/**`（实测） | 98.21% | 98.21%     | 90.35%   | 83.33%    |
+| `packages/ui/src/components/**`（实测） | 98.25% | 98.25%     | 90.76%   | 83.33%    |
 | ↑ 门禁地板                              | **96** | **96**     | **88**   | **81**    |
-| `apps/desktop/src/renderer/**`（实测）  | 86.63% | 86.63%     | 82.44%   | 49.63%    |
-| ↑ 门禁地板                              | **84** | **84**     | **80**   | **47**    |
+| `apps/desktop/src/renderer/**`（实测）  | 87.90% | 87.90%     | 82.51%   | 54.69%    |
+| ↑ 门禁地板                              | **85** | **85**     | **80**   | **52**    |
 
-（实测取自 `npm run test:component` 全量 194 用例；renderer functions 偏低是模板内联
-handler / computed 未逐一驱动所致。）
+（实测取自 `npm run test:component` 全量 221 用例；0.1.1 补齐 NetworkView 确认回放、
+SettingsView setter 落盘对账、WslConfPanel 未运行门禁与 diff 渲染、TaskDrawer 键盘与
+取消成功、命令面板最近使用 a11y 等用例后，renderer 地板由 84/80/47 抬升至 85/80/52。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
-更新为「新实测 −2pp」；renderer functions 47% 是过渡期防线，不是终点。
+更新为「新实测 −2pp」；renderer functions 52% 是过渡期防线，不是终点。
 
 **覆盖范围**：
 
