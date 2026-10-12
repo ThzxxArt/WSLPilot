@@ -15,8 +15,8 @@
   名额预留 / 取消透传）、门禁一致性（隐式启动封杀补全）、安全（命令注入 / 脱敏 / 提权误判 /
   IPC 纵深防御）、健壮性（日志 / 压缩 / 原子写 / 缓存 / 编码）、UI 体验（全局错误兜底 /
   无障碍 / 令牌化）、工程护栏（CI / 覆盖率分母 / E2E / 视觉掩码）。
-- 实测：单测 1069 条（lines 95.88% / branches 88.2% / functions 95.48%）、组件 318 用例
-  （ui 桶 98.99/90.58/92.86 → 地板 96/88/90；renderer 桶 90.15/84.82/60.82 → 地板 88/82/58）、
+- 实测：单测 1109 条（lines 95.97% / branches 88.39% / functions 95.54%）、组件 333 用例
+  （ui 桶 98.99/90.58/92.86 → 地板 96/88/90；renderer 桶 90.22/85.23/61.12 → 地板 88/83/59）、
   E2E smoke 2 条 + 视觉 2 条；「等价命令复制执行」文案统一引导 **管理员 PowerShell**。
 
 ### Fixed
@@ -110,10 +110,56 @@
   - 细节：备份向导重置保留默认格式、网络编辑弹窗受控关闭（保存失败保留表单）、
     系统转发表状态 12s 静默轮询、跨发行版脚本串台消除、终端字号边界禁用 + aria-label 补全
 
+### 审计修复
+
+- **独立正确性审计修复**（0.1.2 发布后独立审计，shared / kit / ui + 文档域）：
+  - schema-sanitize：整对象回退过宽根治 —— 语义级 refine 失败（如 network.jsonc 重复 id）
+    不再清空用户全部配置，仅输出「键面残缺」才回退默认值
+  - wslconf `isSameText`：恢复行级等价（仅 CRLF/LF 换行差异不算 dirty），保持 O(n) 直接比较
+  - logger：保留清理排除今日文件与保留集最新一天，不再可能删掉正在写入的日志
+  - run-tool：取消结果新增 `aborted` 标记（abort 与普通失败可区分）
+  - elevation：删除重复 JSDoc；`isElevationError` 补 `elevation is required` 语序
+  - types：`PortProxyEntry.kind` 注释与 v4tov4 / v6tov6 实现对齐
+  - tool-output：UTF-32LE/BE BOM 优先于 UTF-16 判定（TextDecoder 不可用时手动降级解码）
+  - diagnostics：密钥赋值支持转义引号值；鉴权头允许 `:` 后无空格（`Authorization:Bearer x`）
+  - atomic-write：保留 mode 仅取权限位 `& 0o777`（不复刻 setuid/setgid/sticky）
+  - zip：合计体积守卫由 `> 4GiB` 收紧为 `>= 0xffffffff`（uint32 字段溢出边界）
+  - 测试诚实化：ProgressRing 负半径（size×1.2 stroke）与默认渐变派生、MetricCard 字符串数字
+    三条假覆盖修正为真实可失败断言
+- **独立正确性审计修复**（renderer / 视图 / 主进程域）：
+  - ConflictResolver：`action` slot 替换默认按钮导致点击三选后弹窗不关闭（队列反叠框）——
+    实例化 dialog 并在 resolve 落地后 `destroy()`，队列在销毁后推进
+  - DistroDetailModal：files 页签补 `display-directive="show"`（切页签不再卸载文件面板丢编辑）；
+    FileBrowserPanel/WslConfPanel 的切换确认 await 后复验发行版归属（杜绝视图串台）
+  - InstallDistroModal：补「取消」终态出口（此前无按钮死路）；taskLost 隐藏进行中标签与进度条
+  - DevicesView：USB 官网按钮改走新增 `app:openExternal` 通道（原用仅允许目录的 openPath，
+    点击必失败）；协议白名单（仅 http/https）+ handler 二次校验
+  - XtermPane：尺寸同步单飞 settle 后若仍漂移链式补发（消除「飞行中丢最后一次尺寸」）
+  - FileBrowserPanel：保存期间编辑器只读，仅当文本仍等于快照才清脏标记（假干净根治）
+  - 大小写归一补齐：备份重名比较 / 终端创建去重 / 文件面板归属校验（WSL 名不区分大小写）
+  - network store：silent 轮询不再令非 silent 请求的 loading 永久卡住（owner 记账）
+  - App.vue：onErrorCaptured 不再阻断全局 errorHandler（协作语义修正）；降级面板补「返回应用」复位
+  - metrics store：采样成功清除 lastError（StatusBar 不再永久「服务异常」）
+  - SidebarNav：窄屏自动折叠时 toggle 禁用（不再把「展开」写成用户偏好）
+  - TitleBar：窗口控件先取 `wslAPI.app` 判空（子命名空间缺失不再同步 TypeError）
+  - update store：删除无消费方的聚合 `busy`（死代码清零）
+  - SettingsView：恢复默认后界面刷新失败提示 warning（不再误报成功）
+  - main：注销改走 `runExclusive` 与同发行版长任务严格互斥（TOCTOU 根治）；
+    update install 抛错映射 `TASK_FAILED`（不再 UNKNOWN）+ 状态落 error；
+    usbipd「成功优先」收尾（取消信号在成功后到达不再误报取消）；
+    proxyState 的 NOT_FOUND 正则收窄（发行版不存在不再假报「脚本不存在」）；
+    runTool `truncated` 消费（usbipd/network 截断输出按失败处理）；
+    wslconf 写与终止纳入同一 per-distro 队列；`assertRunning` 注入改必填
+  - 视觉回归：镜像卡掩码收窄**评估后回退为整卡掩码**（收窄后 mask 矩形仍随
+    mirrored/NAT 状态变化，两平台基线曾因此记录不同状态，环境一换即假红；
+    定高整卡掩码使两形态在截图中等价）——0.1.2 变更记录以此为准
+
 ### Added
 
 - **工程护栏（CI / 覆盖率 / E2E）**
   - `npm run tokens:check`（设计令牌产物与 `tokens.ts` 逐字节对账）入 CI「Tokens drift check」步骤
+    —— CI 语义 = 生成物存在且与源一致（供本地开发者自检）；生成物不入库是既有设计，
+    `build` 脚本首位前置 `npm run tokens`，保证构建始终使用与 `tokens.ts` 同步的生成物
   - 覆盖率分母治理：单测 features 改 `features/**` 通配（新 feature 目录不再静默掉出分母）；
     组件 ui 桶纳入 `composables/`、`directives/`、`naive/`、`index.ts`
     （vRipple / useReducedMotion / applyAccentToDom / theme-overrides 有测试但此前不计分）
@@ -129,13 +175,13 @@
 
 ### Changed
 
-- 组件覆盖率地板随实测上调：ui 96/96/88/81 → **96/96/88/90**（分母扩展后重测
-  98.99/90.58/92.86）；renderer 85/85/80/52 → **88/88/82/58**（实测 90.15/84.82/60.82，318 用例）
-- docs/testing.md 基线与门禁表同步（单测 1069 条：95.88/88.2/95.48）；
+- 组件覆盖率地板随测试补齐再次上调：ui 96/96/88/90（实测 98.99/90.58/92.86）；
+  renderer **88/88/82/58 → 88/88/83/59**（独立审计修复后复测 90.22/85.23/61.12，333 用例）
+- docs/testing.md 基线与门禁表同步（单测 1109 条：95.97/88.39/95.54）；
   README 测试区块补实测数字与 tokens:check 说明
-- 视觉回归掩码收窄：系统转发表整表 → 仅数据行区域（表头 / 边框参与比对）、
-  镜像卡整卡 → 状态徽章 / 路径行 / 状态正文三个具体动态元素；smoke 补结构补偿断言
-  （收窄区域容器必须真实可见，样式崩坏不再被掩码掩盖）
+- 视觉回归：系统转发表掩码收窄为数据行区域（表头 / 边框参与比对）保留；
+  镜像卡掩码收窄评估后**回退为整卡**（状态可变区域使 mask 矩形漂移，宽掩码更稳——见审计修复）
+- 视觉回归：smoke 补结构补偿断言（收窄区域容器必须真实可见且不塌陷）
 
 ### Security
 

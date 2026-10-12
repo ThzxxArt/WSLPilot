@@ -137,7 +137,7 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（0.1.2）**：单测 1069 条，Lines 95.88% / Branches 88.2% / Functions 95.48%。
+**当前基线（0.1.2）**：单测 1109 条，Lines 95.97% / Branches 88.39% / Functions 95.54%。
 
 ### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
 
@@ -148,15 +148,15 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 | -------------------------------------- | ------ | ---------- | -------- | --------- |
 | `packages/ui/src/**`（实测）           | 98.99% | 98.99%     | 90.58%   | 92.86%    |
 | ↑ 门禁地板                             | **96** | **96**     | **88**   | **90**    |
-| `apps/desktop/src/renderer/**`（实测） | 90.15% | 90.15%     | 84.82%   | 60.82%    |
-| ↑ 门禁地板                             | **88** | **88**     | **82**   | **58**    |
+| `apps/desktop/src/renderer/**`（实测） | 90.22% | 90.22%     | 85.23%   | 61.12%    |
+| ↑ 门禁地板                             | **88** | **88**     | **83**   | **59**    |
 
-（实测取自 `npm run test:component` 全量 318 用例；0.1.2 分母纳入 ui 桶
+（实测取自 `npm run test:component` 全量 333 用例（0.1.2 独立审计修复后复测）；0.1.2 分母纳入 ui 桶
 `composables` / `directives` / `naive` / `index.ts` 后重测 —— ui branches 地板随测试补齐
-87→88；renderer 地板由 0.1.1 的 85/80/52 抬升至 88/82/58。）
+87→88；renderer 地板由 0.1.1 的 85/80/52 抬升至 88/83/59。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
-更新为「新实测 −2pp」；renderer functions 57% 是过渡期防线，不是终点。
+更新为「新实测 −2pp」；renderer functions 58% 是过渡期防线，不是终点。
 
 **覆盖范围**：
 
@@ -194,7 +194,7 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 
 - `lint-typecheck-test`：Node 20/22 矩阵，lint + format:check + typecheck +
   **Tokens drift check（`tokens:check`：`tokens.ts` 与生成产物逐字节对账）** + **test:coverage（85% 门禁）**
-  - **test:component（per-glob 两档门禁：ui 96/96/87/90、renderer 87/87/82/57）** + build +
+  - **test:component（per-glob 两档门禁：ui 96/96/88/90、renderer 88/88/82/58）** + build +
     **smoke:product（main 模块图 + preload 模块图硬校验）**
 - 覆盖率报告以 artifact 形式保留 14 天
 - `e2e`：Windows runner，`npm run test:e2e` 实跑 smoke + 视觉回归（`smoke.e2e.ts` 与 `visual.e2e.ts`）

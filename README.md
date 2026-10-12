@@ -159,8 +159,8 @@ npm run tokens:check     # 设计令牌漂移检查（tokens.ts 与生成产物�
   也不受本机强调色 / 侧栏折叠 / 语言影响；`test:e2e` 含视觉回归，`test:visual` 仅跑视觉
 - **视觉回归**：截图基线按平台入库（`{arg}-{platform}.png`，linux / win32 各一套），`updateSnapshots: 'none'` 硬门禁——缺基线直接失败，禁止 CI 自动造基线放行；新增 / 更新截图用 `npx playwright test --grep @visual --update-snapshots=all` 并提交产物
 - **E2E 串行**：应用是单实例语义，`workers: 1` 防并行双开假红
-- **实测（2026-10-12）**：单测 1069 条（lines 95.88% / branches 88.2% / functions 95.48%）；
-  组件 318 用例（ui 桶 98.99/90.58/92.86、renderer 桶 90.15/84.82/60.82，两档地板为「实测 −2pp」）；
+- **实测（2026-10-12）**：单测 1109 条（lines 95.97% / branches 88.39% / functions 95.54%）；
+  组件 333 用例（ui 桶 98.99/90.58/92.86、renderer 桶 90.22/85.23/61.12，两档地板为「实测 −2pp」）；
   E2E = smoke 2 条 + 视觉 2 条；`tokens:check` 已入 CI（令牌漂移即红）
 
 分层策略与门禁细节见 [docs/testing.md](./docs/testing.md)。
