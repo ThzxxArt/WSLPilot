@@ -96,6 +96,18 @@ describe('IPC 错误序列化协议', () => {
     expect(isAppError({ code: 'X' })).toBe(false)
   })
 
+  it('isAppError 校验字段类型（伪造形状不通过 — review 0.1.2 加固）', () => {
+    expect(isAppError({ code: 1, message: 'x', recoverable: true })).toBe(false)
+    expect(isAppError({ code: 'X', message: 2, recoverable: true })).toBe(false)
+    expect(isAppError({ code: 'X', message: 'x', recoverable: 'yes' })).toBe(false)
+  })
+
+  it('createAppError 目录外 code 兜底不崩（review 0.1.2 根治）', () => {
+    const err = createAppError('NOT_A_REAL_CODE' as never)
+    expect(err.message).toContain('NOT_A_REAL_CODE')
+    expect(err.recoverable).toBe(false)
+  })
+
   it('deserialize 校验结构：未知错误码/缺字段的伪造 payload 拒绝（review M9）', () => {
     expect(
       deserializeIpcError('WSLPILOT:{"code":"HACK","message":"x","recoverable":true}'),

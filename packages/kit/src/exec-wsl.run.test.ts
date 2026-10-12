@@ -191,8 +191,8 @@ describe('getRawCommand（formatCommand 转发壳）', () => {
   it('与 shared 的 formatCommand 是同一函数（兼容导出）', () => {
     expect(getRawCommand).toBe(formatCommand)
   })
-  it('quotes args with spaces', () => {
-    expect(getRawCommand('wsl.exe', ['-d', 'Ubuntu 22.04'])).toBe('wsl.exe -d "Ubuntu 22.04"')
+  it('quotes args with spaces（shared 已改为 PowerShell 单引号规则 — review 0.1.2）', () => {
+    expect(getRawCommand('wsl.exe', ['-d', 'Ubuntu 22.04'])).toBe("wsl.exe -d 'Ubuntu 22.04'")
   })
   it('leaves simple args bare', () => {
     expect(getRawCommand('wsl.exe', ['-e', 'ls'])).toBe('wsl.exe -e ls')

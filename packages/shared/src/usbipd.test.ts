@@ -72,12 +72,14 @@ describe('parseUsbipdList', () => {
     expect(list[0]!.description).toBe('USB   Receiver   Nano')
   })
 
-  it('空输出 / 表头 / 重复 busid', () => {
+  it('空输出 / 表头 / 重复 busid 后出现者覆盖', () => {
     expect(parseUsbipdList('')).toEqual([])
     expect(parseUsbipdList('Connected:\nBUSID  VID:PID  DEVICE  STATE')).toEqual([])
+    // 同 busid 多次出现（真实输出含分段时状态可能不同）：后者携带更新状态，必须胜出
     const dup = ['1-2  046d:c534  Dev A  Not attached', '1-2  046d:c534  Dev B  Shared'].join('\n')
     expect(parseUsbipdList(dup)).toHaveLength(1)
-    expect(parseUsbipdList(dup)[0]!.description).toBe('Dev A')
+    expect(parseUsbipdList(dup)[0]!.description).toBe('Dev B')
+    expect(parseUsbipdList(dup)[0]!.state).toBe('shared')
   })
 })
 

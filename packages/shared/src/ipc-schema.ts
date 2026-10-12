@@ -4,7 +4,12 @@ import { assertSafeDistroName } from './errors'
 import { assertSafeActionId } from './actions'
 import { assertSafeRuleId } from './network'
 import { assertSafeBusId } from './usbipd'
-import { DEFAULT_BACKUP_KEEP, FS_WRITE_LIMIT_BYTES, WSL_CONF_MAX_BYTES } from './constants'
+import {
+  DEFAULT_BACKUP_KEEP,
+  CONFIG_FILE_NAMES,
+  FS_WRITE_LIMIT_BYTES,
+  WSL_CONF_MAX_BYTES,
+} from './constants'
 
 /**
  * 各 IPC 通道入参 zod schema（设计书 §8.2）。
@@ -77,7 +82,10 @@ export const busIdSchema = z
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 function hasForbiddenKey(value: unknown, depth = 0): boolean {
-  if (depth > 20 || value === null || typeof value !== 'object') return false
+  // 深度超限 fail-closed：无法在有限深度内证明干净的深嵌套对象按不可信拒绝
+  // （此前返回 false 让深层 `__proto__` 绕过本层，依赖下游 deepMerge 兜底 — review 0.1.2 纵深防御）
+  if (depth > 20) return true
+  if (value === null || typeof value !== 'object') return false
   const keys = Object.getOwnPropertyNames(value)
   if (keys.some((k) => FORBIDDEN_KEYS.has(k))) return true
   for (const v of Object.values(value as Record<string, unknown>)) {
@@ -103,14 +111,14 @@ export const patchSchema = z.custom<Record<string, unknown>>(
   { message: `patch 含非法键或序列化后超过 ${CONFIG_PATCH_MAX_BYTES} 字节上限` },
 )
 
-export const configKeySchema = z.enum([
-  'settings',
-  'distros',
-  'actions',
-  'network',
-  'uiState',
-  'state',
-])
+// 从 CONFIG_FILE_NAMES 派生（唯一事实源）：新增配置键只改一处，IPC 边界自动跟上 —
+// 此前硬编码列表与 CONFIG_FILE_NAMES 是双事实源，新增键漏改即静默拒绝（review 0.1.2 根治）
+export const configKeySchema = z.enum(
+  Object.keys(CONFIG_FILE_NAMES) as [
+    keyof typeof CONFIG_FILE_NAMES,
+    ...(keyof typeof CONFIG_FILE_NAMES)[],
+  ],
+)
 
 /** IO 路径：拒绝控制字符与 NUL，长度受限（设计书 §14.2 路径校验） */
 export const ioPathSchema = z

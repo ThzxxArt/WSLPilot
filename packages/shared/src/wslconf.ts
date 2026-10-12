@@ -400,14 +400,22 @@ export interface DiffLine {
 }
 
 /**
- * 行级 LCS 差异。配置文件体量小（wsl.conf ≤ 64KB），O(n·m) 足够。
- * 输出顺序：删除行先于新增行（便于阅读）。
+ * 行级 LCS 差异。配置文件体量小（wsl.conf ≤ 64KB），O(n·m) 常规足够；
+ * 但极端输入（单字符行 ~3.2 万行）最坏可达 10^9 单元直接 OOM —
+ * 超过 `DIFF_CELL_LIMIT` 退化为「全删 + 全增」（正确性不降，仅可读性降级 — review 0.1.2 根治）。
  */
+const DIFF_CELL_LIMIT = 4_000_000
 export function diffLines(oldText: string, newText: string): DiffLine[] {
   const a = oldText === '' ? [] : oldText.split(/\r?\n/)
   const b = newText === '' ? [] : newText.split(/\r?\n/)
   const n = a.length
   const m = b.length
+  if (n * m > DIFF_CELL_LIMIT) {
+    return [
+      ...a.map((text, i): DiffLine => ({ type: 'del', text, oldLine: i + 1 })),
+      ...b.map((text, j): DiffLine => ({ type: 'add', text, newLine: j + 1 })),
+    ]
+  }
   // dp[i][j] = LCS 长度（a[i:], b[j:]）
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
   for (let i = n - 1; i >= 0; i--) {
@@ -442,7 +450,7 @@ export function diffLines(oldText: string, newText: string): DiffLine[] {
   return out
 }
 
-/** 差异是否为空（保存前判断是否需要写盘） */
+/** 差异是否为空（保存前判断是否需要写盘）——直接文本比较，不为此跑全量 diff（review 0.1.2） */
 export function isSameText(a: string, b: string): boolean {
-  return diffLines(a, b).every((d) => d.type === 'same')
+  return a === b
 }

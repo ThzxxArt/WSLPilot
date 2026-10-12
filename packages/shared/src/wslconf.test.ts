@@ -250,4 +250,13 @@ describe('diffLines / isSameText', () => {
     expect(diffLines('', '').every((d) => d.type === 'same')).toBe(true)
     expect(isSameText('', '')).toBe(true)
   })
+
+  it('超大规模输入退化为整段增删（杜绝 O(n·m) OOM — review 0.1.2 根治）', () => {
+    const a = Array.from({ length: 2100 }, (_, i) => `a${i}`).join('\n')
+    const b = Array.from({ length: 2100 }, (_, i) => `b${i}`).join('\n')
+    const d = diffLines(a, b)
+    expect(d.filter((x) => x.type === 'del')).toHaveLength(2100)
+    expect(d.filter((x) => x.type === 'add')).toHaveLength(2100)
+    expect(d.filter((x) => x.type === 'same')).toHaveLength(0)
+  })
 })

@@ -4,8 +4,18 @@
  */
 import type { BackupFormat, IoExportRequest, IoImportRequest, IoMoveRequest } from './types'
 
+/**
+ * 等价命令参数引用（用于「复制到管理员终端执行」场景的展示文本）。
+ *
+ * 采用 **PowerShell 单引号规则**：无需引用时原样；否则 `'…'` 包裹、内部 `'` 双写。
+ * - 此前只处理空白/引号/`$`/反引号/反斜杠并统一双引号：`&` `%` `|` `^` `<` `>` `(`
+ *   等 cmd 元字符未被处理，复制到终端会注入/错误展开（review 0.1.2 根治）。
+ * - PowerShell 单引号内一切字符（含 cmd 元字符）均为字面量，复制执行零歧义；
+ *   引用统一引导「管理员 PowerShell」（README 故障排查 / 错误建议文案同步）。
+ */
 function quoteArg(s: string): string {
-  return /[\s"'$`\\]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s
+  if (s === '') return "''"
+  return /[^\w.\-:/\\@+=~]/.test(s) ? `'${s.replace(/'/g, "''")}'` : s
 }
 
 /** 生成等价命令行字符串 */

@@ -38,9 +38,17 @@ export interface DiagnosticsExportResult {
 export const DIAGNOSTICS_NOTE =
   'WSLPilot 诊断包：包含近期日志与配置脱敏副本（主目录已替换为 %USERPROFILE%、URL 凭据与密钥已打码），可安全提交给维护者排查问题。'
 
-const URL_CREDENTIALS_RE = /([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+):([^/\s@]+)@/gi
+/**
+ * URL userinfo 打码：**用户名与密码都算凭据**。
+ * 旧实现要求 `user:pass@` 双段才命中，`scheme://token@host`（token 作为唯一 userinfo，
+ * GitHub PAT / 预签名 URL 的常见形态）完全不脱敏 — 与「可安全提交」承诺不符（review 0.1.2 根治）。
+ */
+const URL_CREDENTIALS_RE = /([a-z][a-z0-9+.-]*:\/\/)([^/\s:@]+)(?::[^/\s@]*)?@/gi
+/** 鉴权头（`Authorization: Bearer …` / `Proxy-Authorization: Basic …`） */
+const AUTH_HEADER_RE =
+  /\b((?:proxy-)?authorization\s*[:=]\s*(?:bearer|basic|token|digest)\s+)[^\s"'\\]+/gi
 const SECRET_ASSIGN_RE =
-  /((?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)/gi
+  /((?:password|passwd|pwd|secret|token|api[-_]?key|access[-_]?key|private[-_]?key|client[-_]?secret)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^"'\s,;}]+)/gi
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -83,6 +91,7 @@ export function sanitizeDiagnosticsText(text: string, homeDir: string): string {
     out = out.replace(new RegExp(`${escapeRegExp(v)}(?![^\\\\/])`, 'gi'), '%USERPROFILE%')
   }
   out = out.replace(URL_CREDENTIALS_RE, '$1***@')
+  out = out.replace(AUTH_HEADER_RE, '$1***')
   out = out.replace(SECRET_ASSIGN_RE, '$1***')
   return out
 }

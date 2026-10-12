@@ -14,10 +14,14 @@ export interface ToolResult {
   stdout: string
   stderr: string
   code: number
+  /** 输出超过 maxBuffer 被截断（review 0.1.2：调用方须能区分「完整输出」与「截断输出」） */
+  truncated?: boolean
 }
 
 export interface RunToolOptions {
   timeoutMs?: number
+  /** 取消信号（review 0.1.2）：abort 后 execFile 终止子进程，函数仍按约定返回 code/-1 不抛 */
+  signal?: AbortSignal
 }
 
 export type RunToolFn = (
@@ -41,6 +45,7 @@ export async function runTool(
       windowsHide: true,
       timeout: opts.timeoutMs ?? 20_000,
       maxBuffer: 16 * 1024 * 1024,
+      ...(opts.signal ? { signal: opts.signal } : {}),
     })
     return {
       stdout: decodeToolOutput(stdout as unknown as Buffer),
@@ -56,10 +61,14 @@ export async function runTool(
     }
     // spawn 级错误（ENOENT 等）没有 stderr，必须保留 message（与 runWsl 一致）
     const stderrText = decodeToolOutput(err.stderr) || (err.message ? `${err.message}\n` : '')
+    // maxBuffer 超限：execFile 以 ERR_CHILD_PROCESS_STDIO_MAXBUFFER 拒绝并可能只带回部分输出 ——
+    // 标记 truncated，调用方不得把截断输出当完整结果解析（review 0.1.2）
+    const truncated = err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
     return {
       stdout: decodeToolOutput(err.stdout),
       stderr: stderrText,
       code: typeof err.code === 'number' ? err.code : -1,
+      ...(truncated ? { truncated: true } : {}),
     }
   }
 }

@@ -60,7 +60,7 @@ export function usbipdStateLabel(state: UsbipdState): string {
  */
 export function parseUsbipdList(raw: string): UsbDevice[] {
   const out: UsbDevice[] = []
-  const seen = new Set<string>()
+  const index = new Map<string, number>()
   for (const line of String(raw ?? '').split(/\r?\n/)) {
     const m =
       /^(\d{1,3}-\d{1,3}(?:\.\d{1,3})*)\s+([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4})\s+(.+?)\s+(Not attached|Not shared|Shared|Attached)\s*$/.exec(
@@ -68,15 +68,22 @@ export function parseUsbipdList(raw: string): UsbDevice[] {
       )
     if (!m) continue
     const busId = m[1]!
-    if (seen.has(busId)) continue
-    seen.add(busId)
-    out.push({
+    const device: UsbDevice = {
       busId,
       vid: m[2]!.toLowerCase(),
       pid: m[3]!.toLowerCase(),
       description: m[4]!.trim(),
       state: normalizeUsbipdState(m[5]!),
-    })
+    }
+    // 同 busid 多次出现（真实输出含 Connected / Persisted 等分段时状态可能不同）：
+    // 后出现者覆盖先出现者（后者携带更新状态；旧实现「首次出现胜」会展示过期状态 — review 0.1.2）
+    const at = index.get(busId)
+    if (at !== undefined) {
+      out[at] = device
+    } else {
+      index.set(busId, out.length)
+      out.push(device)
+    }
   }
   return out
 }

@@ -90,4 +90,38 @@ describe('runTool', () => {
       encoding: 'buffer',
     })
   })
+
+  it('signal 透传给 execFile（review 0.1.2 取消支持）', async () => {
+    mockExecFile.mockImplementation(
+      (_c: string, _a: string[], _o: unknown, cb: (e: unknown, o: Buffer, s: Buffer) => void) => {
+        cb(null, Buffer.alloc(0), Buffer.alloc(0))
+      },
+    )
+    const ac = new AbortController()
+    await runTool('usbipd.exe', ['bind', '--busid', '1-2'], { signal: ac.signal })
+    expect(mockExecFile.mock.calls[0]![2]).toMatchObject({ signal: ac.signal })
+  })
+
+  it('maxBuffer 超限标记 truncated，不被当完整输出（review 0.1.2）', async () => {
+    const err = Object.assign(new Error('stdout maxBuffer length exceeded'), {
+      code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+    })
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, Buffer.from('partial output'), Buffer.alloc(0))
+    })
+    const r = await runTool('netsh.exe', ['interface', 'portproxy', 'show', 'all'])
+    expect(r.truncated).toBe(true)
+    expect(r.stdout).toContain('partial output')
+    expect(r.code).toBe(-1)
+  })
+
+  it('普通失败不带 truncated 标志（区分完整/截断语义）', async () => {
+    const err: Error & { code?: number } = new Error('denied')
+    err.code = 5
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, Buffer.alloc(0), Buffer.alloc(0))
+    })
+    const r = await runTool('netsh.exe', ['x'])
+    expect(r.truncated).toBeUndefined()
+  })
 })

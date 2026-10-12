@@ -5,7 +5,7 @@
  */
 import type { WslAction } from './types'
 import { formatCommand } from './commands'
-import { createAppError } from './errors'
+import { assertSafeSlugId } from './slug'
 
 /** 动作变量上下文（主进程解析后传入） */
 export interface ActionVarContext {
@@ -94,16 +94,5 @@ export function previewActionCommandForDistro(
 
 /** 动作 id 安全校验（执行白名单的键）：非空、≤100、无控制字符与文件名非法字符 */
 export function assertSafeActionId(id: unknown): string {
-  const s = typeof id === 'string' ? id.trim() : ''
-  const bad = (msg: string): never => {
-    throw createAppError('CONFIG_INVALID', {
-      message: msg,
-      suggestion: '动作 id 不得包含 \\ / : * ? " < > | 或控制字符，长度 1–100',
-    })
-  }
-  if (!s || s.length > 100) bad('动作 id 非法（空或超过 100 字符）')
-  // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
-  if (/[\u0000-\u001f\u007f]/.test(s)) bad('动作 id 非法（含控制字符）')
-  if (/[\\/:*?"<>|]/.test(s)) bad('动作 id 非法（含非法字符）')
-  return s
+  return assertSafeSlugId(id, '动作 id')
 }

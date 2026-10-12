@@ -10,7 +10,13 @@ export interface FuzzyResult {
   indices: number[]
 }
 
-const EMPTY: FuzzyResult = { score: 0, indices: [] }
+/**
+ * 空 query 返回全新对象：共享常量曾存在被调用方改写 indices 的全局污染风险 —
+ * 每次新建的成本可忽略（review 0.1.2 根治）。
+ */
+function emptyResult(): FuzzyResult {
+  return { score: 0, indices: [] }
+}
 
 function isWordBoundary(text: string, index: number): boolean {
   if (index === 0) return true
@@ -24,7 +30,7 @@ function isWordBoundary(text: string, index: number): boolean {
  */
 export function fuzzyMatch(query: string, text: string): FuzzyResult | null {
   const q = query.trim().toLowerCase()
-  if (q === '') return EMPTY
+  if (q === '') return emptyResult()
   const t = text.toLowerCase()
   const indices: number[] = []
   let score = 0

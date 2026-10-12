@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { defaultConfig, appSettingsSchema, uiStateFileSchema } from '../src/config-schema'
+import {
+  defaultConfig,
+  appSettingsSchema,
+  uiStateFileSchema,
+  distrosFileSchema,
+  networkFileSchema,
+} from '../src/config-schema'
 import { migrateConfig } from '../src/config-migrations'
 import { sanitizeWithSchema } from '../src/schema-sanitize'
 import { DEFAULT_BACKUP_KEEP, DEFAULT_POLL_INTERVAL_MS } from '../src/constants'
@@ -96,7 +102,7 @@ describe('migrations', () => {
     expect(future.general.accent).toBe('ocean')
   })
 
-  it('迁移链不完整时不假盖章（核验修复）', () => {
+  it('迁移链不完整时不假盖章（fail-safe 补测 — review 0.1.2）', () => {
     // 输入已达目标版本：原样保留，不多次迁移
     const done = migrateConfig(
       'settings',
@@ -105,6 +111,49 @@ describe('migrations', () => {
     ) as any
     expect(done.$schemaVersion).toBe(2)
     expect(done.general.accent).toBe('ocean')
+
+    // 目标版本超出链长度（链不完整）：迁移到链条尽头后**删除版本戳**，决不给假盖章
+    const beyond = migrateConfig('settings', { $schemaVersion: 1, general: {} }, 3) as any
+    expect(beyond.$schemaVersion).toBeUndefined()
+    expect(beyond.general.accent).toBe('aurora') // 链条能到的一步已如实执行
+  })
+})
+
+describe('config schema 加固（review 0.1.2）', () => {
+  it('distroMeta.name 接入执行侧同名断言（控制字符/非法形态拒绝）', () => {
+    const bad = distrosFileSchema.safeParse({
+      $schemaVersion: 1,
+      distros: [{ name: 'a\u0000b' }],
+    })
+    expect(bad.success).toBe(false)
+    const ok = distrosFileSchema.safeParse({
+      $schemaVersion: 1,
+      distros: [{ name: 'Ubuntu-22.04' }],
+    })
+    expect(ok.success).toBe(true)
+  })
+
+  it('portForwarding 重复 id 拒绝（执行白名单键必须唯一）', () => {
+    const dup = networkFileSchema.safeParse({
+      $schemaVersion: 1,
+      portForwarding: [
+        { id: 'dup', distro: 'U', listenPort: 1, connectPort: 1 },
+        { id: 'dup', distro: 'U', listenPort: 2, connectPort: 2 },
+      ],
+    })
+    expect(dup.success).toBe(false)
+    if (!dup.success) {
+      // 失败原因必须来自 id 唯一性 refine，而非其它必填缺失
+      expect(dup.error.issues.some((i) => /id 重复/.test(i.message))).toBe(true)
+    }
+    const ok = networkFileSchema.safeParse({
+      $schemaVersion: 1,
+      portForwarding: [
+        { id: 'a', distro: 'U', listenPort: 1, connectPort: 1 },
+        { id: 'b', distro: 'U', listenPort: 2, connectPort: 2 },
+      ],
+    })
+    expect(ok.success).toBe(true)
   })
 })
 

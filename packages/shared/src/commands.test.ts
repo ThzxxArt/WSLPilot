@@ -19,23 +19,36 @@ import { formatBytes } from './format'
 describe('formatCommand', () => {
   it('quotes args containing spaces and leaves simple args bare', () => {
     expect(formatCommand('wsl.exe', ['-e', 'ls'])).toBe('wsl.exe -e ls')
+    // PowerShell 单引号引用：无特殊字符的参数（含纯 Windows 路径）原样
     expect(formatCommand('wsl.exe', ['--export', 'Ubuntu 22', 'C:\\my dir\\a.tar'])).toBe(
-      'wsl.exe --export "Ubuntu 22" "C:\\my dir\\a.tar"',
+      "wsl.exe --export 'Ubuntu 22' 'C:\\my dir\\a.tar'",
+    )
+    expect(formatCommand('wsl.exe', ['--export', 'U', 'C:\\b\\u.tar'])).toBe(
+      'wsl.exe --export U C:\\b\\u.tar',
     )
   })
 
-  it('escapes embedded quotes', () => {
-    expect(formatCommand('x', ['a"b'])).toBe('x "a\\"b"')
+  it('escapes embedded quotes (PowerShell 单引号内双引号是字面量)', () => {
+    expect(formatCommand('x', ['a"b'])).toBe(`x 'a"b'`)
+    expect(formatCommand('x', ["a'b"])).toBe("x 'a''b'")
+  })
+
+  it('cmd 元字符触发引用（复制执行不再注入/错误展开 — review 0.1.2 根治）', () => {
+    expect(formatCommand('wsl.exe', ['a&b'])).toBe("wsl.exe 'a&b'")
+    expect(formatCommand('wsl.exe', ['%PATH%'])).toBe("wsl.exe '%PATH%'")
+    expect(formatCommand('wsl.exe', ['a|b'])).toBe("wsl.exe 'a|b'")
+    expect(formatCommand('wsl.exe', ['a$(x)'])).toBe("wsl.exe 'a$(x)'")
+    expect(formatCommand('wsl.exe', [''])).toBe("wsl.exe ''")
   })
 })
 
 describe('preview commands (display only)', () => {
   it('previewExportCommand appends --vhd for vhd format', () => {
     expect(previewExportCommand({ name: 'U', path: 'C:\\b\\u.tar', format: 'tar' })).toBe(
-      'wsl.exe --export U "C:\\b\\u.tar"',
+      'wsl.exe --export U C:\\b\\u.tar',
     )
     expect(previewExportCommand({ name: 'U', path: 'C:\\b\\u.vhdx', format: 'vhd' })).toBe(
-      'wsl.exe --export U "C:\\b\\u.vhdx" --vhd',
+      'wsl.exe --export U C:\\b\\u.vhdx --vhd',
     )
     expect(previewExportCommand({ name: 'U', path: '/tmp/u.tar', format: 'tar' })).toBe(
       'wsl.exe --export U /tmp/u.tar',
@@ -52,7 +65,7 @@ describe('preview commands (display only)', () => {
         version: 2,
         inPlace: false,
       }),
-    ).toBe('wsl.exe --import N "D:\\N" "D:\\a.tar" --version 2')
+    ).toBe('wsl.exe --import N D:\\N D:\\a.tar --version 2')
 
     expect(
       previewImportCommand({
@@ -63,7 +76,7 @@ describe('preview commands (display only)', () => {
         version: 1,
         inPlace: false,
       }),
-    ).toBe('wsl.exe --import N "D:\\N" "D:\\a.vhdx" --vhd')
+    ).toBe('wsl.exe --import N D:\\N D:\\a.vhdx --vhd')
 
     expect(
       previewImportCommand({
@@ -74,7 +87,7 @@ describe('preview commands (display only)', () => {
         version: 2,
         inPlace: true,
       }),
-    ).toBe('wsl.exe --import-in-place N "D:\\a.vhdx"')
+    ).toBe('wsl.exe --import-in-place N D:\\a.vhdx')
 
     expect(
       previewImportCommand({
@@ -90,7 +103,7 @@ describe('preview commands (display only)', () => {
 
   it('previewMoveCommand shows --manage --move', () => {
     expect(previewMoveCommand({ name: 'U', path: 'D:\\U', terminateFirst: true })).toBe(
-      'wsl.exe --manage U --move "D:\\U"',
+      'wsl.exe --manage U --move D:\\U',
     )
     expect(previewMoveCommand({ name: 'U', path: '/mnt/d/U', terminateFirst: true })).toBe(
       'wsl.exe --manage U --move /mnt/d/U',

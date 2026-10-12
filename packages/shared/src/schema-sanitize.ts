@@ -63,7 +63,14 @@ export function sanitizeWithSchema<T extends z.ZodTypeAny>(
     }
 
     const retry = core.safeParse(out)
-    return (retry.success ? retry.data : out) as z.infer<T>
+    if (retry.success) return retry.data as z.infer<T>
+    // 逐字段清洗后仍不满足 schema（缺必填/字段形态异常）：整对象回退默认值。
+    // 不得把「不满足 z.infer 契约」的对象当合法配置返回（此前 return out 属类型谎言 — review 0.1.2 根治）
+    if (defaults !== undefined) {
+      const fallback = core.safeParse(defaults)
+      if (fallback.success) return fallback.data as z.infer<T>
+    }
+    return out as z.infer<T>
   }
 
   // 数组类型：逐项清洗；仍不合法的项丢弃（避免脏数据入库）

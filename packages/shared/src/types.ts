@@ -244,6 +244,11 @@ export interface TaskProgress {
   message: string
   logLine?: string
   status: TaskStatus
+  /**
+   * 失败原因（仅终态携带；task-runner settle 写入真实 error）。
+   * 渲染层不得再用最后一条 message 冒充失败原因 — review 0.1.2 根治。
+   */
+  error?: string
 }
 
 /** 任务句柄；terminal 动作附带临时 PTY 会话 id 与目标发行版 */
@@ -370,6 +375,17 @@ export interface UpdateState {
   currentVersion: string
   /** 更新源（feed URL）；未配置发布源时为空 */
   feedUrl?: string
+}
+
+/**
+ * `wslconf:write` 返回（review 0.1.2 根治：文件已写入成功后，terminate 失败
+ * 不再让整次写入被当成失败 —— terminated:false + terminateError 如实上报）。
+ * terminateError 为可选字段，向后兼容旧消费方。
+ */
+export interface WslConfWriteResult {
+  terminated: boolean
+  /** 文件已写入但终止发行版失败时的原因（8 秒规则需重启才生效） */
+  terminateError?: string
 }
 
 /** 代码签名状态（M7 签名 + SmartScreen 说明） */

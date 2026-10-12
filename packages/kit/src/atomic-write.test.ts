@@ -76,6 +76,35 @@ describe('atomicWrite', () => {
     }
   })
 
+  it('覆盖已有文件时保留其权限 mode（review 0.1.2 根治）', async () => {
+    const file = join(dir, 'mode.jsonc')
+    await atomicWrite(file, 'v1')
+    await fs.chmod(file, 0o600)
+    await atomicWrite(file, 'v2')
+    expect(await fs.readFile(file, 'utf8')).toBe('v2')
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600)
+  })
+
+  it('EBUSY 指数退避重试 3 次后成功（50/150/450ms — review 0.1.2 根治）', async () => {
+    const file = join(dir, 'busy.jsonc')
+    const realRename = fs.rename.bind(fs)
+    let failures = 3
+    const spy = vi.spyOn(fs, 'rename').mockImplementation((async (a: never, b: never) => {
+      if (failures-- > 0) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' })
+      return realRename(a, b)
+    }) as never)
+    try {
+      await atomicWrite(file, 'ok-after-backoff')
+      expect(await fs.readFile(file, 'utf8')).toBe('ok-after-backoff')
+      // 首次 + 3 次重试 = 4 次调用
+      expect(spy).toHaveBeenCalledTimes(4)
+      const entries = await fs.readdir(dir)
+      expect(entries.filter((e) => e.includes('.tmp'))).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('非 EPERM 的 rename 失败不重试，且清理 tmp 并向上抛', async () => {
     const file = join(dir, 'hard-fail.jsonc')
     const spy = vi

@@ -2,6 +2,7 @@
  * 全局常量
  * 颜色 / 令牌一律来自 ./tokens.ts（唯一事实源）
  */
+import type { ConfigKeyOf } from './config-schema'
 import { ACCENT_MAPS } from './tokens'
 
 export {
@@ -13,7 +14,7 @@ export {
 
 export const APP_NAME = 'WSLPilot'
 
-/** 配置文件键 → 文件名 */
+/** 配置文件键 → 文件名（键集与 ConfigKeyOf 编译期绑定：漏配新键即报错 — review 0.1.2） */
 export const CONFIG_FILE_NAMES = {
   settings: 'settings.jsonc',
   distros: 'distros.jsonc',
@@ -21,7 +22,7 @@ export const CONFIG_FILE_NAMES = {
   network: 'network.jsonc',
   uiState: 'ui-state.jsonc',
   state: 'state.jsonc',
-} as const
+} as const satisfies Record<ConfigKeyOf, string>
 
 /** 配置备份保留份数 */
 export const CONFIG_BACKUP_KEEP = 3

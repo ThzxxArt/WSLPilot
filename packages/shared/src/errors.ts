@@ -52,7 +52,15 @@ export class WslPilotError extends Error implements AppError {
 }
 
 export function isAppError(e: unknown): e is AppError {
-  return typeof e === 'object' && e !== null && 'code' in e && 'message' in e && 'recoverable' in e
+  // 类型级校验（不能只查键存在）：伪造 `{ code, message, recoverable }` 形状的普通对象
+  // 若 message 非字符串，describeError 会返回非字符串 — review 0.1.2 加固
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    typeof (e as AppError).code === 'string' &&
+    typeof (e as AppError).message === 'string' &&
+    typeof (e as AppError).recoverable === 'boolean'
+  )
 }
 
 /** 错误码 → 默认中文文案与建议 */
@@ -129,7 +137,16 @@ function unknownMessage(detail: string): string {
 }
 
 export function createAppError(code: ErrorCode, overrides: Partial<AppError> = {}): WslPilotError {
-  const base = ERROR_CATALOG[code]
+  // 目录外 code（IPC 反序列化可携带任意字符串）不得解引用 undefined 崩溃：
+  // 按目录查不到时给出通用兜底文案 — review 0.1.2 根治
+  const catalog = ERROR_CATALOG as Record<
+    string,
+    { message: string; suggestion?: string; recoverable: boolean } | undefined
+  >
+  const base = catalog[code] ?? {
+    message: `发生未知错误：${String(code)}`,
+    recoverable: false,
+  }
   return new WslPilotError({
     code,
     message: overrides.message ?? base.message,

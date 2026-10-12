@@ -96,7 +96,7 @@ describe('netsh 参数与等价命令', () => {
 
   it('带空格的地址整体被引号包裹（参数数组语义不变）', () => {
     const cmd = previewNetshCommand({ ...RULE, listenAddress: 'host name' }, 'add')
-    expect(cmd).toContain('"listenaddress=host name"')
+    expect(cmd).toContain("'listenaddress=host name'")
   })
 })
 
@@ -144,6 +144,26 @@ describe('parsePortProxyShow', () => {
   it('越界端口的行被丢弃', () => {
     expect(parsePortProxyShow('0.0.0.0 70000 127.0.0.1 1')).toEqual([])
     expect(parsePortProxyShow('0.0.0.0 0 127.0.0.1 1')).toEqual([])
+  })
+
+  it('v6 区段数据行标 v6tov6（不再硬编码 v4tov4 — review 0.1.2 根治）', () => {
+    const raw = [
+      'Listen on ipv4:             Connect to ipv4:',
+      'Address            Port        Address            Port',
+      '--------------- ----------  --------------- ----------',
+      '0.0.0.0            3000        127.0.0.1          3000',
+      '',
+      'Listen on ipv6:             Connect to ipv6:',
+      'Address            Port        Address            Port',
+      '--------------- ----------  --------------- ----------',
+      '::                 8080        ::1                8080',
+    ].join('\n')
+    const parsed = parsePortProxyShow(raw)
+    expect(parsed).toHaveLength(2)
+    expect(parsed[0]!.kind).toBe('v4tov4')
+    expect(parsed[1]!.kind).toBe('v6tov6')
+    expect(parsed[1]!.listenAddress).toBe('::')
+    expect(parsed[1]!.listenPort).toBe(8080)
   })
 })
 
@@ -237,6 +257,45 @@ describe('代理助手', () => {
     expect(disabled.https).toBe('')
   })
 
+  it('resolveEffectiveProxy 解析多协议串并继承 ProxyOverride（review 0.1.2 根治）', () => {
+    const base = {
+      useWindowsProxy: true,
+      httpProxy: '',
+      httpsProxy: '',
+      noProxy: '',
+    }
+    // `http=…;https=…` 多协议串：逐协议解析，绝不整体当 URL
+    const multi = resolveEffectiveProxy(base, {
+      enabled: true,
+      server: 'http=127.0.0.1:7890;https=127.0.0.1:7891',
+    })
+    expect(multi.http).toBe('http://127.0.0.1:7890')
+    expect(multi.https).toBe('http://127.0.0.1:7891')
+
+    // 仅 http 段：https 回退 http
+    const httpOnly = resolveEffectiveProxy(base, {
+      enabled: true,
+      server: 'http=proxy:8080;socks=socks5://127.0.0.1:1080',
+    })
+    expect(httpOnly.http).toBe('http://proxy:8080')
+    expect(httpOnly.https).toBe('http://proxy:8080')
+
+    // ProxyOverride → noProxy 继承；`<local>` 映射为回环直连
+    const ovr = resolveEffectiveProxy(base, {
+      enabled: true,
+      server: 'proxy:8080',
+      override: '*.corp.local;<local>',
+    })
+    expect(ovr.noProxy).toBe('*.corp.local,localhost,127.0.0.1,::1')
+
+    // 本地 noProxy 显式值优先于系统 override
+    const local = resolveEffectiveProxy(
+      { ...base, noProxy: 'localhost' },
+      { enabled: true, server: 'proxy:8080', override: '*.corp.local' },
+    )
+    expect(local.noProxy).toBe('localhost')
+  })
+
   it('buildProxyScript 生成 export 行并防引号闭合', () => {
     const script = buildProxyScript({ http: "http://a'b:1", https: '', noProxy: 'localhost' })
     expect(script).toContain(`export http_proxy='http://a'\\''b:1'`)
@@ -306,6 +365,18 @@ describe('地址与端口合法性', () => {
     expect(isValidIpv4('1.2.3')).toBe(false)
     expect(isValidIpv6('::1')).toBe(true)
     expect(isValidIpv6('fe80::1')).toBe(true)
+    expect(isValidIpv6('::')).toBe(true)
+    expect(isValidIpv6('fe80::')).toBe(true)
+    expect(isValidIpv6('1:2:3:4:5:6:7:8')).toBe(true)
+    expect(isValidIpv6('::ffff:192.168.1.1')).toBe(true)
+    expect(isValidIpv6('[::1]')).toBe(true)
+    expect(isValidIpv6('fe80::1%eth0')).toBe(true)
+    // 收紧（review 0.1.2）：字符集宽松放行的非法形态一律拒绝
+    expect(isValidIpv6(':::')).toBe(false)
+    expect(isValidIpv6('1:2:')).toBe(false)
+    expect(isValidIpv6('1:2:3:4')).toBe(false)
+    expect(isValidIpv6('12345::1')).toBe(false)
+    expect(isValidIpv6('1:2:3:4:5:6:7:8:9')).toBe(false)
     expect(isValidIpv6('abc')).toBe(false)
   })
 

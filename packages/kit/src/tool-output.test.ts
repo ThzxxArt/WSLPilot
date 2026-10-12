@@ -44,4 +44,37 @@ describe('decodeToolOutput', () => {
   it('Uint8Array 也可接受', () => {
     expect(decodeToolOutput(new Uint8Array([0x61, 0x62]))).toBe('ab')
   })
+
+  it('BOM 优先于 NUL 启发式：纯 CJK UTF-16LE（无 NUL 结构）也能正确解码', () => {
+    const text = '中文测试'
+    const body = Buffer.from(text, 'utf16le')
+    // 确认该内容确实没有 ASCII/NUL 结构（启发式本会失手）
+    expect(body.includes(0)).toBe(false)
+    const withBom = Buffer.concat([Buffer.from([0xff, 0xfe]), body])
+    expect(decodeToolOutput(withBom)).toBe(text)
+  })
+
+  it('FE FF → UTF-16BE（review 0.1.2 BOM 优先）', () => {
+    const text = '请求的操作需要提升'
+    const le = Buffer.from(text, 'utf16le')
+    const be = Buffer.alloc(le.length)
+    for (let i = 0; i + 1 < le.length; i += 2) {
+      be[i] = le[i + 1]!
+      be[i + 1] = le[i]!
+    }
+    expect(decodeToolOutput(Buffer.concat([Buffer.from([0xfe, 0xff]), be]))).toBe(text)
+    // 带 ASCII 的 BE 输出
+    const asciiBe = Buffer.from([0xfe, 0xff, 0x00, 0x4e, 0x00, 0x41, 0x00, 0x4d, 0x00, 0x45])
+    expect(decodeToolOutput(asciiBe)).toBe('NAME')
+  })
+
+  it('非 UTF-16 文本中的合法 NUL 不被删除（NUL 清理只在 UTF-16 判命中后）', () => {
+    // 位置结构不满足 UTF-16LE 启发式（偶数位 NUL 多于奇数位），走严格 UTF-8
+    const buf = Buffer.from([0x61, 0x62, 0x00, 0x63])
+    expect(decodeToolOutput(buf)).toBe('ab\u0000c')
+  })
+
+  it('UTF-8 BOM 被剥离', () => {
+    expect(decodeToolOutput(Buffer.from([0xef, 0xbb, 0xbf, 0x68, 0x69]))).toBe('hi')
+  })
 })

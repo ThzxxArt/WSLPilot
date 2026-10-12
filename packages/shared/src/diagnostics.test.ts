@@ -42,6 +42,34 @@ describe('诊断脱敏（M7 §15.3）', () => {
     expect(out).toContain('***')
   })
 
+  it('user-only userinfo 打码（scheme://token@host，GitHub PAT / 预签名 URL 常见形态）', () => {
+    const out = sanitizeDiagnosticsText('https://ghp_Abc123Xyz@github.com/repo', 'C:\\nope')
+    expect(out).toBe('https://***@github.com/repo')
+    expect(out).not.toContain('ghp_Abc123Xyz')
+  })
+
+  it('鉴权头打码（Authorization: Bearer / Basic）', () => {
+    const out = sanitizeDiagnosticsText(
+      ['Authorization: Bearer eyJhbGciOi.payload.sig', 'Proxy-Authorization: Basic dXNlcg=='].join(
+        '\n',
+      ),
+      'C:\\nope',
+    )
+    expect(out).not.toContain('eyJhbGciOi.payload.sig')
+    expect(out).not.toContain('dXNlcg==')
+    expect(out).toContain('***')
+  })
+
+  it('私钥 / 客户端密钥打码（含空格形态的值整体打码）', () => {
+    const out = sanitizeDiagnosticsText(
+      '{"private_key": "-----BEGIN KEY-----abc", "client_secret": "shh-99"}',
+      'C:\\nope',
+    )
+    expect(out).not.toContain('BEGIN KEY')
+    expect(out).not.toContain('shh-99')
+    expect(out).toContain('***')
+  })
+
   it('主目录变体经脱敏可观测：正/反斜杠与 JSON 转义形态全覆盖（模块内 homeDirVariants）', () => {
     const out = sanitizeDiagnosticsText(
       ['p: C:/Users/me/a', 'q: C:\\Users\\me\\b', 'j: C:\\\\Users\\\\me/c'].join('\n'),

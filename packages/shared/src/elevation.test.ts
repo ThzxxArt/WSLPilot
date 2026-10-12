@@ -140,11 +140,15 @@ describe('提权操作白名单（M7 §14.3）', () => {
     expect(() => buildElevationHelperPayload([])).toThrow(/不能为空/)
   })
 
-  it('isElevationError 识别中英文提权失败', () => {
+  it('isElevationError 识别中英文提权失败；不误判 Linux 风格 permission denied（review 0.1.2 收窄）', () => {
     expect(isElevationError('The requested operation requires elevation')).toBe(true)
     expect(isElevationError('请求的操作需要提升(作为管理员运行)')).toBe(true)
     expect(isElevationError('Access is denied.')).toBe(true)
     expect(isElevationError('拒绝访问')).toBe(true)
+    expect(isElevationError('This task requires elevated privileges')).toBe(true)
+    // Linux 风格权限错误（发行版内目录不可写等）不再触发无谓 UAC
+    expect(isElevationError('permission denied')).toBe(false)
+    expect(isElevationError('bash: /root/x: Permission denied')).toBe(false)
     expect(isElevationError('ok')).toBe(false)
     expect(ELEVATION_SUGGESTION).toContain('管理员')
   })

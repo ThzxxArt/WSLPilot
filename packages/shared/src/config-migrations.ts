@@ -3,8 +3,9 @@ import type { ConfigKeyOf } from './config-schema'
 /** 配置版本迁移链：旧结构 → 新结构（模块内类型，外部经 migrateConfig 消费） */
 type MigrationFn = (old: Record<string, unknown>) => Record<string, unknown>
 
-/** 迁移链表（模块内常量，外部经 migrateConfig 消费） */
-const migrations: Record<string, MigrationFn[]> = {
+/** 迁移链表（模块内常量，外部经 migrateConfig 消费）。
+ *  `Record<ConfigKeyOf, …>` 让新增配置键漏配迁移链在编译期即报错（此前 `?? []` 静默兜底）。 */
+const migrations: Record<ConfigKeyOf, MigrationFn[]> = {
   settings: [
     // v1 → v2: 增加 accent / launchAtLogin / reduceMotion
     (v1) => ({
@@ -37,7 +38,7 @@ export function migrateConfig<K extends ConfigKeyOf>(
   data: Record<string, unknown>,
   toVersion: number,
 ): Record<string, unknown> {
-  const chain = migrations[key] ?? []
+  const chain = migrations[key]
   let current = { ...data }
   let version = typeof current.$schemaVersion === 'number' ? (current.$schemaVersion as number) : 1
   if (version <= 0) version = 1

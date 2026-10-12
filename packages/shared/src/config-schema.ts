@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { assertSafeRuleId, MAX_PORT_FORWARD_RULES } from './network'
+import { assertSafeDistroName } from './errors'
 import { DEFAULT_BACKUP_KEEP, DEFAULT_POLL_INTERVAL_MS } from './constants'
 
 /** settings.jsonc schema — v2 */
@@ -57,7 +58,21 @@ export const appSettingsSchema = z.object({
 
 /** distros.jsonc */
 export const distroMetaSchema = z.object({
-  name: z.string().min(1),
+  // name 是稳定键：接入执行侧同名断言（此前仅 min(1)，含控制字符/非法形态的名字可入库 —
+  // 之后所有按名调用 wsl.exe 的入口都会带着脏名字 — review 0.1.2 根治）
+  name: z
+    .string()
+    .min(1)
+    .superRefine((s, ctx) => {
+      try {
+        assertSafeDistroName(s)
+      } catch (e) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: e instanceof Error ? e.message : '发行版名非法',
+        })
+      }
+    }),
   alias: z.string().default(''),
   tags: z.array(z.string()).default([]),
   color: z.string().default(''),
@@ -124,6 +139,20 @@ export const networkFileSchema = z.object({
       }),
     )
     .max(MAX_PORT_FORWARD_RULES)
+    // id 唯一性：重复 id 会让执行白名单键语义歧义（findRule 只认第一条，第二条永远不可达）
+    .superRefine((rules, ctx) => {
+      const seen = new Set<string>()
+      rules.forEach((r, idx) => {
+        if (seen.has(r.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `转发规则 id 重复：${r.id}`,
+            path: [idx, 'id'],
+          })
+        }
+        seen.add(r.id)
+      })
+    })
     .default([]),
   proxy: z
     .object({

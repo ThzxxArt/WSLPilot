@@ -72,12 +72,32 @@ describe('ipc-schema', () => {
   it('rejects prototype pollution keys in patch', () => {
     const evil = JSON.parse('{"__proto__":{"polluted":true}}')
     expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: evil }])).toThrow()
-    const evil2 = JSON.parse('{"constructor":{"x":1}}')
+    const evil2 = JSON.parse('{"a":{"constructor":{"x":1}}}')
     expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: evil2 }])).toThrow()
     // 正常 patch 可通过
-    expect(
+    expect(() =>
       parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: { general: {} } }]),
-    ).toBeTruthy()
+    ).not.toThrow()
+  })
+
+  it('深度超限 fail-closed：深层 __proto__ 同样拒绝（review 0.1.2 纵深防御）', () => {
+    const wrapDepth = (depth: number, leaf: unknown): Record<string, unknown> => {
+      const root: Record<string, unknown> = {}
+      let cur = root
+      for (let i = 0; i < depth; i++) {
+        const next: Record<string, unknown> = {}
+        cur.n = next
+        cur = next
+      }
+      cur.n = leaf
+      return root
+    }
+    // 21 层包裹后的 __proto__：超出深度 20 无法证明干净 → 拒绝
+    const deepEvil = wrapDepth(21, JSON.parse('{"__proto__":{"x":1}}'))
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: deepEvil }])).toThrow()
+    // 浅层合法深嵌套不受影响
+    const okDeep = wrapDepth(15, { value: 1 })
+    expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: okDeep }])).not.toThrow()
   })
 
   it('every multi-arg IPC channel that is used in M1+M2 has a schema', () => {

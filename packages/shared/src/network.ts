@@ -3,11 +3,12 @@
  * 等价命令行与真实执行同源构建（设计书 §9.6），主/渲染共享，杜绝各写一份。
  */
 import { formatCommand } from './commands'
-import { createAppError } from './errors'
+import { assertSafeSlugId } from './slug'
 import type { NetworkMode, PortForwardRule, PortProxyEntry, ProxyConfig } from './types'
 
-/** netsh portproxy 隧道类型：仅支持 TCP v4→v4（udp 规则只在配置里记录意图）；模块内常量，行为经 parsePortProxyShow/build* 可观测 */
+/** netsh portproxy 隧道类型：TCP v4→v4 与 v6→v6（udp 规则只在配置里记录意图）；数据行 kind 随区段判定 */
 const PORTPROXY_KIND = 'v4tov4' as const
+const PORTPROXY_KIND_V6 = 'v6tov6' as const
 
 /** 发行版内代理脚本路径（应用/清除代理的唯一落点） */
 export const PROXY_SCRIPT_PATH = '/etc/profile.d/wslpilot-proxy.sh'
@@ -15,26 +16,12 @@ export const PROXY_SCRIPT_PATH = '/etc/profile.d/wslpilot-proxy.sh'
 /** 转发规则条数上限（network.jsonc 写入约束） */
 export const MAX_PORT_FORWARD_RULES = 100
 
-const RULE_ID_BAD_CHARS = /[\\/:*?"<>|]/
-// eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
-
 /**
  * 转发规则 id 安全校验（执行白名单的键）：非空、≤100、无控制字符与文件名非法字符。
- * 与 `assertSafeActionId` 同一规则族：IPC 边界与执行边界必须一致。
+ * 与 `assertSafeActionId` 同一规则族：唯一实现收敛在 slug.ts（review 0.1.2）。
  */
 export function assertSafeRuleId(id: unknown): string {
-  const s = typeof id === 'string' ? id.trim() : ''
-  const bad = (msg: string): never => {
-    throw createAppError('CONFIG_INVALID', {
-      message: msg,
-      suggestion: '规则 id 不得包含 \\ / : * ? " < > | 或控制字符，长度 1–100',
-    })
-  }
-  if (!s || s.length > 100) bad('规则 id 非法（空或超过 100 字符）')
-  if (CONTROL_CHARS.test(s)) bad('规则 id 非法（含控制字符）')
-  if (RULE_ID_BAD_CHARS.test(s)) bad('规则 id 非法（含非法字符）')
-  return s
+  return assertSafeSlugId(id, '规则 id')
 }
 
 export interface PortProxyTarget {
@@ -91,11 +78,20 @@ export function previewNetshCommand(
 /**
  * 解析 `netsh interface portproxy show all` 输出。
  * 只认「地址 端口 地址 端口」四列数据行，表头随系统语言变化一律跳过（宽容解析）。
+ * 数据行 `kind` 随所在区段判定（`Listen on ipv4:` / `Listen on ipv6:`）：
+ * 旧实现把所有行硬编码为 v4tov4，v6 条目被误标（review 0.1.2 根治）。
  */
 export function parsePortProxyShow(raw: string): PortProxyEntry[] {
   const out: PortProxyEntry[] = []
+  let kind: string = PORTPROXY_KIND
   for (const line of String(raw ?? '').split(/\r?\n/)) {
-    const m = /^(\S+)\s+(\d{1,5})\s+(\S+)\s+(\d{1,5})\s*$/.exec(line.trim())
+    const t = line.trim()
+    if (/listen|侦听/i.test(t)) {
+      if (/ipv6/i.test(t)) kind = PORTPROXY_KIND_V6
+      else if (/ipv4/i.test(t)) kind = PORTPROXY_KIND
+      continue
+    }
+    const m = /^(\S+)\s+(\d{1,5})\s+(\S+)\s+(\d{1,5})\s*$/.exec(t)
     if (!m) continue
     const listenPort = Number(m[2])
     const connectPort = Number(m[4])
@@ -105,13 +101,13 @@ export function parsePortProxyShow(raw: string): PortProxyEntry[] {
       listenPort,
       connectAddress: m[3]!,
       connectPort,
-      kind: PORTPROXY_KIND,
+      kind,
     })
   }
   return out
 }
 
-/** 系统转发条目 ↔ 规则是否匹配（监听地址+端口即唯一键） */
+/** 系统转发条目 ↔ 规则是否匹配（四元组全等：监听地址/端口 + 转发地址/端口） */
 export function ruleMatchesEntry(rule: PortForwardRule, e: PortProxyEntry): boolean {
   return (
     rule.listenAddress === e.listenAddress &&
@@ -216,22 +212,60 @@ export interface EffectiveProxy {
 }
 
 /**
+ * 解析 Windows `ProxyServer` 注册表值。
+ * 真实形态有两种：单一 `host:port`，或**多协议串** `http=host:port;https=host:port;socks=…`。
+ * 旧实现把整串当单一 URL，产出 `http://http=127.0.0.1:7890` 垃圾地址 —
+ * 开启「跟随系统代理」会把垃圾代理写进发行版（review 0.1.2 根治）。
+ * `socks=` 对 HTTP(S) 代理环境变量无意义（curl/wget 不走 socks env），忽略。
+ */
+export function parseWindowsProxyServer(server: string): { http: string; https: string } {
+  const s = String(server ?? '').trim()
+  if (!s) return { http: '', https: '' }
+  if (!s.includes('=')) return { http: s, https: s }
+  const out = { http: '', https: '' }
+  for (const part of s.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq <= 0) continue
+    const key = part.slice(0, eq).trim().toLowerCase()
+    const value = part.slice(eq + 1).trim()
+    if (!value) continue
+    if (key === 'http') out.http = value
+    else if (key === 'https') out.https = value
+  }
+  return out
+}
+
+/** `ProxyOverride`（`*.local;10.*;<local>`）→ no_proxy 逗号串；`<local>` 映射为回环直连 */
+export function normalizeProxyOverride(override?: string): string {
+  const s = String(override ?? '').trim()
+  if (!s) return ''
+  return s
+    .split(/[;,]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => (t.toLowerCase() === '<local>' ? 'localhost,127.0.0.1,::1' : t))
+    .join(',')
+}
+
+/**
  * 解析生效代理：`useWindowsProxy` 时以 Windows 系统代理为回退，
  * 本地显式填写的值优先（用户意图永远压过系统默认）。
+ * 回退支持多协议串与 `ProxyOverride` 例外继承（review 0.1.2 根治）。
  */
 export function resolveEffectiveProxy(
   proxy: ProxyConfig,
-  windows?: { enabled: boolean; server: string } | null,
+  windows?: { enabled: boolean; server: string; override?: string } | null,
 ): EffectiveProxy {
   const http = String(proxy.httpProxy ?? '').trim()
   const https = String(proxy.httpsProxy ?? '').trim()
   const noProxy = String(proxy.noProxy ?? '').trim()
   if (proxy.useWindowsProxy && windows?.enabled) {
-    const base = normalizeProxyUrl(windows.server)
+    const parsed = parseWindowsProxyServer(windows.server)
     return {
-      http: normalizeProxyUrl(http || base),
-      https: normalizeProxyUrl(https || base),
-      noProxy,
+      http: normalizeProxyUrl(http || parsed.http || ''),
+      https: normalizeProxyUrl(https || parsed.https || parsed.http || ''),
+      // 未显式配置 noProxy 时继承系统例外（此前完全忽略 ProxyOverride）
+      noProxy: noProxy || normalizeProxyOverride(windows.override),
     }
   }
   return {
@@ -287,9 +321,43 @@ export function isValidIpv4(value: string): boolean {
   return true
 }
 
+/**
+ * IPv6 地址校验（含压缩 `::`、尾部 IPv4、`%zone` 后缀）。
+ * 旧实现只查字符集与含冒号，`:::` / `1:2:` / 四段 `1:2:3:4` 等均可通过 —
+ * 非法地址进入 netsh 参数（review 0.1.2 根治）。规则：
+ * - `::` 至多一次，压缩处折叠任意组；无 `::` 时必须恰好 8 组（尾部 IPv4 记 2 组）
+ */
 export function isValidIpv6(value: string): boolean {
-  const s = value.trim()
-  return s.includes(':') && /^[0-9a-fA-F:.%[\]]+$/.test(s)
+  const raw0 = value.trim()
+  // 兼容带方括号形态（部分工具/文档以 `[::1]` 表示地址）
+  const raw =
+    raw0.length > 2 && raw0.startsWith('[') && raw0.endsWith(']') ? raw0.slice(1, -1) : raw0
+  if (!raw.includes(':')) return false
+  const zoneIdx = raw.indexOf('%')
+  const addr = zoneIdx >= 0 ? raw.slice(0, zoneIdx) : raw
+  if (zoneIdx >= 0 && !/^[0-9a-zA-Z]{1,32}$/.test(raw.slice(zoneIdx + 1))) return false
+  const sides = addr.split('::')
+  if (sides.length > 2) return false
+  const parseSide = (side: string): { ok: boolean; count: number } => {
+    if (side === '') return { ok: true, count: 0 }
+    const groups = side.split(':')
+    let count = 0
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i]!
+      if (i === groups.length - 1 && isValidIpv4(g)) {
+        count += 2
+        continue
+      }
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return { ok: false, count: 0 }
+      count += 1
+    }
+    return { ok: true, count }
+  }
+  const left = parseSide(sides[0] ?? '')
+  const right = parseSide(sides[1] ?? '')
+  if (!left.ok || !right.ok) return false
+  const total = left.count + right.count
+  return sides.length === 2 ? total <= 7 : total === 8
 }
 
 /** 监听/转发地址：IPv4 / IPv6 / 主机名（netsh 需要具体地址，不接受空） */

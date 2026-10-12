@@ -1,10 +1,27 @@
 /**
  * 极简 ZIP 写入器（诊断包打包用）— 无第三方依赖。
- * - DEFLATE 压缩（zlib.deflateRawSync）+ CRC32
+ * - DEFLATE 压缩（异步 zlib.deflateRaw，review 0.1.2 根治：同步 deflateRawSync 会阻塞主进程）
  * - 只写不读：诊断包是一次性产物，解压由系统工具完成
  * - 文件名按 UTF-8 写入（EFS 标志位 bit 11），中文名安全
  */
-import { deflateRawSync } from 'node:zlib'
+import { deflateRaw } from 'node:zlib'
+import { promisify } from 'node:util'
+
+const deflateRawAsync = promisify(deflateRaw) as (buf: Buffer) => Promise<Buffer>
+
+/** ZIP 格式硬上限（review 0.1.2：超限必须可读报错，不得静默溢出 16/32 位字段） */
+export const ZIP_MAX_ENTRIES = 0xffff
+export const ZIP_MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+
+/** 容量守卫（独立导出便于真实单测）：条目数 / 合计字节超 ZIP 格式上限即抛可读错误 */
+export function assertZipCapacity(entryCount: number, totalBytes: number): void {
+  if (entryCount > ZIP_MAX_ENTRIES) {
+    throw new Error(`zip 条目数超上限（${entryCount} > ${ZIP_MAX_ENTRIES}）`)
+  }
+  if (totalBytes > ZIP_MAX_TOTAL_BYTES) {
+    throw new Error('zip 合计体积超 4GB 上限，无法生成')
+  }
+}
 
 export interface ZipEntry {
   /** 包内路径（`/` 分隔；拒绝绝对路径与 `..` 逃逸） */
@@ -34,16 +51,22 @@ export function crc32(buf: Buffer | Uint8Array): number {
   return (c ^ -1) >>> 0
 }
 
-/** DOS 时间/日期（ZIP 时间戳格式） */
+/**
+ * DOS 时间/日期（ZIP 时间戳格式）。
+ * review 0.1.2 根治：DOS 日期起点是 1980 —— 早于 1980/非法日期必须 clamp 到 1980-01-01，
+ * 原实现负数按位与 0x7f 会回绕成 2098 年。
+ */
 function dosDateTime(at: Date): { time: number; date: number } {
+  let d = at
+  if (Number.isNaN(d.getTime()) || d.getFullYear() < 1980) {
+    d = new Date(1980, 0, 1, 0, 0, 0)
+  }
   const time =
-    ((at.getHours() & 0x1f) << 11) |
-    ((at.getMinutes() & 0x3f) << 5) |
-    ((at.getSeconds() / 2) & 0x1f)
+    ((d.getHours() & 0x1f) << 11) | ((d.getMinutes() & 0x3f) << 5) | ((d.getSeconds() / 2) & 0x1f)
   const date =
-    (((at.getFullYear() - 1980) & 0x7f) << 9) |
-    (((at.getMonth() + 1) & 0x0f) << 5) |
-    (at.getDate() & 0x1f)
+    (((d.getFullYear() - 1980) & 0x7f) << 9) |
+    (((d.getMonth() + 1) & 0x0f) << 5) |
+    (d.getDate() & 0x1f)
   return { time, date }
 }
 
@@ -67,20 +90,29 @@ export function assertSafeZipName(name: string): string {
 }
 
 /**
- * 生成 ZIP 字节流。
- * 条目按传入顺序写入；重名条目按 ZIP 允许（解压时后者覆盖），调用方自行保证唯一。
+ * 生成 ZIP 字节流（异步）：
+ * - 条目按传入顺序写入；重名条目按 ZIP 允许（解压时后者覆盖），调用方自行保证唯一
+ * - 容量守卫（review 0.1.2）：条目数 / 合计字节超 ZIP 格式上限时抛可读错误
  */
-export function createZip(entries: readonly ZipEntry[], at: Date = new Date()): Buffer {
+export async function createZip(
+  entries: readonly ZipEntry[],
+  at: Date = new Date(),
+): Promise<Buffer> {
+  assertZipCapacity(entries.length, 0)
   const { time, date } = dosDateTime(at)
   const locals: Buffer[] = []
   const centrals: Buffer[] = []
   let offset = 0
+  let totalBytes = 0
 
   for (const entry of entries) {
     const name = assertSafeZipName(entry.name)
     const nameBuf = Buffer.from(name, 'utf8')
     const raw = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, 'utf8')
-    const compressed = raw.length > 0 ? deflateRawSync(raw) : Buffer.alloc(0)
+    // 容量守卫：写头部前先校验，避免 32 位 offset/尺寸字段静默溢出
+    totalBytes += raw.length + nameBuf.length + 76 // 76 = local(30) + central(46) 头部合计
+    assertZipCapacity(entries.length, totalBytes)
+    const compressed = raw.length > 0 ? await deflateRawAsync(raw) : Buffer.alloc(0)
     const useDeflate = raw.length > 0 && compressed.length < raw.length
     const method = useDeflate ? 8 : 0
     const data = useDeflate ? compressed : raw
