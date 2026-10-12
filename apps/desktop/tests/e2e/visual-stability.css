@@ -37,8 +37,12 @@
   overflow: hidden;
 }
 
-/* 发行版卡片网格固定高度：0–2 行卡片都占同一高度，下方「快捷操作」不再位移 */
-.cards {
+/* 发行版列表区固定高度：卡片（本机）/ 空态（CI runner 无发行版）/ 骨架屏三种数据状态
+   都占同一高度并被 mask —— 无论运行机器上有没有 WSL 发行版，下方「快捷操作」不位移、
+   mask 区域完全一致（review：CI 首跑空态分支 40% 假红根治） */
+.cards,
+.skeleton-cards,
+.empty-wrap {
   height: 380px;
   overflow: hidden;
 }

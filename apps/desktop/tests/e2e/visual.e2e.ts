@@ -37,10 +37,12 @@ function dynamicMasks(window: import('@playwright/test').Page) {
     // 状态栏：时钟与全局版本
     window.locator('.statusbar .right'),
     window.locator('.statusbar .muted'),
-    // 发行版卡片区（数量随本机变化；高度由 visual-stability.css 固定）
+    // 发行版卡片区（数量随本机变化；高度由 visual-stability.css 固定为 380px）
     window.locator('.cards'),
     window.locator('.grid'),
     window.locator('.skeleton-cards'),
+    // 空态容器（CI runner 无 WSL 发行版时走此分支——与卡片区同尺寸掩码，保证两分支渲染等价）
+    window.locator('.empty-wrap'),
     // 网络页：系统真实转发表（条数与内容随机器变化）
     window.locator('.system-card .panel-title'),
     window.locator('.system-card .table'),
