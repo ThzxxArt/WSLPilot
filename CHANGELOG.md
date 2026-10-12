@@ -5,6 +5,149 @@
 
 > **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
 
+## [0.1.2] - 2026-10-12
+
+### Notes
+
+- **0.1.2 为第二轮质量收敛版**：全量深读缺陷根治 + 工程护栏加固，无新增功能；
+  功能增量（引导页 / `.wslconfig` 编辑 / 文件双栏等）留待 0.2.0。
+- 修复主题：数据安全（跨发行版串写 / 丢编辑 / 守卫旁路 / 编辑残留）、并发（写队列 / 代际 /
+  名额预留 / 取消透传）、门禁一致性（隐式启动封杀补全）、安全（命令注入 / 脱敏 / 提权误判 /
+  IPC 纵深防御）、健壮性（日志 / 压缩 / 原子写 / 缓存 / 编码）、UI 体验（全局错误兜底 /
+  无障碍 / 令牌化）、工程护栏（CI / 覆盖率分母 / E2E / 视觉掩码）。
+- 实测：单测 1068 条（lines 95.88% / branches 88.2% / functions 95.48%）、组件 300 用例
+  （ui 桶 98.95/89.71/92.86 → 地板 96/87/90；renderer 桶 89.96/84.11/59.74 → 地板 87/82/57）、
+  E2E smoke 2 条 + 视觉 2 条；「等价命令复制执行」文案统一引导 **管理员 PowerShell**。
+
+### Fixed
+
+- **数据安全（跨发行版串写 / 丢编辑 / 守卫旁路 / 编辑残留）**
+  - 文件面板跨发行版串写根治：载入文件记录所属发行版，保存前校验归属（不一致拒绝写回）；
+    切换发行版被取消时回退父级选择（`restore-distro`），不再把编辑留在未载入的新发行版上；
+    目录加载代际守卫（快速进出目录旧响应不覆盖新目录）；写盘在途冻结导航/返回/刷新；
+    「超限截断只展示前缀」文案与实现对齐（只读渲染前缀，不再只提示不展示）
+  - 详情弹窗守卫旁路根治：版本转换 / 注销此前直接关窗绕过脏守卫静默丢弃未保存编辑，
+    现先过 `requestClose`（wsl.conf + 文件页同语义），通过后才执行；关窗守卫加在途重入锁
+    （连点 Esc / 遮罩只弹一次确认）
+  - 页签与编辑残留：同一详情弹窗内切换发行版保持当前页签（此前每次变化都强制回「概览」，
+    现仅关闭→打开回概览）；
+    打开 / 切换发行版复位元数据编辑态（不再用旧发行版编辑值写回）；详情加载代际守卫
+    （旧的注册表详情 / 指标 / 最近任务响应不覆盖新发行版）
+  - WslConfPanel「重新载入」先过脏守卫（此前直接 load 静默丢编辑）；保存成功刷新发行版 store
+    （autoShutdown 终止后列表运行状态不再失真）
+  - 设置防抖丢编辑：SettingsView 文本类设置 400ms 防抖卸载时 flush（切页即走不再丢最后一次编辑）
+  - XtermPane 卸载竞态：`await host()` 期间卸载的续体二次校验（不再向已卸载面板 `open()`，
+    杜绝泄漏与 unhandled rejection）；`syncPtySize` 单飞（并发尺寸同步只发一次 IPC）；
+    尺寸同步失败提示节流（同一失败只提示一次）
+  - 并发防重：备份向导 / 安装向导启动锁（双击不并行拉起两个长任务）、详情转换与注销
+    in-flight 锁、任务取消按钮在途禁用、备份日志抽屉只渲染尾部 ≤500 行并提示截断
+  - 发行版 busy key 与 `byName` 查找大小写归一（WSL 名不区分大小写，`ubuntu` 与 `Ubuntu`
+    的按钮 loading 不再对不上）
+- **并发（RMW 写队列 / 代际 / 名额预留 / 取消透传）**
+  - network / actions store 写队列：upsert / remove / setEnabled 的「读→改→写」在队列轮到时
+    才读快照，并发 RMW 丢更新根治；删除返回被删快照，连续删除后各自撤销恢复各自
+  - devices store 代际守卫（重叠 load 旧响应晚到不覆盖新状态）；network `proxyApply` 代际
+    守卫（写 A 发行版的迟到脚本结果不覆盖后发起查看的 B 脚本）；`loadStatus` 增加 silent 模式
+  - terminal store 创建名额预留：同步段占位 + `creatingDistros` 名单，TOCTOU 封死
+    （并发创建不突破 maxSessions）；同发行版并发创建去重（双击只发起一次）
+  - 任务失败 / 取消原因端到端透传：`TaskProgress.error` 新增字段，渲染层不再用最后一条
+    message 冒充失败原因；终态重复事件不后拨 `finishedAt`
+  - wslconf 同发行版读-写轻量串行（并发读不拿旧内容做整体覆盖）
+- **运行门禁（隐式启动封杀补全）**
+  - action-runner 探测先于运行门禁：`probeUserEnv`（`wsl -d X -e sh -c`）在探测前
+    `assertRunning`，不再由探测隐式拉起发行版（handler 门禁保留为双保险）
+  - IPC 装配 wsl 依赖必填：`ctx.wsl?.`（装配缺失时静默绕过门禁）形态移除
+    （actions / fs / pty / network）
+  - fs `revealInExplorer` 补门禁（此前静默失效）；network proxy 三通道
+    （apply / clear / state）补门禁
+  - distros unregister 任务互斥：同发行版（大小写归一）仍有 running 任务时拒绝注销
+- **健壮性**
+  - wslconf diff 上限降级：超过 4M 单元格退化为「全删 + 全增」（正确性不降、不再 OOM）；
+    `isSameText` 直接文本比较（保存前判断不再跑全量 diff）
+  - logger：本地时区日键（东八区 0–8 点不再落「昨天」文件）、保留策略（7 天 / 5MB）、
+    单队列串行 append（并发写不交错丢行）、非对象 extra 包 `{ value }`
+  - zip：异步 `deflateRaw`（不再阻塞主进程）、容量守卫（条目 / 合计超 ZIP 上限可读报错）、
+    DOS 日期 1980 clamp（非法日期不再回绕到 2098）
+  - atomic-write：覆盖时保留原文件权限 mode、rename 3 次指数退避（50/150/450ms）、
+    POSIX 目录 fsync（目录项落盘）
+  - registry 缓存治理：查询失败不写 30s 缓存（一次瞬断不再伪装「确无发行版」）、single-flight
+    合并并发读；`Version` 缺失保留 undefined（不再伪造为 2）
+  - usbipd：bind 等操作可取消（abort 子进程按 TASK_CANCELED 结算）、
+    bind/unbind/attach/detach 统一串行队列、`--version` 锚定 usbipd-win 前缀
+  - network：Windows `ProxyServer` 多协议串解析（不再产出垃圾代理地址）、`ProxyOverride`
+    继承为 no_proxy 例外、IPv6 校验收紧（`::` 次数与组数）、系统转发表 kind 区段化
+    （v6 条目不再误标 v4tov4）、规则匹配改四元组全等、地址比较 trim + 小写
+  - run-tool `signal` 取消透传 + maxBuffer 截断标记（不把截断输出当完整结果）；
+    tool-output BOM 优先识别；config-schema 迁移链不完整不假盖章；
+    schema-sanitize 不满足契约不得当合法配置返回
+  - metrics：`sampledAt` 取所有成功样本的最新时刻；无 Running 发行版不 push 0 假数据点
+    （history 冻结）；`sampleDistro` 区分「未运行」与「采样失败」
+  - diagnostics：单文件超上限跳过该文件继续收集小文件、mkdir 失败映射 IO_ERROR；
+    signature 检测失败降级未检测态（不冒泡 UNKNOWN）；`appOpenConfigDir` openPath
+    非空错误串映射 IO_ERROR；app 存在性检查 `statSync` 改异步（不阻塞主进程）；
+    update 四通道错误码由 UNKNOWN 统一为 TASK_FAILED
+- **UI / 体验**
+  - 全局错误兜底：`app.config.errorHandler` + App.vue `onErrorCaptured` 渲染降级面板
+    （重载按钮）；preload 桥接缺失显式错误屏（不再全页静默失能、白屏无出路）
+  - 路由 catch-all：非法 hash / 托盘未知路径重定向驾驶舱，不再白屏
+  - 状态栏真实健康度：发行版 / 指标任一 lastError 时警示点 + 「服务异常」（不再恒绿）；
+    多任务并行显示「运行任务 N」；`aria-live` 播报只在任务开始 / 结束迁移时更新（进度不刷屏）
+  - 设置：新增「恢复默认设置」（`defaultConfig` 唯一事实源全量 patch）；强调色保存失败
+    不报成功（判 persist 返回值）；检查更新 / 下载更新的 loading 相互独立
+  - 发行版页：首页排序 running → default → pinned → 名称（不再把运行中截断在 6 条之外）；
+    表格停止按钮二次确认；`focus`/`detail` 查询参数消费后清理（刷新不重复弹窗 / 过滤）；
+    手动刷新独立 loading（轮询不再让按钮周期性闪烁）；表格 a11y（caption + scope）
+  - USB 页：首次加载骨架屏（不再先闪空态）；共享 / 附加开关补 aria-label；官网引导链接；
+    「操作成功但列表刷新失败」如实提示
+  - 命令面板：键盘导航展平序与视觉一致（分组序，不再跳组）；结果集缩减夹紧高亮项
+  - 主题覆盖扩展：Input / Select / Dropdown / Tag / Tooltip / Message 纳入 ThemeOverrides；
+    按压色从 hover 派生更深一档（不再复用 hover）；字号 / 圆角引用令牌（去硬编码）
+  - 组件：Skeleton 单根（父级透传 class/style 不再产生 extraneous attrs）；Sparkline
+    非有限值过滤 + 恒定序列画中线；ProgressRing 半径守卫（stroke ≥ size 不再产生负半径）；
+    MetricCard 时长引用令牌 + reduced-motion 中途开启立即落终值；useReducedMotion 挂载对拍
+  - 窄窗口（<960px）侧栏自动折叠、恢复宽度回用户偏好；导航 `aria-current`；
+    热键 `e.repeat` 不连发、`Ctrl+Shift+,` 不误触设置；轮询窗口隐藏真正暂停（不做空转）
+  - 细节：备份向导重置保留默认格式、网络编辑弹窗受控关闭（保存失败保留表单）、
+    系统转发表状态 12s 静默轮询、跨发行版脚本串台消除、终端字号边界禁用 + aria-label 补全
+
+### Added
+
+- **工程护栏（CI / 覆盖率 / E2E）**
+  - `npm run tokens:check`（设计令牌产物与 `tokens.ts` 逐字节对账）入 CI「Tokens drift check」步骤
+  - 覆盖率分母治理：单测 features 改 `features/**` 通配（新 feature 目录不再静默掉出分母）；
+    组件 ui 桶纳入 `composables/`、`directives/`、`naive/`、`index.ts`
+    （vRipple / useReducedMotion / applyAccentToDom / theme-overrides 有测试但此前不计分）
+  - smoke-product 增加 **preload 模块图硬校验**（产物可加载 + API 面真实暴露）
+  - Playwright `forbidOnly`（CI 出现 `.only` 直接失败，防静默缩减测试面）
+  - E2E 新增两条：**「命令面板执行导航」**（搜索 → 执行 → 标题切换 + 面板收起）、
+    **「设置持久化闭环」**（修改减弱动效 → 重启仍生效，落盘 → 读回 → 渲染全链路）
+  - 测试稳固化：`vi.waitFor` 条件等待替代硬 sleep 与固定轮询（chokidar / 组件异步时序）
+
+### Changed
+
+- 组件覆盖率地板随实测上调：ui 96/96/88/81 → **96/96/87/90**（分母扩展后重测
+  98.95/89.71/92.86）；renderer 85/85/80/52 → **87/87/82/57**（实测 89.96/84.11/59.74，300 用例）
+- docs/testing.md 基线与门禁表同步（单测 1068 条：95.88/88.2/95.48）；
+  README 测试区块补实测数字与 tokens:check 说明
+- 视觉回归掩码收窄：系统转发表整表 → 仅数据行区域（表头 / 边框参与比对）、
+  镜像卡整卡 → 状态徽章 / 路径行 / 状态正文三个具体动态元素；smoke 补结构补偿断言
+  （收窄区域容器必须真实可见，样式崩坏不再被掩码掩盖）
+
+### Security
+
+- 等价命令引用改 **PowerShell 单引号规则**（无需引用时原样、否则 `'…'` 包裹内部双写）：
+  `& % | ^ < > ( )` 等 cmd 元字符注入 / 错误展开根治；错误建议与 README 统一引导
+  「管理员 PowerShell」
+- 诊断包脱敏补齐：URL userinfo 单段（`scheme://token@host`）打码、`Authorization: Bearer` /
+  `Proxy-Authorization: Basic` 头打码、`private_key` / `client_secret` 赋值打码
+  （对齐「可安全提交」承诺）
+- `isElevationError` 收窄为明确 UAC / 管理员语境：Linux 风格 `permission denied` 不再误弹
+  无谓 UAC（漏判代价小于误判代价）
+- IPC `patch` 深嵌套 fail-closed：深度超限一律拒绝（深层 `__proto__` 不再依赖下游兜底）
+- id 安全校验唯一实现收敛（`slug.ts`，规则 id / 动作 id 同规则族）；`configKeySchema` 从
+  `CONFIG_FILE_NAMES` 派生（双事实源漂移根治）；`isAppError` 类型级校验、
+  `createAppError` 目录外 code 兜底不崩
+
 ## [0.1.1] - 2026-10-12
 
 ### Notes

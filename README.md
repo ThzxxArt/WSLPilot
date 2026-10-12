@@ -7,7 +7,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 - **技术栈**：TypeScript + Vue 3 + Electron（npm workspaces monorepo）
 - **持久化**：人类可读的 JSONC 配置文件（无数据库，可纳入 Git）
 - **设计系统**：浅色「极光」风格（四套强调色），完整动效基座，支持 `prefers-reduced-motion`
-- **当前版本**：`0.1.1`（M1–M7 全部交付；0.1.1 为质量收敛版——缺陷根治 + 测试诚实化，无新增功能）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
+- **当前版本**：`0.1.2`（M1–M7 全部交付；0.1.2 为第二轮质量收敛版——全量深读缺陷根治与工程护栏加固，无新增功能；功能增量留待 0.2.0）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
 
 ---
 
@@ -145,10 +145,11 @@ npm run tokens           # 重新生成设计令牌 CSS（tokens.generated.scss�
 
 ```bash
 npm run test:coverage    # 单元测试 + 覆盖率硬门禁（≥85%，不达标即失败）
-npm run test:component   # 组件测试 + 覆盖率硬门禁（ui 96/88/81、renderer 84/80/47 两档地板）
+npm run test:component   # 组件测试 + 覆盖率硬门禁（ui 96/87/90、renderer 87/82/57 两档地板）
 npm run test:e2e         # E2E + 视觉回归（需显示环境；先构建 desktop）
 npm run test:visual      # 仅视觉回归（基线比对，缺基线直接红）
-npm run smoke:product    # 产物冒烟（main 模块图完整性）
+npm run smoke:product    # 产物冒烟（main / preload 模块图完整性）
+npm run tokens:check     # 设计令牌漂移检查（tokens.ts 与生成产物逐字节一致）
 ```
 
 质量基线：
@@ -158,6 +159,9 @@ npm run smoke:product    # 产物冒烟（main 模块图完整性）
   也不受本机强调色 / 侧栏折叠 / 语言影响；`test:e2e` 含视觉回归，`test:visual` 仅跑视觉
 - **视觉回归**：截图基线按平台入库（`{arg}-{platform}.png`，linux / win32 各一套），`updateSnapshots: 'none'` 硬门禁——缺基线直接失败，禁止 CI 自动造基线放行；新增 / 更新截图用 `npx playwright test --grep @visual --update-snapshots=all` 并提交产物
 - **E2E 串行**：应用是单实例语义，`workers: 1` 防并行双开假红
+- **实测（2026-10-12）**：单测 1068 条（lines 95.88% / branches 88.2% / functions 95.48%）；
+  组件 300 用例（ui 桶 98.95/89.71/92.86、renderer 桶 89.96/84.11/59.74，两档地板为「实测 −2pp」）；
+  E2E = smoke 2 条 + 视觉 2 条；`tokens:check` 已入 CI（令牌漂移即红）
 
 分层策略与门禁细节见 [docs/testing.md](./docs/testing.md)。
 
@@ -237,9 +241,9 @@ npm run package --workspace @wslpilot/desktop -- --x64    # 指定架构打包
 | 提示「无法启动终端会话」                                    | 确认 WSL 已安装且 `wsl.exe` 可用；若依赖未安装完整，在项目目录重新执行 `npm ci` 后重启应用（开发环境偶发于原生模块缺失）                                                                                                                                               |
 | 提示「发生未知错误：…」                                     | 冒号后即真实原因摘要；配合「设置 → 关于 → 导出诊断包」反馈                                                                                                                                                                                                             |
 | USB 设备页提示未检测到 usbipd                               | 可选能力，不影响其它功能；按页内引导安装：`winget install usbipd --source winget`，完成后回页点「我已安装，重新检测」。若提示「已安装但调用失败」，按错误详情排查，不要反复重装                                                                                        |
-| 提示「系统未启用 WSL」/「找不到 wsl.exe」                   | 管理员终端运行 `wsl --install` 后重启应用；已安装仍报错则检查 PATH 是否包含 WSL 安装路径                                                                                                                                                                               |
+| 提示「系统未启用 WSL」/「找不到 wsl.exe」                   | 管理员 **PowerShell** 运行 `wsl --install` 后重启应用；已安装仍报错则检查 PATH 是否包含 WSL 安装路径                                                                                                                                                                   |
 | 新装发行版的用户名 / 密码怎么设置                           | 首次以终端打开该发行版，多数发行版会进入 **UNIX 用户创建向导**（在终端里输入用户名与密码）；若直接进入了 root，在终端 `adduser 用户名` 创建用户，再到「详情 → 配置」给 `/etc/wsl.conf` 写入 `[user]` 段 `default=用户名`，停止并重开终端生效。安装完成面板也有同款指引 |
-| 端口转发应用失败提示需要管理员权限                          | 会自动弹出提权助手（一次 UAC 合并执行）；取消授权时错误信息中附带可直接复制到管理员终端执行的等价命令行                                                                                                                                                                |
+| 端口转发应用失败提示需要管理员权限                          | 会自动弹出提权助手（一次 UAC 合并执行）；取消授权时错误信息中附带可直接复制到管理员 **PowerShell** 执行的等价命令行（按 PowerShell 单引号规则引用）                                                                                                                    |
 | 反馈问题 / 排查异常                                         | 设置 → 关于 →「导出诊断包」：近期日志 + 配置脱敏副本（主目录替换为 `%USERPROFILE%`、URL 凭据打码）+ 环境信息；也可「打开日志目录」                                                                                                                                     |
 
 ## 文档索引

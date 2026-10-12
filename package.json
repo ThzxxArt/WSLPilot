@@ -1,6 +1,6 @@
 {
   "name": "wslpilot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "WSLPilot — WSL 的驾驶舱。现代化 Windows Subsystem for Linux 图形化控制中枢。",
   "license": "MIT",
@@ -24,6 +24,7 @@
     "test:visual": "playwright test --grep @visual",
     "smoke:product": "node scripts/smoke-product.mjs",
     "tokens": "tsx scripts/gen-tokens.ts",
+    "tokens:check": "tsx scripts/gen-tokens.ts --check",
     "postinstall": "npm run tokens",
     "changeset": "changeset",
     "release": "changeset version && npm run build"

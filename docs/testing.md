@@ -67,6 +67,9 @@ CommandPalette 587、WslConfPanel 496、ActionsPanel 456 等）**不进任何覆
 70% 数字不含 UI 层，属分母瘦身。现已纳入：
 
 - `packages/ui/src/components/**/*.{vue,ts}`（设计系统组件）
+- `packages/ui/src/composables/**`、`directives/**`、`naive/**` 与 `packages/ui/src/index.ts`
+  （vRipple / useReducedMotion / applyAccentToDom / theme-overrides —— review 0.1.2 补录分母，
+  此前有测试但不计分，回归门禁对它们曾是无覆盖盲区）
 - `apps/desktop/src/renderer/**/*.vue`（全部 UI 视图/面板/布局壳）
 - `apps/desktop/src/renderer/router/**/*.ts`（路由表 + afterEach 标题，无其他分母）
 
@@ -83,8 +86,12 @@ Playwright 截图对比（`npm run test:visual`，`@visual` 标签）：驾驶�
 关键页面浅色主题渲染一致性。
 
 - 动画禁用 + **动态源全量 mask**：时段问候语、hero 统计行（WSL 版本/发行版数量/内核）、
-  指标数字与提示、迷你图、时钟、发行版卡片区、系统转发表、Windows 代理状态、
-  `.wslconfig` 真实路径、设置页版本号（每项都对应真实动态源，新增动态源必须登记）
+  指标数字与提示、迷你图、时钟、发行版卡片区、**系统转发表（仅数据行 tbody —— 表头与边框
+  参与比对）**、**镜像卡（收窄为状态徽章 / 路径行 / 状态正文三个具体动态元素 —— 卡标题、
+  边框、背景参与比对）**、Windows 代理状态、`.wslconfig` 真实路径、设置页版本号
+  （每项都对应真实动态源，新增动态源必须登记）
+- **掩码收窄的结构补偿断言**（review 0.1.2）：smoke 中断言 `.mirror-card` / `.system-card`
+  容器真实可见 —— 被收窄区域的样式崩坏不再被掩码掩盖
 - **截图期盒尺寸稳定化**（`tests/e2e/visual-stability.css`，仅 `stylePath` 注入、不改生产样式）：
   动态文本宽度铺满、指标值固定高度、卡片网格固定高度——消除「内容变化 → mask 边界漂移 /
   下方版式位移」造成的假红
@@ -97,7 +104,9 @@ Playwright 截图对比（`npm run test:visual`，`@visual` 标签）：驾驶�
 
 Playwright + Electron（`electron.launch`，Windows）——一次实跑 **smoke + 视觉回归**（`*.e2e.ts` 全量，含 `@visual`）：
 
-- smoke：启动、窗口显示、侧栏导航（驾驶舱 / 发行版 / 终端 / 备份迁移 / 设置 / 网络 / 设备）与命令面板关键元素可见性
+- smoke：启动、窗口显示、侧栏导航（驾驶舱 / 发行版 / 终端 / 备份迁移 / 设置 / 网络 / 设备）与命令面板关键元素可见性；
+  0.1.2 补强：**命令面板执行导航**（搜索 → 执行 → 页面标题切换 + 面板收起）与
+  **设置持久化闭环**（修改减弱动效 → 重启仍生效，落盘 → 读回 → 渲染全链路）
 - **隔离**：每次启动使用临时 `userData`（`WSLPILOT_USER_DATA` 环境变量，主进程在单实例锁前应用），
   不读写真实用户配置/日志/备份，也不受本机强调色 / 侧栏折叠 / 语言影响（review E2E 隔离根治）
 - **定位策略**：侧栏导航一律收敛到 `aside.sidebar` 内定位——页面内容可能出现同名按钮
@@ -128,26 +137,26 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（0.1.1 / 0.1.0 后全量修复）**：单测 Lines 95.7% / Branches 88.0% / Functions 95.3%。
+**当前基线（0.1.2）**：单测 1068 条，Lines 95.88% / Branches 88.2% / Functions 95.48%。
 
 ### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
 
 UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` 的 per-glob 拆两档，
 每档为**实测值减 2 个百分点向下取整**的诚实地板（只防回归、不虚高摆拍）：
 
-| 分母                                    | Lines  | Statements | Branches | Functions |
-| --------------------------------------- | ------ | ---------- | -------- | --------- |
-| `packages/ui/src/components/**`（实测） | 98.25% | 98.25%     | 90.76%   | 83.33%    |
-| ↑ 门禁地板                              | **96** | **96**     | **88**   | **81**    |
-| `apps/desktop/src/renderer/**`（实测）  | 87.90% | 87.90%     | 82.51%   | 54.69%    |
-| ↑ 门禁地板                              | **85** | **85**     | **80**   | **52**    |
+| 分母                                   | Lines  | Statements | Branches | Functions |
+| -------------------------------------- | ------ | ---------- | -------- | --------- |
+| `packages/ui/src/**`（实测）           | 98.95% | 98.95%     | 89.71%   | 92.86%    |
+| ↑ 门禁地板                             | **96** | **96**     | **87**   | **90**    |
+| `apps/desktop/src/renderer/**`（实测） | 89.96% | 89.96%     | 84.11%   | 59.74%    |
+| ↑ 门禁地板                             | **87** | **87**     | **82**   | **57**    |
 
-（实测取自 `npm run test:component` 全量 221 用例；0.1.1 补齐 NetworkView 确认回放、
-SettingsView setter 落盘对账、WslConfPanel 未运行门禁与 diff 渲染、TaskDrawer 键盘与
-取消成功、命令面板最近使用 a11y 等用例后，renderer 地板由 84/80/47 抬升至 85/80/52。）
+（实测取自 `npm run test:component` 全量 300 用例；0.1.2 分母纳入 ui 桶
+`composables` / `directives` / `naive` / `index.ts` 后重测 —— branches 地板随分母扩大
+诚实下调 88→87、functions 81→90；renderer 地板由 0.1.1 的 85/80/52 抬升至 87/82/57。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
-更新为「新实测 −2pp」；renderer functions 52% 是过渡期防线，不是终点。
+更新为「新实测 −2pp」；renderer functions 57% 是过渡期防线，不是终点。
 
 **覆盖范围**：
 
@@ -183,8 +192,10 @@ SettingsView setter 落盘对账、WslConfPanel 未运行门禁与 diff 渲染�
 
 `.github/workflows/ci.yml`：
 
-- `lint-typecheck-test`：Node 20/22 矩阵，lint + format:check + typecheck + **test:coverage（85% 门禁）**
-  - **test:component（per-glob 两档门禁：ui 96/96/88/81、renderer 84/84/80/47）** + build + smoke:product
+- `lint-typecheck-test`：Node 20/22 矩阵，lint + format:check + typecheck +
+  **Tokens drift check（`tokens:check`：`tokens.ts` 与生成产物逐字节对账）** + **test:coverage（85% 门禁）**
+  - **test:component（per-glob 两档门禁：ui 96/96/87/90、renderer 87/87/82/57）** + build +
+    **smoke:product（main 模块图 + preload 模块图硬校验）**
 - 覆盖率报告以 artifact 形式保留 14 天
 - `e2e`：Windows runner，`npm run test:e2e` 实跑 smoke + 视觉回归（`smoke.e2e.ts` 与 `visual.e2e.ts`）
 
