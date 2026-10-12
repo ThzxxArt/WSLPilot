@@ -1,4 +1,4 @@
-import { CH } from '@wslpilot/shared'
+import { CH, type WslConfWriteResult } from '@wslpilot/shared'
 import type { WslConfService } from '../../services/wslconf-service'
 import type { WslService } from '../../services/wsl-service'
 import type { IpcContext } from '../router'
@@ -26,15 +26,21 @@ export function registerWslConfHandlers(
 
   add(
     CH.wslconfWrite,
-    async (c, payload: { name: string; content: string }): Promise<{ terminated: boolean }> => {
+    async (c, payload: { name: string; content: string }): Promise<WslConfWriteResult> => {
       await deps.wsl.assertRunning(payload.name)
       await deps.wslconf.write(payload.name, payload.content)
       const autoStop = c.configService.loadSync('settings').wsl.autoShutdownAfterConfigChange
-      if (autoStop) {
+      if (!autoStop) return { terminated: false }
+      try {
         await deps.wsl.terminate(payload.name)
         return { terminated: true }
+      } catch (e) {
+        // review 0.1.2 根治：文件已写成功 —— terminate 失败只影响「8 秒规则是否立即生效」，
+        // 不得把整次写入当作失败（返回可读原因，由 UI 提示手动重启）
+        const msg = e instanceof Error ? e.message : String(e)
+        c.logger.warn('wslconf written but terminate failed', { distro: payload.name, error: msg })
+        return { terminated: false, terminateError: msg }
       }
-      return { terminated: false }
     },
   )
 }

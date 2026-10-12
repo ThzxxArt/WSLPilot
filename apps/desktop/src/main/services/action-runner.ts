@@ -44,6 +44,11 @@ export interface ActionRunnerDeps {
   configService: ActionConfigReader
   wsl: { list(): Promise<Array<{ name: string; isDefault: boolean }>> }
   pty: Pick<PtyManager, 'createCommand' | 'waitExit' | 'kill'>
+  /**
+   * 运行状态硬门禁（review 0.1.2 根治：`wsl -d X -e sh -c` 探测会隐式启动发行版）：
+   * 注入后 probeUserEnv 之前调用，未运行直接拒绝，绝不由探测拉起发行版。
+   */
+  assertRunning?: (distro: string) => Promise<void>
   runWsl?: (
     args: string[],
     opts?: { timeoutMs?: number },
@@ -145,6 +150,9 @@ export function createActionRunner(deps: ActionRunnerDeps): ActionRunner {
         user: '',
       }
       if (needed.includes('home') || needed.includes('user')) {
+        // review 0.1.2 根治：探测走 `wsl -d X -e`，未运行时会把发行版隐式拉起 ——
+        // 必须晚于运行状态门禁（handler 原有门禁保留为双保险）
+        if (deps.assertRunning) await deps.assertRunning(target)
         const env = await probeUserEnv(target)
         ctx.home = env.home
         ctx.user = env.user

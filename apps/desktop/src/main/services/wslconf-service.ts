@@ -44,8 +44,28 @@ export interface WslConfServiceDeps {
   runWslWithStdin?: RunWslStdinFn
 }
 
-/** 文件不存在类错误（read 时降级为空配置） */
-const NOT_FOUND_RE = /no such file|not found|cannot open|没有那个文件|找不到/i
+/**
+ * 文件不存在类错误（read 时降级为空配置）。
+ * review 0.1.2 根治：原正则裸 `not found` 会把「发行版不存在」等执行错误误判为
+ * 「文件不存在 → 空配置」，错误被吞成默认值。现要求命中 cat/tee 行语境或
+ * 显式文件语境短语；发行版级报错（如 no distribution…）不再命中。
+ */
+const NOT_FOUND_RE = new RegExp(
+  [
+    // `cat: /etc/wsl.conf: No such file or directory` / 中文同义（工具行前缀锚定）
+    String.raw`(?:cat|tee)\s*:[^\r\n]*(?:no such file|not found|没有那个文件|找不到)`,
+    // 裸系统文案本身已含 file/directory 语境，允许直配
+    String.raw`no such file or directory`,
+    String.raw`没有那个文件或目录`,
+    // `Cannot open ... for reading` 需带 file/文件 语境，避免误吞发行版级错误
+    String.raw`cannot open[^\r\n]*(?:file|文件)`,
+    String.raw`文件不存在`,
+  ].join('|'),
+  'i',
+)
+
+/** 权限失败识别：review 0.1.2 根治裸 `root` —— 路径/文案里出现 root 不代表权限不足 */
+const PERMISSION_RE = /permission|denied|sudo|不允许|权限/i
 
 /**
  * 写入前的语法守卫：只允许 blank/comment/section/entry 行。
@@ -72,21 +92,40 @@ export function createWslConfService(deps: WslConfServiceDeps): WslConfService {
   const run = deps.runWsl ?? runWsl
   const runIn = deps.runWslWithStdin ?? runWslWithStdin
 
+  /**
+   * 同发行版读-写轻量串行（review 0.1.2 根治）：
+   * 渲染层「读→编辑→写」与并发只读若交错，后发读可能拿到旧内容做整体覆盖。
+   * 按发行版名排队，不阻塞其它发行版。
+   */
+  const tails = new Map<string, Promise<unknown>>()
+  function enqueue<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = tails.get(key) ?? Promise.resolve()
+    const p = prev.then(fn, fn)
+    const tail = p.catch(() => {})
+    tails.set(key, tail)
+    void tail.then(() => {
+      if (tails.get(key) === tail) tails.delete(key)
+    })
+    return p
+  }
+
   return {
     async read(name) {
       const distro = assertSafeDistroName(name)
-      const r = await run(['-d', distro, '-e', 'cat', WSL_CONF_PATH], { timeoutMs: 15_000 })
-      if (r.code === 0) return r.stdout
-      const text = `${r.stderr}\n${r.stdout}`
-      if (NOT_FOUND_RE.test(text)) {
-        deps.logger.debug('wsl.conf not found, treating as default', { distro })
-        return ''
-      }
-      throw createAppError('IO_ERROR', {
-        message: `读取 ${distro} 的 wsl.conf 失败`,
-        detail: text.trim(),
-        rawCommand: `wsl.exe -d ${distro} -e cat ${WSL_CONF_PATH}`,
-        suggestion: '请确认发行版可正常启动，且当前用户可读 /etc/wsl.conf',
+      return enqueue(distro.toLowerCase(), async () => {
+        const r = await run(['-d', distro, '-e', 'cat', WSL_CONF_PATH], { timeoutMs: 15_000 })
+        if (r.code === 0) return r.stdout
+        const text = `${r.stderr}\n${r.stdout}`
+        if (NOT_FOUND_RE.test(text)) {
+          deps.logger.debug('wsl.conf not found, treating as default', { distro })
+          return ''
+        }
+        throw createAppError('IO_ERROR', {
+          message: `读取 ${distro} 的 wsl.conf 失败`,
+          detail: text.trim(),
+          rawCommand: `wsl.exe -d ${distro} -e cat ${WSL_CONF_PATH}`,
+          suggestion: '请确认发行版可正常启动，且当前用户可读 /etc/wsl.conf',
+        })
       })
     },
 
@@ -94,22 +133,24 @@ export function createWslConfService(deps: WslConfServiceDeps): WslConfService {
       const distro = assertSafeDistroName(name)
       const body = String(content ?? '')
       assertParsableWslConf(body)
-      deps.logger.info('wsl.conf write', { distro, bytes: Buffer.byteLength(body, 'utf8') })
-      const r = await runIn(['-d', distro, '-u', 'root', '-e', 'tee', WSL_CONF_PATH], body, {
-        timeoutMs: 20_000,
-      })
-      if (r.code !== 0) {
-        const text = `${r.stderr}\n${r.stdout}`
-        const denied = /permission|denied|root|sudo|不允许|权限/i.test(text)
-        throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
-          message: `写入 ${distro} 的 wsl.conf 失败`,
-          detail: text.trim(),
-          rawCommand: `wsl.exe -d ${distro} -u root -e tee ${WSL_CONF_PATH}`,
-          suggestion: denied
-            ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
-            : '请查看原始输出并重试',
+      return enqueue(distro.toLowerCase(), async () => {
+        deps.logger.info('wsl.conf write', { distro, bytes: Buffer.byteLength(body, 'utf8') })
+        const r = await runIn(['-d', distro, '-u', 'root', '-e', 'tee', WSL_CONF_PATH], body, {
+          timeoutMs: 20_000,
         })
-      }
+        if (r.code !== 0) {
+          const text = `${r.stderr}\n${r.stdout}`
+          const denied = PERMISSION_RE.test(text)
+          throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
+            message: `写入 ${distro} 的 wsl.conf 失败`,
+            detail: text.trim(),
+            rawCommand: `wsl.exe -d ${distro} -u root -e tee ${WSL_CONF_PATH}`,
+            suggestion: denied
+              ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
+              : '请查看原始输出并重试',
+          })
+        }
+      })
     },
   }
 }

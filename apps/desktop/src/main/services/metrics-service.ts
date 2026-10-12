@@ -41,6 +41,7 @@ export async function sampleOverview(
   let cpuSum = 0
   let successCount = 0
   let sampledAt = ''
+  let sampledAtMs = Number.NEGATIVE_INFINITY
 
   for (const r of results) {
     if (!r.m) continue
@@ -51,7 +52,13 @@ export async function sampleOverview(
     diskUsedKB += r.m.diskUsedKB
     diskTotalKB += r.m.diskTotalKB
     cpuSum += r.m.cpuPercent
-    sampledAt = r.m.sampledAt
+    // review 0.1.2 根治：sampledAt 取所有成功样本中的**最新时刻**，
+    // 而不是循环里最后一个成功样本的任意值（Promise.all 完成顺序与采样时刻无关）
+    const atMs = Date.parse(r.m.sampledAt)
+    if (Number.isFinite(atMs) && atMs > sampledAtMs) {
+      sampledAtMs = atMs
+      sampledAt = r.m.sampledAt
+    }
   }
 
   return {
@@ -61,7 +68,8 @@ export async function sampleOverview(
     memTotalKB,
     diskUsedKB,
     diskTotalKB,
-    // 按成功样本平均，失败样本不占分母（M3）
+    // CPU 均值口径：分母只含**采样成功**的发行版（失败样本既不进分子也不进分母，
+    // 不以 0 顶替——否则失败会把整体 CPU 假性拉低）
     cpuPercent: successCount ? Math.round((cpuSum / successCount) * 10) / 10 : 0,
     sampledAt: sampledAt || new Date().toISOString(),
     perDistro,

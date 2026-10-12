@@ -76,7 +76,10 @@ export async function collectRecentLogs(
     } catch {
       continue
     }
-    if (total + sizeBytes > maxBytes && out.length > 0) break
+    // review 0.1.2 根治：单文件超总量上限时**跳过该文件继续**收集更小的日志；
+    // 原实现 `&& out.length > 0` 在首个文件超限时会把它整个吞进来，上限形同虚设
+    if (sizeBytes > maxBytes) continue
+    if (total + sizeBytes > maxBytes) continue
     total += sizeBytes
     out.push({ name, path, sizeBytes })
   }
@@ -98,7 +101,16 @@ export function createDiagnosticsService(deps: DiagnosticsServiceDeps): Diagnost
 
   async function openLogsDir(): Promise<void> {
     const dir = logsPath()
-    await fs.mkdir(dir, { recursive: true })
+    // review 0.1.2 根治：mkdir 失败原样冒泡会变成 UNKNOWN —— 映射为可行动 IO_ERROR
+    try {
+      await fs.mkdir(dir, { recursive: true })
+    } catch (e) {
+      throw createAppError('IO_ERROR', {
+        message: '创建日志目录失败',
+        detail: e instanceof Error ? e.message : String(e),
+        suggestion: '请检查用户数据目录的写入权限后重试',
+      })
+    }
     const opener = deps.openDirectory
     if (!opener) return
     const err = await opener(dir)
@@ -165,7 +177,7 @@ export function createDiagnosticsService(deps: DiagnosticsServiceDeps): Diagnost
     }
     entries.push({ name: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` })
 
-    const zip = createZip(entries, now())
+    const zip = await createZip(entries, now())
     // 原子写：保存对话框允许覆盖已存在的诊断包，绝不截断写（防崩溃留下半截 zip）
     await atomicWrite(targetPath, zip)
     logger.info('diagnostics exported', {

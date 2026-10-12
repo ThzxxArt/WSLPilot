@@ -1,6 +1,7 @@
 import { CH, type NetworkStatus, type ProxyScriptState, type TaskHandle } from '@wslpilot/shared'
 import type { NetworkService } from '../../services/network-service'
 import type { TaskRunner } from '../../services/task-runner'
+import type { WslService } from '../../services/wsl-service'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -17,7 +18,7 @@ type AddFn = (
  */
 export function registerNetworkHandlers(
   add: AddFn,
-  deps: { network: NetworkService; tasks: TaskRunner },
+  deps: { network: NetworkService; tasks: TaskRunner; wsl: Pick<WslService, 'assertRunning'> },
 ): void {
   const { network, tasks } = deps
 
@@ -53,20 +54,24 @@ export function registerNetworkHandlers(
     })
   })
 
+  // 硬门禁（review 0.1.2 根治：proxy 三通道均走 `wsl -d X -e`，会隐式启动发行版）：未运行不执行
   add(CH.networkProxyApply, async (_c, arg: never): Promise<{ distro: string }> => {
     const o = arg as { distro: string }
+    await deps.wsl.assertRunning(o.distro)
     await network.proxyApply(o.distro)
     return { distro: o.distro }
   })
 
   add(CH.networkProxyClear, async (_c, arg: never): Promise<{ distro: string }> => {
     const o = arg as { distro: string }
+    await deps.wsl.assertRunning(o.distro)
     await network.proxyClear(o.distro)
     return { distro: o.distro }
   })
 
   add(CH.networkProxyState, async (_c, arg: never): Promise<ProxyScriptState> => {
     const o = arg as { distro: string }
+    await deps.wsl.assertRunning(o.distro)
     return network.proxyState(o.distro)
   })
 }

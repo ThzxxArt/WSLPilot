@@ -136,6 +136,17 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
     return deps.configService.loadSync('network').portForwarding ?? []
   }
 
+  /**
+   * 轻量串行队列（review 0.1.2 根治）：proxy 写/清同一脚本文件，
+   * 并发 IPC 交错会让「写入 vs 删除」互相覆盖出不确定态。只排队，不阻塞其它操作。
+   */
+  let proxyQueue: Promise<unknown> = Promise.resolve()
+  function enqueueProxy<T>(fn: () => Promise<T>): Promise<T> {
+    const p = proxyQueue.then(fn, fn)
+    proxyQueue = p.catch(() => {})
+    return p
+  }
+
   function findRule(id: string): PortForwardRule {
     const key = assertSafeRuleId(id)
     const rule = rules().find((r) => r.id === key)
@@ -596,44 +607,48 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
 
     async proxyApply(distro: string) {
       const name = assertSafeDistroName(distro)
-      const proxy = deps.configService.loadSync('network').proxy
-      const windows = proxy.useWindowsProxy ? await readWinProxy() : null
-      const script = buildProxyScript(resolveEffectiveProxy(proxy, windows))
-      logger.info('proxy apply', { distro: name, bytes: Buffer.byteLength(script, 'utf8') })
-      const r = await runIn(['-d', name, '-u', 'root', '-e', 'tee', PROXY_SCRIPT_PATH], script, {
-        timeoutMs: 20_000,
-      })
-      if (r.code !== 0) {
-        const text = `${r.stderr}\n${r.stdout}`
-        const denied = /permission|denied|root|sudo|不允许|权限/i.test(text)
-        throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
-          message: `写入 ${name} 的代理脚本失败`,
-          detail: text.trim(),
-          rawCommand: `wsl.exe -d ${name} -u root -e tee ${PROXY_SCRIPT_PATH}`,
-          suggestion: denied
-            ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
-            : '请查看原始输出并重试',
+      return enqueueProxy(async () => {
+        const proxy = deps.configService.loadSync('network').proxy
+        const windows = proxy.useWindowsProxy ? await readWinProxy() : null
+        const script = buildProxyScript(resolveEffectiveProxy(proxy, windows))
+        logger.info('proxy apply', { distro: name, bytes: Buffer.byteLength(script, 'utf8') })
+        const r = await runIn(['-d', name, '-u', 'root', '-e', 'tee', PROXY_SCRIPT_PATH], script, {
+          timeoutMs: 20_000,
         })
-      }
+        if (r.code !== 0) {
+          const text = `${r.stderr}\n${r.stdout}`
+          const denied = /permission|denied|sudo|不允许|权限/i.test(text)
+          throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
+            message: `写入 ${name} 的代理脚本失败`,
+            detail: text.trim(),
+            rawCommand: `wsl.exe -d ${name} -u root -e tee ${PROXY_SCRIPT_PATH}`,
+            suggestion: denied
+              ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
+              : '请查看原始输出并重试',
+          })
+        }
+      })
     },
 
     async proxyClear(distro: string) {
       const name = assertSafeDistroName(distro)
-      const r = await run(['-d', name, '-u', 'root', '-e', 'rm', '-f', PROXY_SCRIPT_PATH], {
-        timeoutMs: 15_000,
-      })
-      if (r.code !== 0) {
-        const text = `${r.stderr}\n${r.stdout}`
-        const denied = /permission|denied|root|sudo|不允许|权限/i.test(text)
-        throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
-          message: `清除 ${name} 的代理脚本失败`,
-          detail: text.trim(),
-          rawCommand: `wsl.exe -d ${name} -u root -e rm -f ${PROXY_SCRIPT_PATH}`,
-          suggestion: denied
-            ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
-            : '请查看原始输出并重试',
+      return enqueueProxy(async () => {
+        const r = await run(['-d', name, '-u', 'root', '-e', 'rm', '-f', PROXY_SCRIPT_PATH], {
+          timeoutMs: 15_000,
         })
-      }
+        if (r.code !== 0) {
+          const text = `${r.stderr}\n${r.stdout}`
+          const denied = /permission|denied|sudo|不允许|权限/i.test(text)
+          throw createAppError(denied ? 'PERMISSION_DENIED' : 'IO_ERROR', {
+            message: `清除 ${name} 的代理脚本失败`,
+            detail: text.trim(),
+            rawCommand: `wsl.exe -d ${name} -u root -e rm -f ${PROXY_SCRIPT_PATH}`,
+            suggestion: denied
+              ? '需要发行版内 root 权限；请确认 wsl.exe 可以 -u root 执行'
+              : '请查看原始输出并重试',
+          })
+        }
+      })
     },
   }
 }

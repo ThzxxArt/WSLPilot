@@ -73,9 +73,23 @@ export function createSignatureService(deps: SignatureServiceDeps): SignatureSer
     // 单引号转义后内嵌到 PowerShell 表达式；execFile 传参数组，不经 cmd
     const quoted = `'${exePath.replace(/'/g, "''")}'`
     const command = `try { (Get-AuthenticodeSignature -FilePath ${quoted}) | ConvertTo-Json -Depth 4 -Compress } catch { $_.Exception.Message }`
-    const r = await tool('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-      timeoutMs: 15_000,
-    })
+    let r: { stdout: string; stderr: string; code: number }
+    try {
+      r = await tool('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+        timeoutMs: 15_000,
+      })
+    } catch (e) {
+      // review 0.1.2 根治：检测失败（注入实现抛错 / spawn 异常）是可预期降级路径，
+      // 返回 checked:false + 原因，不得冒泡成 IPC UNKNOWN
+      const detail = e instanceof Error ? e.message : String(e)
+      deps.logger.warn('signature tool invocation failed', { error: detail })
+      return {
+        checked: false,
+        signed: false,
+        detail: detail.slice(0, 300) || '签名检测调用失败',
+        smartscreenNote: SMARTSCREEN_NOTE,
+      }
+    }
     const text = `${r.stdout}`.trim()
     const parsed = parseAuthenticodeJson(text)
     if (!parsed) {

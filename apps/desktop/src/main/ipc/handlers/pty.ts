@@ -1,6 +1,7 @@
 import { CH, createAppError, assertSafeDistroName, MAX_PTY_SESSIONS } from '@wslpilot/shared'
 import * as os from 'node:os'
 import type { PtyManager, PtyCreateOptions } from '../../services/pty-manager'
+import type { WslService } from '../../services/wsl-service'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -33,13 +34,17 @@ function asId(arg: unknown): string {
   return id
 }
 
-export function registerPtyHandlers(add: AddFn, deps: { pty: PtyManager }): void {
+export function registerPtyHandlers(
+  add: AddFn,
+  deps: { pty: PtyManager; wsl: Pick<WslService, 'assertRunning'> },
+): void {
   const { pty } = deps
 
-  add(CH.ptyCreate, async (c, arg: never) => {
+  add(CH.ptyCreate, async (_c, arg: never) => {
     const o = asCreate(arg)
-    // 硬门禁（review：开会话即 `wsl -d X -e`，会隐式启动发行版）：未运行不建会话
-    await c.wsl?.assertRunning(o.distro)
+    // 硬门禁（review：开会话即 `wsl -d X -e`，会隐式启动发行版）：未运行不建会话。
+    // review 0.1.2 根治：wsl 必填 —— `ctx.wsl?.` 会静默绕过门禁
+    await deps.wsl.assertRunning(o.distro)
     return pty.create(o)
   })
 

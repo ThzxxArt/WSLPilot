@@ -2,6 +2,7 @@ import { CH, createAppError, type DistroView, type TaskHandle } from '@wslpilot/
 import type { WslService } from '../../services/wsl-service'
 import type { RegistryService } from '../../services/registry-service'
 import type { TaskRunner } from '../../services/task-runner'
+import { sampleOverview } from '../../services/metrics-service'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -90,7 +91,6 @@ export function registerDistroHandlers(
 
   // metrics:overview — 全局概览（OverviewMetrics），无发行版入参
   add(CH.metricsOverview, async (c) => {
-    const { sampleOverview } = await import('../../services/metrics-service')
     const distros = await wsl.list()
     return sampleOverview(wsl, distros, c.logger)
   })
@@ -125,6 +125,20 @@ export function registerDistroHandlers(
 
   // 危险操作：仅执行，二次确认由渲染层按 confirmDestructive 负责
   add(CH.distrosUnregister, async (_c, name: string) => {
-    await wsl.unregister(assertName(name))
+    const target = assertName(name)
+    // review 0.1.2 根治：注销会终结发行版 —— 同发行版（大小写归一）仍有 running 任务时
+    // 必须先拒绝，否则任务会随发行版被注销而诡异失败/悬挂
+    const lower = target.toLowerCase()
+    const busy = tasks
+      .list()
+      .filter((t) => t.status === 'running' && (t.distro ?? '').toLowerCase() === lower)
+    if (busy.length > 0) {
+      throw createAppError('TASK_FAILED', {
+        message: `发行版 ${target} 仍有 ${busy.length} 个任务在执行，暂不能注销`,
+        detail: busy.map((t) => `${t.taskId}（${t.type}）：${t.message}`).join('\n'),
+        suggestion: '请在任务中心等待其完成或取消后再注销',
+      })
+    }
+    await wsl.unregister(target)
   })
 }

@@ -108,6 +108,8 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
       status: rec.status,
     }
     if (logLine !== undefined) p.logLine = logLine
+    // 失败/取消原因端到端透传（渲染层不得再用最后一条 message 冒充 — review 0.1.2）
+    if (rec.error !== undefined) p.error = rec.error
     try {
       events.onProgress(p)
     } catch (e) {

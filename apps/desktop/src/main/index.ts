@@ -196,7 +196,15 @@ async function bootstrap() {
 
   // M5：wsl.conf 编辑 / 自定义动作 / 发行版内文件桥
   const wslconf = createWslConfService({ logger })
-  const runner = createActionRunner({ logger, configService, wsl, pty })
+  const runner = createActionRunner({
+    logger,
+    configService,
+    wsl,
+    pty,
+    // review 0.1.2 根治：probeUserEnv（`wsl -d X -e sh -c`）会隐式启动发行版，
+    // 必须在探测前过运行状态门禁（wsl-service 是唯一判定入口）
+    assertRunning: (d) => wsl.assertRunning(d),
+  })
   const fsBridge = createFsBridge({ logger })
 
   // M6：端口转发 / 镜像模式 / 代理 + usbipd 设备（M7 提权接线）

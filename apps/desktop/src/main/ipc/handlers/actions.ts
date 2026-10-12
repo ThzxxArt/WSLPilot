@@ -2,6 +2,7 @@ import { CH, type TaskHandle } from '@wslpilot/shared'
 import type { ActionRunner } from '../../services/action-runner'
 import { actionTaskHandle } from '../../services/action-runner'
 import type { TaskRunner } from '../../services/task-runner'
+import type { WslService } from '../../services/wsl-service'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -18,13 +19,14 @@ type AddFn = (
  */
 export function registerActionHandlers(
   add: AddFn,
-  deps: { runner: ActionRunner; tasks: TaskRunner },
+  deps: { runner: ActionRunner; tasks: TaskRunner; wsl: Pick<WslService, 'assertRunning'> },
 ): void {
-  add(CH.actionRun, async (c, arg: never): Promise<TaskHandle> => {
+  add(CH.actionRun, async (_c, arg: never): Promise<TaskHandle> => {
     const o = arg as { actionId: string; distro?: string }
     const prepared = await deps.runner.prepare(o.actionId, o.distro)
-    // 硬门禁（review：动作在发行版内执行 `wsl -d X -e`，会隐式启动发行版）：未运行不执行
-    if (prepared.distro) await c.wsl?.assertRunning(prepared.distro)
+    // 硬门禁（review：动作在发行版内执行 `wsl -d X -e`，会隐式启动发行版）：未运行不执行。
+    // review 0.1.2 根治：wsl 必填 —— `ctx.wsl?.` 会静默绕过门禁（prepare 探测侧另有内部门禁）
+    await deps.wsl.assertRunning(prepared.distro)
     const info = prepared.action.terminal ? deps.runner.spawnTerminal(prepared) : null
     try {
       const handle = deps.tasks.start({

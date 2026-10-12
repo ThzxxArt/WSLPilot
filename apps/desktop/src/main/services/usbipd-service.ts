@@ -108,31 +108,55 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
   const logger = deps.logger
   const tool: RunToolFn = deps.runTool ?? runTool
 
-  async function runOp(op: UsbipdOp, busId: string, distro?: string): Promise<void> {
+  /**
+   * 轻量串行队列（review 0.1.2 根治）：bind/unbind/attach/detach 都会改动设备共享状态，
+   * 并发执行会互相踩（如 attach 与 unbind 交错产生半状态）。统一排队执行。
+   */
+  let opQueue: Promise<unknown> = Promise.resolve()
+  function enqueueOp<T>(fn: () => Promise<T>): Promise<T> {
+    const p = opQueue.then(fn, fn)
+    opQueue = p.catch(() => {})
+    return p
+  }
+
+  async function runOp(
+    op: UsbipdOp,
+    busId: string,
+    distro?: string,
+    ctl?: TaskControl,
+  ): Promise<void> {
     const id = assertSafeBusId(busId)
     const target = distro?.trim() ? assertSafeDistroName(distro) : undefined
     const args = buildUsbipdArgs(op, id, target)
     const rawCommand = previewUsbipdCommand(op, id, target)
-    logger.info('usbipd op', { op, busId: id, distro: target })
-    const r = await tool('usbipd.exe', args, { timeoutMs: 30_000 })
-    if (r.code === 0) return
-    const text = `${r.stderr}\n${r.stdout}`
-    // bind / unbind 需要管理员权限：直接执行被拒 → 提权助手（一次 UAC；§14.3）
-    if (isElevationError(text) && deps.elevation && (op === 'bind' || op === 'unbind')) {
-      logger.info('usbipd requires elevation, delegating', { op, busId: id })
-      const res = await deps.elevation.runOne({
-        op: op === 'bind' ? 'usbipd.bind' : 'usbipd.unbind',
-        params: { busId: id },
-      })
-      if (res.ok) return
-      throw createAppError('PERMISSION_DENIED', {
-        message: `usbipd ${op} 失败（${id}）：提权执行失败`,
-        detail: `${res.stderr}\n${res.stdout}`.trim(),
-        rawCommand,
-        suggestion: ELEVATION_SUGGESTION,
-      })
-    }
-    mapUsbipdFailure(r, rawCommand, `usbipd ${op} 失败（${id}）`, op)
+    return enqueueOp(async () => {
+      // 可取消（review 0.1.2）：任务取消 → abort 子进程，绝不让 usbipd 卡住任务收尾
+      const ac = new AbortController()
+      ctl?.onCancel(() => ac.abort())
+      logger.info('usbipd op', { op, busId: id, distro: target })
+      const r = await tool('usbipd.exe', args, { timeoutMs: 30_000, signal: ac.signal })
+      if (ctl?.isCanceled()) {
+        throw createAppError('TASK_CANCELED', { message: `usbipd ${op} 已取消（${id}）` })
+      }
+      if (r.code === 0) return
+      const text = `${r.stderr}\n${r.stdout}`
+      // bind / unbind 需要管理员权限：直接执行被拒 → 提权助手（一次 UAC；§14.3）
+      if (isElevationError(text) && deps.elevation && (op === 'bind' || op === 'unbind')) {
+        logger.info('usbipd requires elevation, delegating', { op, busId: id })
+        const res = await deps.elevation.runOne({
+          op: op === 'bind' ? 'usbipd.bind' : 'usbipd.unbind',
+          params: { busId: id },
+        })
+        if (res.ok) return
+        throw createAppError('PERMISSION_DENIED', {
+          message: `usbipd ${op} 失败（${id}）：提权执行失败`,
+          detail: `${res.stderr}\n${res.stdout}`.trim(),
+          rawCommand,
+          suggestion: ELEVATION_SUGGESTION,
+        })
+      }
+      mapUsbipdFailure(r, rawCommand, `usbipd ${op} 失败（${id}）`, op)
+    })
   }
 
   return {
@@ -151,8 +175,11 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
           error: text.slice(0, 300) || `usbipd 退出码 ${r.code}`,
         }
       }
-      // 形如 `usbipd-win 2.4.1` 或 `2.4.1`
-      const version = /(\d+\.\d+(?:\.\d+)?)/.exec(text)?.[1] ?? text.split(/\r?\n/)[0]!.trim()
+      // review 0.1.2 根治：优先锚定官方前缀 `usbipd-win 2.4.1`（避免抓到系统/日志里的
+      // 无关版本号，如 Windows 10.0.x）；其次接受「纯版本号」输出；最后如实回退首行
+      const anchored = /usbipd-win\s+v?(\d+\.\d+(?:\.\d+)?)/i.exec(text)?.[1]
+      const pure = /^v?(\d+\.\d+(?:\.\d+)?)$/.exec(text)?.[1]
+      const version = anchored ?? pure ?? text.split(/\r?\n/)[0]!.trim()
       return { installed: true, version }
     },
 
@@ -177,7 +204,7 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
       const id = assertSafeBusId(busId)
       ctl.log(`$ ${previewUsbipdCommand('bind', id)}`)
       ctl.report(null, `绑定设备 ${id}`)
-      await runOp('bind', id)
+      await runOp('bind', id, undefined, ctl)
       ctl.log(`已绑定 ${id}`)
       ctl.report(100, `已绑定 ${id}`)
     },
@@ -186,7 +213,7 @@ export function createUsbipdService(deps: UsbipdServiceDeps): UsbipdService {
       const id = assertSafeBusId(busId)
       ctl.log(`$ ${previewUsbipdCommand('unbind', id)}`)
       ctl.report(null, `解除绑定 ${id}`)
-      await runOp('unbind', id)
+      await runOp('unbind', id, undefined, ctl)
       ctl.log(`已解除绑定 ${id}`)
       ctl.report(100, `已解除绑定 ${id}`)
     },

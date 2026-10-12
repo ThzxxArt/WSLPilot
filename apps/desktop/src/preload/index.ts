@@ -28,6 +28,7 @@ import {
   type UsbDevice,
   type UsbipdStatus,
   type WslAction,
+  type WslConfWriteResult,
 } from '@wslpilot/shared'
 
 /**
@@ -141,8 +142,11 @@ const api = {
   wslconf: {
     /** 读 /etc/wsl.conf 原文（文件不存在返回空串） */
     read: (name: string): Promise<string> => ipcRenderer.invoke(CH.wslconfRead, name),
-    /** 写 /etc/wsl.conf（发行版内 root）；返回是否按设置自动终止了发行版 */
-    write: (name: string, content: string): Promise<{ terminated: boolean }> =>
+    /**
+     * 写 /etc/wsl.conf（发行版内 root）；返回是否按设置自动终止了发行版。
+     * review 0.1.2：文件写入成功但 terminate 失败时返回 terminated:false + terminateError（如实上报，不算写入失败）
+     */
+    write: (name: string, content: string): Promise<WslConfWriteResult> =>
       ipcRenderer.invoke(CH.wslconfWrite, { name, content }),
   },
 

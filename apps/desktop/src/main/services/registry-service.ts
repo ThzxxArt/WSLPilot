@@ -58,7 +58,8 @@ export function parseGuidDetail(guid: string, out: string): Partial<DistroRuntim
     name: distributionName,
     basePath: pickRegValue(out, 'BasePath'),
     guid,
-    version: versionNum === 1 ? 1 : 2,
+    // review 0.1.2 根治：Version 缺失不再伪造为 2（保留 undefined，由上层决定展示/合并）
+    version: versionNum === 1 ? 1 : versionNum === 2 ? 2 : undefined,
     defaultUid: parseRegDword(pickRegValue(out, 'DefaultUid')),
   }
 }
@@ -112,22 +113,17 @@ export function createRegistryService(
   logger: Logger,
   regQuery: RegQuery = defaultRegQuery,
 ): RegistryService {
-  async function query(args: string[]): Promise<string> {
+  async function query(args: string[]): Promise<{ out: string; ok: boolean }> {
     try {
-      return await regQuery(args)
+      return { out: await regQuery(args), ok: true }
     } catch (e) {
       logger.debug('registry query failed', { args, error: String(e) })
-      return ''
+      return { out: '', ok: false }
     }
   }
 
-  async function readGuid(guid: string): Promise<Partial<DistroRuntime>> {
-    const out = await query(['query', `${LXSS}\\${guid}`, '/s'])
-    return parseGuidDetail(guid, out)
-  }
-
   async function readGuidFull(guid: string): Promise<RegistryDetail | null> {
-    const out = await query(['query', `${LXSS}\\${guid}`, '/s'])
+    const { out } = await query(['query', `${LXSS}\\${guid}`, '/s'])
     return parseGuidFull(guid, out)
   }
 
@@ -139,18 +135,36 @@ export function createRegistryService(
    */
   const CACHE_TTL_MS = 30_000
   let cache: { at: number; items: Array<Partial<DistroRuntime> & { name: string }> } | null = null
+  /** single-flight（review 0.1.2 根治：并发调用共享同一次读，避免重复打爆注册表） */
+  let inFlight: Promise<Array<Partial<DistroRuntime> & { name: string }>> | null = null
 
   async function readAll(fresh = false): Promise<Array<Partial<DistroRuntime> & { name: string }>> {
     if (!fresh && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.items
-    const out = await query(['query', LXSS])
-    const ids = extractGuids(out)
-    const items: Array<Partial<DistroRuntime> & { name: string }> = []
-    for (const guid of ids) {
-      const info = await readGuid(guid)
-      if (info.name) items.push({ ...info, name: info.name })
-    }
-    cache = { at: Date.now(), items }
-    return items
+    if (inFlight) return inFlight
+    inFlight = (async () => {
+      const root = await query(['query', LXSS])
+      // review 0.1.2 根治：查询失败绝不写入 30s 缓存（否则一次瞬断会伪装成
+      // 「确无发行版」并持续半小时），失败样本只用于本次返回空并让下次重试
+      if (!root.ok) return []
+      const ids = extractGuids(root.out)
+      const items: Array<Partial<DistroRuntime> & { name: string }> = []
+      let anyGuidFailed = false
+      for (const guid of ids) {
+        const { out, ok } = await query(['query', `${LXSS}\\${guid}`, '/s'])
+        if (!ok) {
+          anyGuidFailed = true
+          continue
+        }
+        const info = parseGuidDetail(guid, out)
+        if (info.name) items.push({ ...info, name: info.name })
+      }
+      if (anyGuidFailed) return items
+      cache = { at: Date.now(), items }
+      return items
+    })().finally(() => {
+      inFlight = null
+    })
+    return inFlight
   }
 
   async function listGuids(): Promise<Array<{ guid: string; distributionName: string }>> {

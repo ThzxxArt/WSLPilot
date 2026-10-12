@@ -1,4 +1,5 @@
 import { app, dialog, shell } from 'electron'
+import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import {
   CH,
@@ -24,8 +25,17 @@ function toElectronFilters(filters?: FileFilter[]): Electron.FileFilter[] | unde
 export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
   add(CH.appGetVersion, () => app.getVersion())
 
-  add(CH.appOpenConfigDir, (c) => {
-    return shell.openPath(c.configService.userDataDir)
+  add(CH.appOpenConfigDir, async (c): Promise<void> => {
+    // review 0.1.2 根治：openPath 的失败以「非空错误串」返回而非抛出，原实现直接透传字符串，
+    // 渲染层看不到结构化错误 —— 统一映射为 AppError
+    const err = await shell.openPath(c.configService.userDataDir)
+    if (err) {
+      throw createAppError('IO_ERROR', {
+        message: '无法打开配置目录',
+        detail: err,
+        suggestion: '请检查目录是否存在或稍后重试',
+      })
+    }
   })
 
   add(CH.appGetWslVersion, async (c) => {
@@ -95,10 +105,10 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
   add(CH.appOpenPath, async (_c, target: never): Promise<void> => {
     const p = String(target)
     // 只允许打开【目录】：shell.openPath 对文件走系统关联，.exe/.bat/.vbs 可被拉起（review C10）
-    const { statSync } = await import('node:fs')
+    // review 0.1.2 根治：statSync 会阻塞主进程事件循环 —— 改异步 stat
     let isDir = false
     try {
-      isDir = statSync(p).isDirectory()
+      isDir = (await fsp.stat(p)).isDirectory()
     } catch {
       throw createAppError('IO_ERROR', {
         message: '路径不存在或不可访问',
@@ -151,7 +161,19 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
   )
 
   add(CH.appSignatureStatus, async (c): Promise<SignatureStatus> => {
-    if (c.signature) return c.signature.status()
-    return { checked: false, signed: false, smartscreenNote: SMARTSCREEN_NOTE }
+    if (!c.signature) return { checked: false, signed: false, smartscreenNote: SMARTSCREEN_NOTE }
+    try {
+      return await c.signature.status()
+    } catch (e) {
+      // review 0.1.2 根治：签名检测失败是可预期降级路径 —— 兜底为未检测态，
+      // 绝不冒泡成 UNKNOWN 把设置页整个打红
+      c.logger.warn('signature status check degraded', { error: String(e) })
+      return {
+        checked: false,
+        signed: false,
+        detail: e instanceof Error ? e.message : String(e),
+        smartscreenNote: SMARTSCREEN_NOTE,
+      }
+    }
   })
 }
