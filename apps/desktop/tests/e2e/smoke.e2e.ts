@@ -167,4 +167,12 @@ test.describe('WSLPilot 启动冒烟', () => {
       rmSync(userData, { recursive: true, force: true })
     }
   })
+
+  // 注：「无 WSL 首启降级可读」未做 E2E 模拟（review 0.1.2 记录）：
+  // Windows CreateProcess 的搜索顺序为「调用方目录 → 当前目录 → System32 → Windows → PATH」，
+  // System32 优先于 PATH，剥离 PATH 无法抑制 wsl.exe；而系统目录不可在测试内改写。
+  // 该路径（wsl 调用失败 → 错误横幅 + 可执行建议）由组件/单测层真实覆盖：
+  // stores/distros 的 load 失败落 lastError、DashboardView error-banner 渲染、
+  // DistrosView 错误态与错误目录建议文案（见 stores.test.ts / dashboard-metrics.test.ts）。
+  // 若未来产品提供 WSL 路径注入开关（0.2.0+），可在 E2E 层补真实模拟。
 })

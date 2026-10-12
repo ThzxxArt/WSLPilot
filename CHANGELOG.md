@@ -121,6 +121,10 @@
   - Playwright `forbidOnly`（CI 出现 `.only` 直接失败，防静默缩减测试面）
   - E2E 新增两条：**「命令面板执行导航」**（搜索 → 执行 → 标题切换 + 面板收起）、
     **「设置持久化闭环」**（修改减弱动效 → 重启仍生效，落盘 → 读回 → 渲染全链路）
+  - 「无 WSL 首启降级可读」E2E **评估后未做模拟**（记录理由）：Windows CreateProcess 搜索序为
+    「调用方目录 → 当前目录 → System32 → Windows → PATH」，System32 优先于 PATH，
+    剥离 PATH 无法抑制 wsl.exe；该路径由组件/单测层真实覆盖（stores 错误态、
+    DashboardView 错误横幅、errors 目录建议文案），理由已固化在 `smoke.e2e.ts` 内注释
   - 测试稳固化：`vi.waitFor` 条件等待替代硬 sleep 与固定轮询（chokidar / 组件异步时序）
 
 ### Changed
