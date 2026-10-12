@@ -23,6 +23,7 @@
 /* 动态文本：宽度随容器固定（消除 mask 边界随内容漂移） */
 .greeting,
 .hero .sub,
+.page-header .sub,
 .metric-value,
 .metric-hint,
 .system-card .panel-title,
@@ -42,6 +43,20 @@
 
 .metric-hint {
   height: 18px;
+  overflow: hidden;
+}
+
+/* 网络页 · 镜像模式卡：状态随运行机器 .wslconfig 变化（引导卡 / 已开启两种形态与高度都不同），
+   固定为较大形态的高度并整卡掩码 —— 两状态在截图中等价，不影响下方版式 */
+.mirror-card {
+  height: 360px;
+  overflow: hidden;
+}
+
+/* 网络页 · 系统转发表：条数随机器变化，固定容器高度（内容已掩码） */
+.system-card .table,
+.system-card .empty-line {
+  height: 120px;
   overflow: hidden;
 }
 

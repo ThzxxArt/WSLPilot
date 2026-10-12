@@ -51,6 +51,11 @@ function dynamicMasks(window: import('@playwright/test').Page) {
     window.locator('.table-card .sub'),
     // 网络页：.wslconfig 真实路径（含用户名）
     window.locator('.mirror-card .sub code'),
+    // 网络页：镜像模式卡整体（状态随运行机器 .wslconfig 变化：CI runner 预配 mirrored、
+    // 本机为 NAT 引导卡——内容与高度都不同；整卡固定高度 + 掩码保证两状态等价）
+    window.locator('.mirror-card'),
+    // 网络页：页头摘要行（含「系统已生效 N 条」动态计数）
+    window.locator('.page-header .sub'),
     // 网络页：Windows 系统代理状态（随机器变化）
     window.locator('.proxy-card .hint'),
     // 设置页：版本号（随版本变化）
