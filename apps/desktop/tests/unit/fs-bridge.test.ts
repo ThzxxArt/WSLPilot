@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { promises as fsp, mkdtempSync, rmSync, existsSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import {
   createFsBridge,
   parseLinuxPath,
@@ -80,7 +80,7 @@ describe('createFsBridge（临时目录模拟发行版根）', () => {
     bridge = createFsBridge({
       logger: logger(),
       rootFor: () => root,
-      sep: '/',
+      sep,
       reveal: vi.fn(),
     })
   })
@@ -148,7 +148,7 @@ describe('createFsBridge（临时目录模拟发行版根）', () => {
 
   it('revealInExplorer 仅对存在的路径', async () => {
     const reveal = vi.fn()
-    const b = createFsBridge({ logger: logger(), rootFor: () => root, sep: '/', reveal })
+    const b = createFsBridge({ logger: logger(), rootFor: () => root, sep, reveal })
     await b.revealInExplorer('Ubuntu', '/etc/wsl.conf')
     expect(reveal).toHaveBeenCalledWith(join(root, 'etc', 'wsl.conf'))
     await expect(b.revealInExplorer('Ubuntu', '/nope')).rejects.toMatchObject({
@@ -170,7 +170,7 @@ describe('createFsBridge（临时目录模拟发行版根）', () => {
     const small = createFsBridge({
       logger: log,
       rootFor: () => root,
-      sep: '/',
+      sep,
       readDirLimit: 3,
     })
     const entries = await small.readDir('Ubuntu', '/many')
@@ -198,19 +198,35 @@ describe('createFsBridge 备用根回退（wsl.localhost → wsl$）', () => {
   let fallbackRoot: string
   let lockedDir: string
   let primaryRoot: string
+  /** Windows 上 chmod 不阻止目录写入（只读位对目录不生效）：用「不存在的盘符」模拟不可达根 */
+  let ghostDrive = false
 
   beforeEach(async () => {
     fallbackRoot = mkdtempSync(join(tmpdir(), 'wslpilot-fb-'))
     await fsp.mkdir(join(fallbackRoot, 'etc'), { recursive: true })
     await fsp.writeFile(join(fallbackRoot, 'etc', 'wsl.conf'), '[boot]\nsystemd = true\n', 'utf8')
-    // 主根挂在只读目录下：读操作 ENOENT、写操作 EACCES，均属 UNC 不可达类可回退错误
+    // 平台无关的「主根不可达」模拟（均属 UNC 不可达类可回退错误）：
+    // - POSIX：主根挂在只读目录下（读 ENOENT / 写 EACCES）
+    // - Windows：目录只读位不阻止写入，改用不存在的盘符（ENOENT）
     lockedDir = mkdtempSync(join(tmpdir(), 'wslpilot-lock-'))
-    chmodSync(lockedDir, 0o555)
-    primaryRoot = join(lockedDir, 'wsl.localhost')
+    ghostDrive = false
+    if (process.platform === 'win32') {
+      for (const drive of ['Q', 'R', 'S', 'T', 'U', 'V']) {
+        if (!existsSync(`${drive}:\\`)) {
+          primaryRoot = `${drive}:\\wsl.localhost`
+          ghostDrive = true
+          break
+        }
+      }
+    }
+    if (!ghostDrive) {
+      chmodSync(lockedDir, 0o555)
+      primaryRoot = join(lockedDir, 'wsl.localhost')
+    }
   })
 
   afterEach(() => {
-    chmodSync(lockedDir, 0o755)
+    if (!ghostDrive) chmodSync(lockedDir, 0o755)
     rmSync(lockedDir, { recursive: true, force: true })
     rmSync(fallbackRoot, { recursive: true, force: true })
     vi.restoreAllMocks()
@@ -221,7 +237,7 @@ describe('createFsBridge 备用根回退（wsl.localhost → wsl$）', () => {
       logger: logger(),
       rootFor: () => primaryRoot,
       fallbackRootFor: () => fallbackRoot,
-      sep: '/',
+      sep,
       reveal: vi.fn(),
       ...over,
     })
@@ -263,7 +279,7 @@ describe('createFsBridge 备用根回退（wsl.localhost → wsl$）', () => {
       logger: logger(),
       rootFor: () => primary,
       fallbackRootFor: () => backup,
-      sep: '/',
+      sep,
       reveal: vi.fn(),
     })
     const err = await b.readDir('Ubuntu', '/').catch((e) => e)
@@ -282,7 +298,7 @@ describe('createFsBridge 备用根回退（wsl.localhost → wsl$）', () => {
       logger: logger(),
       rootFor: () => primaryRoot,
       fallbackRootFor,
-      sep: '/',
+      sep,
       reveal: vi.fn(),
     })
     await expect(b.write('Ubuntu', '/../evil', 'x')).rejects.toMatchObject({
@@ -301,7 +317,7 @@ describe('createFsBridge 备用根回退（wsl.localhost → wsl$）', () => {
     const b = createFsBridge({
       logger: logger(),
       rootFor: () => primaryRoot,
-      sep: '/',
+      sep,
       reveal: vi.fn(),
     })
     const err = await b.readDir('Ubuntu', '/').catch((e) => e)
