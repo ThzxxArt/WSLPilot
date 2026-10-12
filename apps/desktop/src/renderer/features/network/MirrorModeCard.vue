@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton, NTag, useMessage } from 'naive-ui'
+import { NButton, NSkeleton, NTag, useMessage } from 'naive-ui'
 import {
   mirrorModeGuidance,
   mirrorModeSnippet,
@@ -22,7 +22,8 @@ const mode = computed(() => props.status?.mode ?? 'unknown')
 const mirrored = computed(() => mode.value === 'mirrored')
 const guidance = computed(() => mirrorModeGuidance(mode.value))
 
-const modeLabel = computed(() => NETWORK_MODE_LABEL[mode.value])
+// 运行时 status 来自 IPC，mode 可能超出枚举：未命中一律兜底展示（review 0.1.2 根治）
+const modeLabel = computed(() => NETWORK_MODE_LABEL[mode.value] ?? '未知')
 const modeType = computed(() => (mirrored.value ? 'success' : 'warning'))
 
 async function copySnippet() {
@@ -43,7 +44,7 @@ async function copySnippet() {
         <p class="sub">
           读取 <code>{{ status?.wslconfigPath || '%USERPROFILE%\\.wslconfig' }}</code>
           <n-tag
-            v-if="status && !status.wslconfigExists"
+            v-if="!loading && status && !status.wslconfigExists"
             size="tiny"
             :bordered="false"
             type="warning"
@@ -52,12 +53,19 @@ async function copySnippet() {
           </n-tag>
         </p>
       </div>
-      <n-tag size="small" :bordered="false" :type="modeType">
+      <n-skeleton v-if="loading" text style="width: 96px" />
+      <n-tag v-else size="small" :bordered="false" :type="modeType">
         {{ modeLabel }}
       </n-tag>
     </div>
 
-    <div v-if="mirrored" class="body ok-body">
+    <!-- loading 时渲染骨架：as 异步到达前绝不先闪「推荐开启」卡（review 0.1.2 根治） -->
+    <div v-if="loading" class="body" data-testid="mirror-skeleton">
+      <n-skeleton text :repeat="3" />
+      <n-skeleton text style="width: 40%" />
+    </div>
+
+    <div v-else-if="mirrored" class="body ok-body">
       <p>
         镜像模式已开启：Windows 与 WSL 共用网络栈，宿主机可直接访问 Linux 服务的
         localhost，通常无需端口转发。

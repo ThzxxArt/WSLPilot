@@ -15,3 +15,11 @@ export function useCommandPalette() {
   }
   return { open, openPalette, closePalette, togglePalette }
 }
+
+/**
+ * @internal 仅供测试：重置面板开合状态。
+ * 模块级单例必须可逐用例隔离（参照 terminal store 的 __terminalBuffersForTest 风格）。
+ */
+export function __resetUseCommandPaletteForTest(): void {
+  open.value = false
+}

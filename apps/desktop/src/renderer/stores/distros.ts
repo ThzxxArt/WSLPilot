@@ -16,7 +16,14 @@ export const useDistrosStore = defineStore('distros', {
   getters: {
     runningCount: (s) => s.items.filter((d) => d.state === 'Running').length,
     defaultDistro: (s) => s.items.find((d) => d.isDefault) ?? null,
-    byName: (s) => (name: string) => s.items.find((d) => d.name === name) ?? null,
+    /**
+     * 按名称查找（大小写不敏感 — review 0.1.2 根治）：
+     * WSL 发行版名不区分大小写，此前精确匹配导致 'ubuntu' 查不到 'Ubuntu'。
+     */
+    byName: (s) => (name: string) => {
+      const key = name.toLowerCase()
+      return s.items.find((d) => d.name.toLowerCase() === key) ?? null
+    },
   },
 
   actions: {
@@ -69,7 +76,9 @@ export const useDistrosStore = defineStore('distros', {
     },
 
     async run(name: string, action: DistroAction, fn: () => Promise<void>) {
-      const key = `${action}:${name}`
+      // busy key 归一为小写（review 0.1.2 根治）：与「WSL 名不区分大小写」一致，
+      // 否则 start('ubuntu') 与 isBusy('Ubuntu') 对不上，按钮 loading 失效。
+      const key = `${action}:${name.toLowerCase()}`
       this.busy.add(key)
       this.lastError = null
       try {
@@ -83,8 +92,9 @@ export const useDistrosStore = defineStore('distros', {
     },
 
     isBusy(name: string, action?: DistroAction) {
-      if (action) return this.busy.has(`${action}:${name}`)
-      return [...this.busy].some((k) => k.endsWith(`:${name}`) || k === name)
+      const normalized = name.toLowerCase()
+      if (action) return this.busy.has(`${action}:${normalized}`)
+      return [...this.busy].some((k) => k.endsWith(`:${normalized}`))
     },
   },
 })

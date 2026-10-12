@@ -46,6 +46,8 @@ export function isTypingContext(target: EventTarget | null): boolean {
 }
 
 function matchHotkey(e: KeyboardEvent, h: HotkeyHandlers): boolean {
+  // 长按不连发（review 0.1.2 根治）：keydown 自动重复事件不再反复触发动作
+  if (e.repeat) return false
   if (isTypingContext(e.target)) return false
   const mod = e.ctrlKey || e.metaKey
   if (!mod || e.altKey) return false
@@ -58,7 +60,7 @@ function matchHotkey(e: KeyboardEvent, h: HotkeyHandlers): boolean {
     h.newTerminal?.()
     return true
   }
-  if (key === ',') {
+  if (key === ',' && !e.shiftKey) {
     h.openSettings?.()
     return true
   }

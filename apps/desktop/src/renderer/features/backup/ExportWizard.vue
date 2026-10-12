@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { NButton, NInput, NRadioGroup, NRadioButton, NSelect, NAlert } from 'naive-ui'
 import type { DistroView } from '@wslpilot/shared'
 import type { ExportForm } from './forms'
@@ -27,13 +27,25 @@ const name = computed(() => props.form.name)
 const path = computed(() => props.form.path)
 const format = computed(() => props.form.format)
 
+/**
+ * 上一次自动建议的路径：用户没手改（当前值仍等于建议值或为空）时，
+ * name/format 变化会跟随刷新建议；手改过则一律不动（review 0.1.2 根治）。
+ */
+const lastSuggested = ref('')
+
+/** 未手改状态下重新生成建议路径；返回 null 表示应保持用户当前值 */
+function syncSuggestedPath(nextName: string, nextFormat: 'tar' | 'vhd'): string | null {
+  if (props.form.path && props.form.path !== lastSuggested.value) return null
+  if (!nextName) return ''
+  const suggested = suggestedBackupPath(props.defaultDir, nextName, nextFormat)
+  lastSuggested.value = suggested
+  return suggested
+}
+
 function setName(v: string | number | null) {
   const s = typeof v === 'string' ? v : String(v ?? '')
-  const nextPath =
-    !props.form.path && s
-      ? suggestedBackupPath(props.defaultDir, s, props.form.format)
-      : props.form.path
-  emit('update:form', { ...props.form, name: s, path: nextPath })
+  const synced = syncSuggestedPath(s, props.form.format)
+  emit('update:form', { ...props.form, name: s, path: synced ?? props.form.path })
 }
 
 function setPath(v: string | number | null) {
@@ -41,7 +53,10 @@ function setPath(v: string | number | null) {
 }
 
 function setFormat(v: string | number | null) {
-  emit('update:form', { ...props.form, format: v === 'vhd' ? 'vhd' : 'tar' })
+  const f = v === 'vhd' ? 'vhd' : 'tar'
+  // 已建议后缀同步切换（tar ↔ vhdx）：避免建议文件与所选格式不一致（review 0.1.2 根治）
+  const synced = syncSuggestedPath(props.form.name, f)
+  emit('update:form', { ...props.form, format: f, path: synced ?? props.form.path })
 }
 
 async function browse() {

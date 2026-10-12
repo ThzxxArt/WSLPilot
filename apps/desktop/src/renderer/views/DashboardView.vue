@@ -9,7 +9,7 @@ import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
 import { MetricCard, DistroCard, EmptyState, StatusDot, Skeleton } from '@wslpilot/ui'
 import { vRipple } from '@wslpilot/ui'
-import { ACCENT_GRADIENTS, DEFAULT_POLL_INTERVAL_MS } from '@wslpilot/shared'
+import { ACCENT_GRADIENTS, DEFAULT_POLL_INTERVAL_MS, type DistroView } from '@wslpilot/shared'
 import InstallDistroModal from '../features/distros/InstallDistroModal.vue'
 import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 
@@ -24,8 +24,12 @@ const cleaning = ref(false)
 const detailOpen = ref(false)
 const detailName = ref('')
 
-const hour = new Date().getHours()
-const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
+/** 问候语在每次路由进入（组件挂载）时重算：跨天后不让旧问候语僵在页面上 */
+function greetingText() {
+  const hour = new Date().getHours()
+  return hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
+}
+const greeting = ref(greetingText())
 const gradient = computed(() => ACCENT_GRADIENTS[settings.accent] ?? ACCENT_GRADIENTS.aurora)
 
 const wslInfo = ref({ wslVersion: '', kernelVersion: '' })
@@ -33,6 +37,24 @@ const wslLabel = computed(() => {
   if (wslInfo.value.wslVersion) return `WSL ${wslInfo.value.wslVersion}`
   return 'WSL'
 })
+
+/**
+ * 首页展示排序（review 0.1.2 根治）：running → default → pinned → 名称。
+ * 此前直接 slice(0, 6) 截断原始列表，最关心的运行中发行版可能被截掉。
+ */
+const topDistros = computed(() => {
+  const score = (d: DistroView) =>
+    (d.state === 'Running' ? 4 : 0) + (d.isDefault ? 2 : 0) + (d.meta?.pinned ? 1 : 0)
+  return [...distros.items]
+    .sort((a, b) => {
+      const diff = score(b) - score(a)
+      return diff !== 0 ? diff : a.name.localeCompare(b.name)
+    })
+    .slice(0, 6)
+})
+
+/** 错误横幅：发行版列表与指标采样的错误合并展示，两个来源都有出口 */
+const errorBanner = computed(() => distros.lastError ?? metrics.lastError ?? null)
 
 const pollInterval = computed(() => {
   const ms = settings.pollIntervalMs
@@ -44,6 +66,8 @@ async function refreshAll() {
 }
 
 onMounted(() => {
+  // 每次路由进入重算问候语（跨天/长时间挂起后语义正确）
+  greeting.value = greetingText()
   // settings.general.autoRefreshOnStart：关闭后仅在尚无数据时兜底拉取一次
   if (settings.autoRefreshOnStart || distros.items.length === 0) void refreshAll()
   // 版本探测失败（如 getVersion 双失败抛 AppError）不得成为 unhandled rejection 炸页：
@@ -100,7 +124,8 @@ async function onCleanupBackups() {
   try {
     const { removed } = await window.wslAPI.io.cleanupBackups({
       dir: settings.backupDefaultDir || undefined,
-      keep: settings.backupKeepRecent,
+      // keep 防御（review 0.1.2 根治）：非法/缺失值不得传入 0 把备份清空
+      keep: Math.max(1, settings.backupKeepRecent),
     })
     message.success(removed > 0 ? `已清理 ${removed} 份旧备份` : '没有需要清理的旧备份')
   } catch (e) {
@@ -158,9 +183,9 @@ function onDetailTerminal(name: string) {
       </div>
     </header>
 
-    <p v-if="distros.lastError" class="error-banner">
-      {{ distros.lastError.message }}
-      <span v-if="distros.lastError.suggestion"> — {{ distros.lastError.suggestion }}</span>
+    <p v-if="errorBanner" class="error-banner">
+      {{ errorBanner.message }}
+      <span v-if="errorBanner.suggestion"> — {{ errorBanner.suggestion }}</span>
     </p>
 
     <section class="metrics">
@@ -198,7 +223,7 @@ function onDetailTerminal(name: string) {
 
       <div v-else class="cards">
         <DistroCard
-          v-for="d in distros.items.slice(0, 6)"
+          v-for="d in topDistros"
           :key="d.name"
           :distro="d"
           :busy="distros.isBusy(d.name)"

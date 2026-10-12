@@ -39,6 +39,12 @@ const emit = defineEmits<{
 const message = useMessage()
 const form = reactive<ProxyForm>(proxyToForm(props.proxy))
 const targetDistro = ref('')
+/**
+ * 展示的脚本是否对应当前目标发行版：
+ * 切换 targetDistro 时旧脚本立即隐藏，直到新的 proxyState 结果到达，
+ * 消除「A 发行版的脚本文本挂在 B 发行版名下」的串台（review 0.1.2 根治）。
+ */
+const scriptFresh = ref(false)
 
 watch(
   () => props.proxy,
@@ -53,6 +59,22 @@ watch(
   },
   { immediate: true },
 )
+
+// 新的脚本结果到达（inspect / apply / clear）→ 允许展示；
+// immediate：挂载时已有脚本也直接展示（只有「切换发行版」才判旧）
+watch(
+  () => props.proxyScript,
+  (s) => {
+    scriptFresh.value = !!s
+  },
+  { immediate: true },
+)
+
+// 切换目标发行版：先清空旧展示（防串台），再触发父级按新发行版重载
+watch(targetDistro, (d) => {
+  scriptFresh.value = false
+  if (d) emit('inspect', d)
+})
 
 const distroOptions = computed(() =>
   props.distros.map((d) => ({
@@ -148,7 +170,13 @@ function inspect() {
           <code>{{ PROXY_SCRIPT_PATH }}</code>
         </p>
       </div>
-      <n-button size="small" type="primary" :loading="saving" :disabled="!!error" @click="save">
+      <n-button
+        size="small"
+        type="primary"
+        :loading="saving"
+        :disabled="saving || applying || !!error"
+        @click="save"
+      >
         保存配置
       </n-button>
     </div>
@@ -156,23 +184,35 @@ function inspect() {
     <div class="grid">
       <label class="field toggle">
         <span class="label">跟随 Windows 系统代理</span>
-        <n-switch v-model:value="form.useWindowsProxy" />
+        <n-switch v-model:value="form.useWindowsProxy" :disabled="applying" />
         <span class="hint">{{ windowsProxyLabel }}</span>
       </label>
 
       <label class="field">
         <span class="label">HTTP 代理</span>
-        <n-input v-model:value="form.httpProxy" placeholder="http://127.0.0.1:7890" />
+        <n-input
+          v-model:value="form.httpProxy"
+          placeholder="http://127.0.0.1:7890"
+          :disabled="applying"
+        />
       </label>
 
       <label class="field">
         <span class="label">HTTPS 代理</span>
-        <n-input v-model:value="form.httpsProxy" placeholder="http://127.0.0.1:7890" />
+        <n-input
+          v-model:value="form.httpsProxy"
+          placeholder="http://127.0.0.1:7890"
+          :disabled="applying"
+        />
       </label>
 
       <label class="field">
         <span class="label">不代理列表（no_proxy）</span>
-        <n-input v-model:value="form.noProxy" placeholder="localhost,127.0.0.1" />
+        <n-input
+          v-model:value="form.noProxy"
+          placeholder="localhost,127.0.0.1"
+          :disabled="applying"
+        />
       </label>
     </div>
 
@@ -185,6 +225,7 @@ function inspect() {
           filterable
           placeholder="选择发行版"
           class="distro-select"
+          :disabled="applying"
         />
       </div>
       <div class="apply-actions">
@@ -192,19 +233,23 @@ function inspect() {
           size="small"
           type="primary"
           :loading="applying"
-          :disabled="!!error"
+          :disabled="applying || !!error"
           @click="applyToDistro"
         >
           写入代理脚本
         </n-button>
-        <n-button size="small" secondary @click="clearFromDistro">清除代理脚本</n-button>
-        <n-button size="small" quaternary @click="inspect">查看当前脚本</n-button>
+        <n-button size="small" secondary :disabled="applying" @click="clearFromDistro">
+          清除代理脚本
+        </n-button>
+        <n-button size="small" quaternary :disabled="applying" @click="inspect">
+          查看当前脚本
+        </n-button>
       </div>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div v-if="proxyScript" class="script-state">
+    <div v-if="proxyScript && scriptFresh" class="script-state">
       <div class="script-head">
         <span class="label">发行版内脚本（{{ proxyScript.path }}）</span>
         <n-tag size="tiny" :bordered="false" :type="proxyScript.exists ? 'success' : 'default'">

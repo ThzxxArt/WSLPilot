@@ -9,6 +9,8 @@ const props = defineProps<{
   maxSessions: number
   distroOptions: { label: string; value: string }[]
   defaultDistro: string
+  /** store 中「创建中」的发行版名单：按钮据此进入 loading 并防重（review 0.1.2 根治） */
+  creatingDistros?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -37,6 +39,9 @@ watch(
 )
 
 const canCreate = computed(() => props.sessions.filter((s) => s.alive).length < props.maxSessions)
+
+/** 当前下拉目标正在创建：按钮 loading，双击/重入被挡在 store 去重之外还有视觉反馈 */
+const creating = computed(() => (props.creatingDistros ?? []).includes(newDistro.value))
 
 /** 拖拽排序的 window 监听器清理（组件卸载时兜底，防泄漏 — review M-12） */
 const dragCleanups: Array<() => void> = []
@@ -164,7 +169,7 @@ function submitNew() {
     <div class="tabs-actions">
       <n-popover trigger="click" placement="bottom-end">
         <template #trigger>
-          <n-button size="tiny" secondary :disabled="!canCreate"> + 新建 </n-button>
+          <n-button size="tiny" secondary :disabled="!canCreate || creating"> + 新建 </n-button>
         </template>
         <div class="new-form">
           <div class="hint">选择发行版（上限 {{ maxSessions }}）</div>
@@ -175,7 +180,14 @@ function submitNew() {
             filterable
             style="width: 220px"
           />
-          <n-button size="small" type="primary" style="margin-top: 8px" @click="submitNew">
+          <n-button
+            size="small"
+            type="primary"
+            style="margin-top: 8px"
+            :loading="creating"
+            :disabled="creating"
+            @click="submitNew"
+          >
             打开终端
           </n-button>
         </div>

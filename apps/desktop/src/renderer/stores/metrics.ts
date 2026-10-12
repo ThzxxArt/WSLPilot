@@ -47,15 +47,25 @@ export const useMetricsStore = defineStore('metrics', {
       }
     },
 
+    /**
+     * 单发行版采样（review 0.1.2 根治）：
+     * - 未运行（DISTRO_NOT_RUNNING）是预期状态而非故障：静默返回 null，不污染 lastError；
+     * - 其他失败（采样失败）必须落 lastError，不再一律静默 null 让错误无出口。
+     */
     async sampleDistro(name: string): Promise<Metrics | null> {
       try {
         return (await window.wslAPI.metrics.sample(name)) as Metrics
-      } catch {
+      } catch (e) {
+        const err = toAppError(e)
+        if (err.code !== 'DISTRO_NOT_RUNNING') this.lastError = err
         return null
       }
     },
 
     pushHistory(o: OverviewMetrics) {
+      // 无 Running 发行版时主进程给不出样本，cpuPercent 恒 0：
+      // push 0 会在趋势图上制造「假下探」（review 0.1.2 根治 — 冻结 history 不造假）
+      if (o.runningCount <= 0) return
       const push = (arr: number[], v: number) => {
         arr.push(v)
         if (arr.length > MAX_POINTS) arr.shift()

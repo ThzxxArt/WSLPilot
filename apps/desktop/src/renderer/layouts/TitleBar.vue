@@ -10,24 +10,25 @@ const { openPalette } = useCommandPalette()
 
 const gradient = computed(() => ACCENT_GRADIENTS[settings.accent] ?? ACCENT_GRADIENTS.aurora)
 
-function onSearchKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault()
-    openPalette()
-  }
+/**
+ * 窗口控制失败不再产生 unhandled rejection（review 0.1.2 根治）：
+ * 最小化/最大化/关闭任一 IPC 失败时记录诊断，绝不静默吞掉也不炸控制台。
+ */
+function reportWindowError(action: string) {
+  return (e: unknown) => console.error(`[WSLPilot] 窗口操作失败（${action}）:`, e)
 }
 
 function minimize() {
-  void window.wslAPI.app.minimize()
+  void window.wslAPI?.app.minimize().catch(reportWindowError('最小化'))
 }
 
 function toggleMaximize() {
-  void window.wslAPI.app.maximize()
+  void window.wslAPI?.app.maximize().catch(reportWindowError('最大化'))
 }
 
 function close() {
   // 主进程按 closeBehavior 决定：最小化到托盘或退出
-  void window.wslAPI.app.close()
+  void window.wslAPI?.app.close().catch(reportWindowError('关闭'))
 }
 </script>
 
@@ -39,13 +40,8 @@ function close() {
     </div>
 
     <div class="titlebar-search">
-      <button
-        class="search-box"
-        type="button"
-        aria-label="打开命令面板"
-        @click="openPalette"
-        @keydown="onSearchKeydown"
-      >
+      <!-- 原生 button：Enter/Space 由浏览器触发 click，单一触发源（不再手写 keydown 双触发） -->
+      <button class="search-box" type="button" aria-label="打开命令面板" @click="openPalette">
         <span class="search-placeholder">搜索或执行命令…</span>
         <kbd>Ctrl K</kbd>
       </button>

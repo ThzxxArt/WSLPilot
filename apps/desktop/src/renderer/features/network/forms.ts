@@ -101,6 +101,13 @@ export function formatRuleRange(address: string, port: number): string {
   return `${host}:${port}`
 }
 
+/** 地址规范化：比较前 trim + 小写（IP/主机名大小写不敏感，空白不应造成误判 — review 0.1.2 根治） */
+function normalizeAddr(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+}
+
 /** 规则与系统转发表的对照状态（表格状态列） */
 export function ruleSystemState(
   rule: PortForwardRule,
@@ -108,15 +115,16 @@ export function ruleSystemState(
 ): RuleSystemState {
   if (!canApplyRule(rule)) return 'udp-only'
   const entries = status?.portProxy ?? []
+  const ruleListen = normalizeAddr(rule.listenAddress)
   const listened = entries.find(
-    (e) => e.listenAddress === rule.listenAddress && e.listenPort === rule.listenPort,
+    (e) => normalizeAddr(e.listenAddress) === ruleListen && e.listenPort === rule.listenPort,
   )
   if (!listened) return 'none'
   const exact = entries.some(
     (e) =>
-      e.listenAddress === rule.listenAddress &&
+      normalizeAddr(e.listenAddress) === ruleListen &&
       e.listenPort === rule.listenPort &&
-      e.connectAddress === rule.connectAddress &&
+      normalizeAddr(e.connectAddress) === normalizeAddr(rule.connectAddress) &&
       e.connectPort === rule.connectPort,
   )
   return exact ? 'applied' : 'mismatch'
@@ -168,8 +176,25 @@ export function proxyToForm(proxy: ProxyConfig): ProxyForm {
 }
 
 /**
+ * 代理地址基本形态：host:port 或 scheme://host:port。
+ * 支持 user:pass@host:port 与 IPv6 字面量（[::1]:7890）；端口须在 1..65535。
+ */
+export function isValidProxyAddress(value: string): boolean {
+  const v = String(value ?? '').trim()
+  if (!v) return false
+  const noScheme = v.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+  const at = noScheme.lastIndexOf('@')
+  const hostPort = at >= 0 ? noScheme.slice(at + 1) : noScheme
+  const m = /^(\[[0-9a-fA-F:]+\]|[^:\s/]+):(\d{1,5})$/.exec(hostPort)
+  if (!m) return false
+  const port = Number(m[2])
+  return Number.isInteger(port) && port >= 1 && port <= 65535
+}
+
+/**
  * 代理表单校验：全空 = 显式「不配置代理」（允许保存，即关闭代理）；
- * 填写的值不得含空白字符。目标是可往返表达「关闭」态，而不是逼用户留一个假地址。
+ * 填写的值不得含空白字符且须满足基本形态。目标是可往返表达「关闭」态，
+ * 而不是逼用户留一个假地址；启动时也绝不把垃圾地址写进发行版（review 0.1.2 根治）。
  */
 export function validateProxyForm(form: ProxyForm): string | null {
   const http = form.httpProxy.trim()
@@ -180,6 +205,7 @@ export function validateProxyForm(form: ProxyForm): string | null {
   ] as const) {
     if (!value) continue
     if (/\s/.test(value)) return `${label}不能包含空白字符`
+    if (!isValidProxyAddress(value)) return `${label}格式应为 host:port 或 scheme://host:port`
   }
   return null
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NSelect, NSpin, NSwitch, NTag, useMessage } from 'naive-ui'
-import { EmptyState } from '@wslpilot/ui'
+import { NButton, NSelect, NSwitch, NTag, useMessage } from 'naive-ui'
+import { EmptyState, Skeleton } from '@wslpilot/ui'
 import {
   canAttach,
   canDetach,
@@ -24,11 +24,19 @@ const distros = useDistrosStore()
 const message = useMessage()
 
 const attachTarget = ref<string | null>(null)
+/** usbipd-win 官方仓库（安装引导外链，经主进程 shell 打开，不在应用内导航） */
+const USBIPD_WIN_URL = 'https://github.com/dorssel/usbipd-win'
 
 onMounted(() => {
   void devices.load()
   if (distros.items.length === 0) void distros.refresh()
 })
+
+function openUsbipdSite() {
+  void window.wslAPI.app.openPath(USBIPD_WIN_URL).catch((e: unknown) => {
+    message.error(errorLine(e, '打开 usbipd-win 官网失败'))
+  })
+}
 
 const distroOptions = computed(() => [
   { label: '默认发行版', value: '' },
@@ -78,6 +86,18 @@ async function copyInstall() {
   }
 }
 
+/**
+ * 操作成功后的列表刷新（review 0.1.2 根治）：
+ * refresh 内部会捕获错误写入 lastError，不抛异常；这里主动检查并把
+ * 「操作成功但刷新失败」如实提示，避免界面停在旧状态却无任何解释。
+ */
+async function refreshAfterAction(doneLabel: string) {
+  await devices.refresh()
+  if (devices.lastError) {
+    message.warning(`${doneLabel}，但设备列表刷新失败：${devices.lastError.message}`)
+  }
+}
+
 async function onToggleShare(d: UsbDevice, shared: boolean) {
   if (pending.value.has(d.busId)) return
   markPending(d.busId, true)
@@ -85,11 +105,12 @@ async function onToggleShare(d: UsbDevice, shared: boolean) {
     if (shared) {
       await devices.bind(d.busId)
       message.success(`已提交绑定 ${d.busId}（${usbipdOpLabel('bind')}，需管理员权限）`)
+      await refreshAfterAction('已提交绑定')
     } else {
       await devices.unbind(d.busId)
       message.success(`已提交解除绑定 ${d.busId}`)
+      await refreshAfterAction('已提交解除绑定')
     }
-    void devices.refresh()
   } catch (e) {
     message.error(errorLine(e, shared ? '绑定设备失败' : '解除绑定失败'))
     void devices.refresh()
@@ -105,11 +126,12 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
     if (attached) {
       await devices.attach(d.busId, attachTarget.value || undefined)
       message.success(`已附加 ${d.busId} 到 WSL`)
+      await refreshAfterAction('已附加')
     } else {
       await devices.detach(d.busId)
       message.success(`已断开 ${d.busId}`)
+      await refreshAfterAction('已断开')
     }
-    void devices.refresh()
   } catch (e) {
     message.error(errorLine(e, attached ? '附加设备失败' : '断开设备失败'))
     void devices.refresh()
@@ -141,60 +163,72 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
       </div>
     </header>
 
-    <!-- usbipd 未安装：安装引导（可选能力，不阻断其它功能） -->
-    <section v-if="!installed && !devices.loading" class="card">
-      <EmptyState description="未检测到 usbipd，无法管理 USB 设备" illustration="🔌">
-        <div class="install">
-          <p class="install-text">
-            usbipd-win 让 Windows 上的 USB 设备可以附加到 WSL 发行版。安装后回到本页即可使用：
-          </p>
-          <code class="install-cmd">{{ USBIPD_INSTALL_COMMAND }}</code>
-          <div class="install-actions">
-            <n-button size="small" type="primary" secondary @click="copyInstall">
-              复制安装命令
-            </n-button>
-            <n-button size="small" quaternary @click="() => devices.refresh()">
-              我已安装，重新检测
-            </n-button>
+    <!-- 首次加载：骨架屏（review 0.1.2 根治）：不再先闪「没有发现 USB 设备」空态 -->
+    <div
+      v-if="devices.loading && devices.items.length === 0"
+      class="skeleton-list"
+      aria-busy="true"
+    >
+      <Skeleton v-for="i in 4" :key="i" height="52px" radius="12px" />
+    </div>
+
+    <template v-else>
+      <!-- usbipd 未安装：安装引导（可选能力，不阻断其它功能） -->
+      <section v-if="!installed" class="card">
+        <EmptyState description="未检测到 usbipd，无法管理 USB 设备" illustration="🔌">
+          <div class="install">
+            <p class="install-text">
+              usbipd-win 让 Windows 上的 USB 设备可以附加到 WSL 发行版。安装后回到本页即可使用：
+            </p>
+            <code class="install-cmd">{{ USBIPD_INSTALL_COMMAND }}</code>
+            <div class="install-actions">
+              <n-button size="small" type="primary" secondary @click="copyInstall">
+                复制安装命令
+              </n-button>
+              <n-button size="small" quaternary @click="openUsbipdSite">
+                访问 usbipd-win 官网
+              </n-button>
+              <n-button size="small" quaternary @click="() => devices.refresh()">
+                我已安装，重新检测
+              </n-button>
+            </div>
+          </div>
+        </EmptyState>
+      </section>
+
+      <!-- usbipd 已安装但调用失败：如实提示（不是"未安装"，不要误导重装） -->
+      <section v-else-if="statusError" class="card">
+        <EmptyState description="usbipd 调用失败，无法读取设备列表" illustration="⚠">
+          <p class="install-text">{{ statusError }}</p>
+          <n-button size="small" secondary @click="() => devices.refresh()">重新检测</n-button>
+        </EmptyState>
+      </section>
+
+      <!-- 设备表 -->
+      <section v-else class="card table-card">
+        <div class="head">
+          <div>
+            <h2 class="panel-title">本机 USB 设备</h2>
+            <p class="sub">
+              共 {{ devices.items.length }} 个 · 已附加 {{ devices.attachedCount }} · 已共享
+              {{ devices.sharedCount }}
+              <template v-if="devices.status.version">
+                · usbipd {{ devices.status.version }}</template
+              >
+            </p>
+          </div>
+          <div class="head-actions">
+            <span class="label">附加到</span>
+            <n-select
+              v-model:value="attachTarget"
+              :options="distroOptions"
+              size="small"
+              class="distro-select"
+              placeholder="默认发行版"
+            />
           </div>
         </div>
-      </EmptyState>
-    </section>
 
-    <!-- usbipd 已安装但调用失败：如实提示（不是"未安装"，不要误导重装） -->
-    <section v-else-if="installed && statusError && !devices.loading" class="card">
-      <EmptyState description="usbipd 调用失败，无法读取设备列表" illustration="⚠">
-        <p class="install-text">{{ statusError }}</p>
-        <n-button size="small" secondary @click="() => devices.refresh()">重新检测</n-button>
-      </EmptyState>
-    </section>
-
-    <!-- 设备表 -->
-    <section v-else class="card table-card">
-      <div class="head">
-        <div>
-          <h2 class="panel-title">本机 USB 设备</h2>
-          <p class="sub">
-            共 {{ devices.items.length }} 个 · 已附加 {{ devices.attachedCount }} · 已共享
-            {{ devices.sharedCount }}
-            <template v-if="devices.status.version">
-              · usbipd {{ devices.status.version }}</template
-            >
-          </p>
-        </div>
-        <div class="head-actions">
-          <span class="label">附加到</span>
-          <n-select
-            v-model:value="attachTarget"
-            :options="distroOptions"
-            size="small"
-            class="distro-select"
-            placeholder="默认发行版"
-          />
-        </div>
-      </div>
-
-      <n-spin :show="devices.loading">
         <!-- 读取失败与「真的没有设备」是两种状态：绝不共用空态文案 -->
         <EmptyState
           v-if="devices.lastError"
@@ -234,6 +268,7 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
               <td>
                 <n-switch
                   size="small"
+                  :aria-label="`共享设备 ${d.busId}`"
                   :value="d.state === 'shared' || d.state === 'attached'"
                   :disabled="
                     pending.has(d.busId) || !canToggleShare(d.state) || d.state === 'attached'
@@ -244,6 +279,7 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
               <td>
                 <n-switch
                   size="small"
+                  :aria-label="`附加设备 ${d.busId} 到 WSL`"
                   :value="d.state === 'attached'"
                   :disabled="
                     pending.has(d.busId) ||
@@ -255,14 +291,14 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
             </tr>
           </tbody>
         </table>
-      </n-spin>
 
-      <p class="footnote">
-        「共享」对应 <code>usbipd bind</code>（需要管理员权限）；「附加」对应
-        <code>usbipd attach --wsl</code>（usbipd 2.0+）。附加后设备出现在 WSL 发行版的
-        <code>/dev</code> 中。
-      </p>
-    </section>
+        <p class="footnote">
+          「共享」对应 <code>usbipd bind</code>（需要管理员权限）；「附加」对应
+          <code>usbipd attach --wsl</code>（usbipd 2.0+）。附加后设备出现在 WSL 发行版的
+          <code>/dev</code> 中。
+        </p>
+      </section>
+    </template>
   </div>
 </template>
 
@@ -342,6 +378,12 @@ async function onToggleAttach(d: UsbDevice, attached: boolean) {
 
 .table-card {
   padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-list {
   display: flex;
   flex-direction: column;
   gap: 12px;

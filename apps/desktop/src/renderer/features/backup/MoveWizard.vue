@@ -40,6 +40,29 @@ const selectedDistro = computed(() => props.distros.find((d) => d.name === props
 const isRunning = computed(() => selectedDistro.value?.state === 'Running')
 const currentBasePath = computed(() => selectedDistro.value?.basePath ?? '')
 
+/** 路径规范化：Windows 路径大小写不敏感，尾部分隔符忽略 */
+function normalizePath(p: string): string {
+  return p
+    .trim()
+    .replace(/[\\/]+$/, '')
+    .toLowerCase()
+}
+
+/**
+ * 目标 = 当前位置：原地迁移无意义且 wsl --manage --move 会失败。
+ * 组件内可得 basePath 时拦截提示；basePath 不可得（注册表读取失败）则跳过不误拦
+ * （review 0.1.2 根治；父级 BackupView 另有同规则硬校验）。
+ */
+const pathError = computed(() => {
+  const target = props.form.path
+  const base = currentBasePath.value
+  if (!target.trim() || !base) return ''
+  if (normalizePath(target) === normalizePath(base)) {
+    return '目标位置与发行版当前位置相同，请选择新的目录'
+  }
+  return ''
+})
+
 async function browse() {
   const picked = await window.wslAPI.app.pickDirectory(currentBasePath.value || undefined)
   if (picked) emit('update:form', { ...props.form, path: picked })
@@ -86,6 +109,7 @@ async function browse() {
           目标为目录（发行版虚拟磁盘将移动到该位置）。需要 WSL 2.0+ 的
           <code>wsl --manage --move</code> 支持。
         </div>
+        <n-alert v-if="pathError" type="error">{{ pathError }}</n-alert>
       </div>
 
       <n-alert v-if="autoBackup" type="info">

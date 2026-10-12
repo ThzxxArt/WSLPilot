@@ -12,15 +12,19 @@ const emit = defineEmits<{ 'update:show': [boolean] }>()
 const tasks = useTasksStore()
 const message = useMessage()
 const selectedId = ref('')
+/** 取消在途：按钮 pending 防重（review 0.1.2 根治） */
+const canceling = ref(false)
 /** 耗时显示每秒刷新（Date.now() 非响应式，需 tick 驱动） */
 const now = ref(Date.now())
 let timer: number | undefined
 
+// 单一 watch(show)：计时器启停 + 首次打开补默认选中（此前拆成两个 watch 重复触发）
 watch(
   () => props.show,
   (open) => {
     if (open) {
       if (timer === undefined) timer = window.setInterval(() => (now.value = Date.now()), 1000)
+      if (!selectedId.value) selectedId.value = ordered.value[0]?.taskId ?? ''
     } else if (timer !== undefined) {
       window.clearInterval(timer)
       timer = undefined
@@ -46,15 +50,6 @@ watch(selected, (s) => {
   if (!s && selectedId.value) selectedId.value = ordered.value[0]?.taskId ?? ''
 })
 
-watch(
-  () => props.show,
-  (open) => {
-    if (open && !selectedId.value) {
-      selectedId.value = ordered.value[0]?.taskId ?? ''
-    }
-  },
-)
-
 function statusType(status: string): 'default' | 'info' | 'success' | 'warning' | 'error' {
   if (status === 'success') return 'success'
   if (status === 'failed') return 'error'
@@ -64,12 +59,15 @@ function statusType(status: string): 'default' | 'info' | 'success' | 'warning' 
 
 async function cancelSelected() {
   const t = selected.value
-  if (!t) return
+  if (!t || canceling.value) return
+  canceling.value = true
   try {
     await tasks.cancel(t.taskId)
     message.success('已请求取消任务')
   } catch (e) {
     message.error(errorLine(e, '取消任务失败'))
+  } finally {
+    canceling.value = false
   }
 }
 
@@ -151,6 +149,8 @@ function clearFinished() {
                 size="tiny"
                 type="error"
                 secondary
+                :loading="canceling"
+                :disabled="canceling"
                 @click="cancelSelected"
               >
                 取消
@@ -158,10 +158,10 @@ function clearFinished() {
             </div>
           </div>
           <p v-if="selected.error" class="error">{{ selected.error }}</p>
-          <div class="log" role="log" aria-label="任务日志">
-            <div v-for="(line, i) in selected.logs" :key="i" class="log-line">{{ line }}</div>
-            <div v-if="selected.logs.length === 0" class="log-empty">暂无日志输出</div>
-          </div>
+          <!-- 单 <pre> 拼接：2000 行日志不再产生 2000 个 DOM 节点（review 0.1.2 根治） -->
+          <pre class="log" role="log" aria-live="polite" aria-label="任务日志">{{
+            selected.logs.join('\n') || '暂无日志输出'
+          }}</pre>
         </section>
       </template>
     </div>
@@ -288,6 +288,7 @@ function clearFinished() {
 .log {
   flex: 1;
   min-height: 120px;
+  margin: 0;
   overflow-y: auto;
   padding: 8px 10px;
   border: 1px solid var(--color-border-subtle);
@@ -296,15 +297,8 @@ function clearFinished() {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   line-height: 1.6;
-}
-
-.log-line {
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.log-empty {
-  color: var(--color-text-tertiary);
 }
 </style>

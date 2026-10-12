@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import { useTasksStore } from '../stores/tasks'
+import { useDistrosStore } from '../stores/distros'
+import { useMetricsStore } from '../stores/metrics'
 import { taskTypeLabel } from '../composables/useTaskProgress'
 import TaskDrawer from '../features/tasks/TaskDrawer.vue'
 
 const settings = useSettingsStore()
 const tasks = useTasksStore()
+const distros = useDistrosStore()
+const metrics = useMetricsStore()
 const now = ref(new Date())
 const drawerOpen = ref(false)
 let timer: number | undefined
@@ -22,14 +26,38 @@ const timeLabel = computed(() =>
 
 const versionLabel = computed(() => settings.version || '—')
 
+/**
+ * 服务健康接真实状态（review 0.1.2 根治）：发行版列表或指标采样失败时，
+ * 状态点不得恒绿粉饰；显示警示文案并可查看错误根因。
+ */
+const serviceError = computed(() => distros.lastError ?? metrics.lastError ?? null)
+const serviceLabel = computed(() => (serviceError.value ? '服务异常' : '就绪'))
+
 /** 长任务常驻进度（设计书 §13.4）：状态栏显示 → 点击展开任务面板（日志 / 取消） */
-const runningTask = computed(() => tasks.running[tasks.running.length - 1] ?? null)
+const runningTasks = computed(() => tasks.running)
+const runningCount = computed(() => runningTasks.value.length)
+const runningTask = computed(() => runningTasks.value[runningTasks.value.length - 1] ?? null)
 const hasEntries = computed(() => tasks.entries.length > 0)
 const taskLabel = computed(() => {
+  // 多任务并行时显示任务数（review 0.1.2 根治）：单任务详情不再代表全局
+  if (runningCount.value > 1) return `运行任务 ${runningCount.value}`
   const t = runningTask.value
   if (!t) return ''
   const pct = t.percent === null ? '…' : `${Math.round(t.percent)}%`
   return `${taskTypeLabel(t.type)}${t.distro ? ` ${t.distro}` : ''} · ${pct}`
+})
+
+/**
+ * 无障碍播报只在任务开始/结束（running 数量迁移）时更新，
+ * 进度高频变化不再反复打断读屏（review 0.1.2 根治）。
+ */
+const announcement = ref('')
+watch(runningCount, (next, prev) => {
+  if (next > prev) {
+    announcement.value = next > 1 ? `新任务开始，共 ${next} 个任务运行中` : '任务已开始'
+  } else if (next < prev) {
+    announcement.value = next > 0 ? `一个任务已结束，仍有 ${next} 个任务运行中` : '全部任务已结束'
+  }
 })
 
 function openTasks() {
@@ -40,10 +68,16 @@ function openTasks() {
 <template>
   <footer class="statusbar">
     <div class="left">
-      <span class="dot" aria-hidden="true" />
-      <span class="muted">就绪</span>
-      <!-- 无障碍：任务状态实时播报（role=status / aria-live） -->
-      <span class="task-slot" role="status" aria-live="polite">
+      <span
+        class="dot"
+        :class="{ warn: !!serviceError }"
+        :title="serviceError ? serviceError.message : undefined"
+        aria-hidden="true"
+      />
+      <span class="muted">{{ serviceLabel }}</span>
+      <!-- 无障碍：任务开始/结束迁移时播报（进度高频更新不刷屏） -->
+      <span class="sr-only" role="status" aria-live="polite">{{ announcement }}</span>
+      <span class="task-slot">
         <template v-if="runningTask">
           <span class="sep" aria-hidden="true">·</span>
           <button
@@ -101,6 +135,24 @@ function openTasks() {
   border-radius: 50%;
   background: var(--color-success);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 20%, transparent);
+}
+
+/* 服务异常（发行版/指标任一 lastError）：警示色替换恒绿 */
+.dot.warn {
+  background: var(--color-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 20%, transparent);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .muted {

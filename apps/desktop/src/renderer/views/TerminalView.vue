@@ -250,6 +250,7 @@ onUnmounted(() => {
       :max-sessions="terminal.maxSessions"
       :distro-options="distroOptions"
       :default-distro="defaultDistro"
+      :creating-distros="terminal.creatingDistros"
       @create="create"
       @select="terminal.setActive"
       @close="close"

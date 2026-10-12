@@ -11,6 +11,7 @@ import { useCommandPalette } from '../../composables/useCommandPalette'
 import { errorLine } from '../../composables/useAppError'
 import {
   filterPaletteItems,
+  flattenPaletteGroups,
   groupPaletteItems,
   pushRecentId,
   recentPaletteItems,
@@ -49,7 +50,7 @@ const recentIds = ref<string[]>([])
 /** 打开前的焦点元素：关闭后归还焦点（无障碍 §11.4） */
 const lastFocused = ref<HTMLElement | null>(null)
 
-/** 当前动作目标发行版：上次选中 → 默认 → 第一个 */
+/** 当前动作目标发行版：默认发行版 → 列表第一个（与下方实现一致 — review 0.1.2 对齐注释） */
 function targetDistro(): string | null {
   return distros.defaultDistro?.name ?? distros.items[0]?.name ?? null
 }
@@ -268,9 +269,25 @@ const allItems = computed<PaletteItem[]>(() => buildItems())
 
 const filtered = computed(() => filterPaletteItems(allItems.value, query.value))
 const grouped = computed(() => groupPaletteItems(filtered.value))
-const flat = computed<PaletteItem[]>(() => filtered.value)
+/**
+ * 键盘导航的展平序必须与 DOM 渲染一致（分组序：动作→发行版→导航→设置，组内按分数）。
+ * 直接用 filtered（全按分数排序）会让高亮视觉跳组（review 0.1.2 根治）。
+ */
+const flat = computed<PaletteItem[]>(() => flattenPaletteGroups(grouped.value))
 const recents = computed(() =>
   query.value.trim() === '' ? recentPaletteItems(allItems.value, recentIds.value) : [],
+)
+
+/** 结果集缩减（如发行版列表刷新）后夹紧 activeIndex，Enter 不丢目标（review 0.1.2 根治） */
+watch(
+  () => flat.value.length,
+  (len) => {
+    if (len === 0) {
+      activeIndex.value = 0
+    } else if (activeIndex.value >= len) {
+      activeIndex.value = len - 1
+    }
+  },
 )
 
 /** 当前高亮项的 DOM id（aria-activedescendant，供屏幕阅读器跟随） */

@@ -3,8 +3,6 @@
  * IPC `pty:data` 入参上限 256KB（ipc-schema ptyInput）——超过必须由渲染层分片，
  * 否则大段粘贴被 zod 拒绝后**静默丢失**。切分按 UTF-8 字节数且不拆散代理对。
  */
-import { utf8Bytes } from '@wslpilot/shared'
-
 export const PTY_INPUT_MAX_BYTES = 1024 * 256
 
 /** 单个 Unicode 码点的 UTF-8 字节数 */
@@ -18,9 +16,12 @@ function codePointBytes(cp: number): number {
 /**
  * 把一段终端输入切成若干 ≤ maxBytes（UTF-8）的片段。
  * for...of 按码点遍历（代理对天然完整）；单片段超限的极端情形不会出现（码点 ≤ 4 字节）。
+ * 单遍扫描：不再先 utf8Bytes 全量预检再二次遍历，小输入一片返回，大粘贴也只扫一遍
+ * （review 0.1.2 根治）。
  */
 export function chunkTerminalInput(data: string, maxBytes = PTY_INPUT_MAX_BYTES): string[] {
-  if (utf8Bytes(data) <= maxBytes) return [data]
+  // 空串不产出任何分片：调用方不再发无意义 IPC（review 0.1.2 根治）
+  if (data === '') return []
   const out: string[] = []
   let current = ''
   let currentBytes = 0

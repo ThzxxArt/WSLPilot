@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onErrorCaptured, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NConfigProvider,
@@ -37,6 +37,41 @@ const naiveDateLocale = computed(() => (naiveLocale.value === enUS ? dateEnUS : 
 
 const ready = ref(false)
 
+/**
+ * 主进程桥接缺失（preload 失败）：启动时显式渲染错误屏，
+ * 而不是照常调用全为 undefined 的 wslAPI 后「全页静默失能」（review 0.1.2 根治）。
+ */
+const bridgeMissing = ref(typeof window === 'undefined' || !window.wslAPI)
+
+/**
+ * 子组件未捕获异常：onErrorCaptured 渲染降级错误面板（重载按钮），
+ * 与 main.ts 的 app.config.errorHandler（console.error + wslAPI 探测）形成两级兜底。
+ */
+const fatalError = ref<unknown>(null)
+onErrorCaptured((err, _instance, info) => {
+  console.error('[WSLPilot] 组件错误已捕获:', err, info)
+  fatalError.value = err
+  return false
+})
+
+const fatalMessage = computed(() => {
+  if (bridgeMissing.value) {
+    return '主进程桥接不可用（window.wslAPI 缺失），应用功能无法启用。请重启应用；若问题持续，请检查安装完整性。'
+  }
+  const e = fatalError.value
+  if (e instanceof Error && e.message) return e.message
+  if (typeof e === 'string' && e) return e
+  return '界面渲染发生未知错误'
+})
+
+function reload() {
+  try {
+    window.location.reload()
+  } catch (e) {
+    console.error('[WSLPilot] 重载失败:', e)
+  }
+}
+
 watch(
   () => settings.accent,
   (a) => applyAccentToDom(a as AccentName),
@@ -59,10 +94,11 @@ let unsubTaskProgress: (() => void) | undefined
 let unsubUpdate: (() => void) | undefined
 
 onMounted(async () => {
+  // preload 缺失：不触碰全 undefined 的桥接面，错误屏已由 bridgeMissing 渲染
+  if (bridgeMissing.value) return
   // load 内部已降级兜底；此处 finally 保证界面一定走出 loading（review C11）
   try {
     await settings.load()
-    applyAccentToDom(settings.accent as AccentName)
   } finally {
     ready.value = true
   }
@@ -117,14 +153,25 @@ onUnmounted(() => {
     <n-message-provider>
       <n-notification-provider>
         <n-dialog-provider>
-          <ConflictResolver />
-          <CommandPalette />
-          <div v-if="ready" class="pilot-shell">
-            <DefaultLayout />
+          <!-- 启动兜底：桥接缺失 / 子组件未捕获错误 → 显式降级面板（review 0.1.2 根治） -->
+          <div v-if="bridgeMissing || fatalError" class="fatal-screen" role="alert">
+            <div class="fatal-card">
+              <div class="fatal-badge" aria-hidden="true">!</div>
+              <h1 class="fatal-title">WSLPilot 初始化失败</h1>
+              <p class="fatal-message">{{ fatalMessage }}</p>
+              <button class="fatal-reload" type="button" @click="reload">重新加载</button>
+            </div>
           </div>
-          <div v-else class="loading-screen">
-            <n-spin size="large" />
-          </div>
+          <template v-else>
+            <ConflictResolver />
+            <CommandPalette />
+            <div v-if="ready" class="pilot-shell">
+              <DefaultLayout />
+            </div>
+            <div v-else class="loading-screen">
+              <n-spin size="large" />
+            </div>
+          </template>
         </n-dialog-provider>
       </n-notification-provider>
     </n-message-provider>
@@ -138,5 +185,67 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: var(--color-bg-canvas);
+}
+
+.fatal-screen {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--color-bg-canvas);
+}
+
+.fatal-card {
+  max-width: 460px;
+  padding: 28px 30px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  text-align: center;
+}
+
+.fatal-badge {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  color: var(--color-danger);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.fatal-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--color-text-primary);
+}
+
+.fatal-message {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.fatal-reload {
+  height: 34px;
+  padding: 0 18px;
+  border-radius: 9px;
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.fatal-reload:hover {
+  background: var(--color-accent-hover);
 }
 </style>

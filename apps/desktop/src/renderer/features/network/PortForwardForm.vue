@@ -22,6 +22,8 @@ const props = defineProps<{
   rule: PortForwardRule | null
   rules: PortForwardRule[]
   distros: DistroView[]
+  /** 父级 upsert 在途：按钮 loading 且不可重复提交 */
+  saving?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -82,9 +84,9 @@ function save() {
     message.warning(err)
     return
   }
-  // 编辑态改 id = 重命名：随规则一并交出原 id，upsert 据此替换旧条目而不是另插一条
+  // 编辑态改 id = 重命名：随规则一并交出原 id，upsert 据此替换旧条目而不是另插一条。
+  // 不在此处 close：等父级 upsert 成功后才受控关闭，失败时弹窗保留供修正（review 0.1.2 根治）。
   emit('save', formToRule(form), form.originalId || undefined)
-  close()
 }
 </script>
 
@@ -158,8 +160,8 @@ function save() {
 
     <template #footer>
       <div class="footer">
-        <n-button secondary @click="close">取消</n-button>
-        <n-button type="primary" :disabled="!!error" @click="save">
+        <n-button secondary :disabled="saving" @click="close">取消</n-button>
+        <n-button type="primary" :loading="saving" :disabled="saving || !!error" @click="save">
           {{ rule ? '保存修改' : '创建规则' }}
         </n-button>
       </div>

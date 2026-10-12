@@ -7,6 +7,10 @@ import { useDistrosStore } from '../../stores/distros'
 import { errorLine } from '../../composables/useAppError'
 
 const props = defineProps<{ distroName: string }>()
+const emit = defineEmits<{
+  /** 切发行版被取消时要求父级还原选择（与 WslConfPanel 对齐，脏编辑保留在原发行版上） */
+  'restore-distro': [name: string]
+}>()
 
 const message = useMessage()
 const dialog = useDialog()
@@ -24,8 +28,13 @@ const file = ref<{
   truncated: boolean
   binary: boolean
   sizeBytes: number
+  /** 文件所属发行版：保存前校验，防跨发行版串写（review 0.1.2 根治） */
+  distro: string
 } | null>(null)
 const saving = ref(false)
+
+/** 当前已载入内容的发行版（取消切换时据此还原选择） */
+const currentName = ref(props.distroName)
 
 /** 未保存修改的丢弃确认（§13.4 破坏性操作二次确认） */
 function confirmDiscard(): Promise<boolean> {
@@ -58,7 +67,9 @@ const crumbs = computed(() => {
  * 真正的加载动作（不做确认）。
  * 确认必须由调用方**在改动 path/file 之前**完成 —— 否则用户点「留在此页」时
  * path 已经变了，面包屑与列表不一致（review 自查发现）。
+ * 代际守卫：快速进出目录时旧响应不得覆盖新目录（review 0.1.2 根治）。
  */
+let loadGen = 0
 async function reload() {
   if (!props.distroName) return
   // 未运行不读（fs 走 wsl -d X -e，会隐式启动发行版）— review 状态门禁
@@ -68,16 +79,21 @@ async function reload() {
     loading.value = false
     return
   }
+  const g = ++loadGen
+  const target = currentName.value
   loading.value = true
   error.value = ''
   file.value = null
   try {
-    entries.value = await window.wslAPI.fs.readDir(props.distroName, path.value)
+    const list = await window.wslAPI.fs.readDir(target, path.value)
+    if (g !== loadGen) return
+    entries.value = list
   } catch (e) {
+    if (g !== loadGen) return
     error.value = errorLine(e, '读取目录失败')
     entries.value = []
   } finally {
-    loading.value = false
+    if (g === loadGen) loading.value = false
   }
 }
 
@@ -86,13 +102,15 @@ watch(isRunning, (running) => {
   if (running && entries.value.length === 0 && !file.value) void reload()
 })
 
-/** 刷新当前目录（保留未保存确认） */
+/** 刷新当前目录（保留未保存确认；保存中冻结导航，防 await 期间引用失效） */
 async function load() {
+  if (saving.value) return
   if (!(await confirmDiscard())) return
   await reload()
 }
 
 async function goTo(p: string) {
+  if (saving.value) return
   // 先确认再改 path：取消时面包屑不许动
   if (!(await confirmDiscard())) return
   path.value = p
@@ -100,6 +118,7 @@ async function goTo(p: string) {
 }
 
 async function enter(e: DirEntry) {
+  if (saving.value) return
   if (!(await confirmDiscard())) return
   if (e.isDirectory) {
     path.value = e.path
@@ -107,7 +126,7 @@ async function enter(e: DirEntry) {
     return
   }
   try {
-    const r = await window.wslAPI.fs.read(props.distroName, e.path)
+    const r = await window.wslAPI.fs.read(currentName.value, e.path)
     file.value = {
       path: e.path,
       text: r.binary ? '' : r.text,
@@ -115,6 +134,7 @@ async function enter(e: DirEntry) {
       truncated: r.truncated,
       binary: r.binary,
       sizeBytes: r.sizeBytes,
+      distro: currentName.value,
     }
   } catch (err) {
     message.error(errorLine(err, '读取文件失败'))
@@ -122,17 +142,26 @@ async function enter(e: DirEntry) {
 }
 
 async function saveFile() {
-  if (!file.value) return
+  // 局部快照：await 期间 file.value 可能被导航/切换清空，绝不裸引用
+  // （review 0.1.2 根治「保存后引用已置空 → TypeError 假失败」）
+  const f = file.value
+  if (!f) return
   // 超限截断的文件禁止写回：保存会把前缀整文件覆盖回去，静默毁掉剩余内容
-  if (file.value.truncated) {
+  if (f.truncated) {
     message.warning('该文件超过在线编辑上限，禁止写回以免截断原文件')
+    return
+  }
+  // 跨发行版串写防护：文件属于哪个发行版就写回哪个（review 0.1.2 根治）
+  if (f.distro !== props.distroName) {
+    message.warning('发行版已切换，已阻止跨发行版写回；请重新打开文件后再保存')
     return
   }
   saving.value = true
   try {
-    await window.wslAPI.fs.write(props.distroName, file.value.path, file.value.text)
-    file.value.dirty = false
-    message.success(`已保存 ${file.value.path}`)
+    await window.wslAPI.fs.write(f.distro, f.path, f.text)
+    // 保存期间视图若已被替换，只提示成功，不把脏标记落到别人的文件上
+    if (file.value === f) f.dirty = false
+    message.success(`已保存 ${f.path}`)
   } catch (e) {
     message.error(errorLine(e, '写入文件失败'))
   } finally {
@@ -148,13 +177,15 @@ function onEdit(v: string) {
 }
 
 async function closeFile() {
+  // 保存中禁用返回：避免在途写入的对象被卸载（review 0.1.2 根治）
+  if (saving.value) return
   if (!(await confirmDiscard())) return
   file.value = null
 }
 
 async function reveal(target: string) {
   try {
-    await window.wslAPI.fs.revealInExplorer(props.distroName, target)
+    await window.wslAPI.fs.revealInExplorer(currentName.value, target)
   } catch (e) {
     message.error(errorLine(e, '打开资源管理器失败'))
   }
@@ -175,9 +206,15 @@ function formatTime(e: DirEntry): string {
 onMounted(load)
 watch(
   () => props.distroName,
-  async () => {
-    // 发行版切换同样先确认；取消时保留当前视图（宁可显示旧数据也不静默丢用户修改）
-    if (!(await confirmDiscard())) return
+  async (name) => {
+    if (!name || name === currentName.value) return
+    // 发行版切换同样先确认；取消时回退父级选择（与 WslConfPanel 对齐，绝不静默丢文件编辑）
+    // — review 0.1.2 根治：此前仅 return，父级停在未载入的新发行版上
+    if (!(await confirmDiscard())) {
+      emit('restore-distro', currentName.value)
+      return
+    }
+    currentName.value = name
     path.value = '/'
     await reload()
   },
@@ -196,14 +233,22 @@ defineExpose({ confirmDiscard })
       <nav class="crumbs" aria-label="路径">
         <template v-for="(c, i) in crumbs" :key="c.path">
           <span v-if="i > 0" class="sep">/</span>
-          <button class="crumb" :class="{ active: i === crumbs.length - 1 }" @click="goTo(c.path)">
+          <!-- 保存中冻结导航：写盘在途时不得切换路径（review 0.1.2 根治） -->
+          <button
+            class="crumb"
+            :class="{ active: i === crumbs.length - 1 }"
+            :disabled="saving"
+            @click="goTo(c.path)"
+          >
             {{ c.name }}
           </button>
         </template>
       </nav>
       <div class="bar-actions">
-        <n-button size="tiny" quaternary :disabled="!isRunning" @click="load()">刷新</n-button>
-        <n-button size="tiny" quaternary :disabled="!isRunning" @click="reveal(path)">
+        <n-button size="tiny" quaternary :disabled="!isRunning || saving" @click="load()">
+          刷新
+        </n-button>
+        <n-button size="tiny" quaternary :disabled="!isRunning || saving" @click="reveal(path)">
           资源管理器
         </n-button>
       </div>
@@ -231,7 +276,7 @@ defineExpose({ confirmDiscard })
         <tbody>
           <tr v-for="e in entries" :key="e.path">
             <td>
-              <button class="entry" @click="enter(e)">
+              <button class="entry" :disabled="saving" @click="enter(e)">
                 <span class="icon">{{ e.isDirectory ? '📁' : '📄' }}</span>
                 {{ e.name }}
               </button>
@@ -252,7 +297,7 @@ defineExpose({ confirmDiscard })
       <div v-else class="editor">
         <div class="editor-bar">
           <span class="file-path">
-            <button class="crumb" @click="closeFile">← 返回</button>
+            <button class="crumb" :disabled="saving" @click="closeFile">← 返回</button>
             {{ file.path }}
             <n-tag v-if="file.dirty" size="tiny" type="warning" :bordered="false">未保存</n-tag>
             <n-tag v-if="file.truncated" size="tiny" :bordered="false">超限截断</n-tag>
@@ -261,7 +306,7 @@ defineExpose({ confirmDiscard })
             <n-button
               size="tiny"
               type="primary"
-              :disabled="!file.dirty || file.binary || file.truncated"
+              :disabled="!file.dirty || file.binary || file.truncated || saving"
               :loading="saving"
               @click="saveFile"
             >
@@ -270,14 +315,16 @@ defineExpose({ confirmDiscard })
           </div>
         </div>
         <p v-if="file.binary" class="hint">二进制文件不支持在线编辑，请在终端中处理。</p>
-        <!-- 超限截断：编辑器只读，禁止保存 —— 否则会把截断后的内容整文件覆盖回去（review C1） -->
-        <p v-else-if="file.truncated" class="hint">
+        <!-- 超限截断：只读渲染前缀，禁止保存 —— 否则会把截断后的内容整文件覆盖回去（review C1）。
+             文案称「仅展示前缀」就必须真的展示，此前只提示不渲染（review 0.1.2 根治）。 -->
+        <p v-if="file.truncated" class="hint">
           文件超过在线编辑上限（{{ Math.round(FS_READ_LIMIT_BYTES / 1024) }}KB），仅展示前缀。
           为避免保存时截断原文件，此处禁止编辑；请在终端中用 vim/nano 处理。
         </p>
         <CodeEditor
-          v-else
+          v-if="!file.binary"
           :model-value="file.text"
+          :readonly="file.truncated"
           :min-height="260"
           :placeholder="file.path"
           @update:model-value="onEdit"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import TitleBar from './TitleBar.vue'
 import SidebarNav from './SidebarNav.vue'
@@ -38,6 +38,7 @@ watch(sidebarCollapsed, (v) => {
  * 挂在布局层（message provider 内）：失败路径可即时 toast，杜绝静默。
  */
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const { togglePalette } = useCommandPalette()
 const distros = useDistrosStore()
@@ -73,6 +74,12 @@ watch(
 const unbindHotkeys = bindGlobalHotkeys({
   openPalette: togglePalette,
   newTerminal: async () => {
+    // 会话上限预检（review 0.1.2 根治）：此前静默失败后靠 lastError 异步提示，
+    // 快捷键场景看不出反馈；这里先行拦截并给出明确指引。
+    if (!terminal.canCreate) {
+      message.warning(`终端会话数已达上限 ${terminal.maxSessions}，请先关闭部分终端标签`)
+      return
+    }
     const name = distros.defaultDistro?.name ?? distros.items[0]?.name
     if (!name) {
       message.warning('没有可用的发行版')
@@ -86,7 +93,12 @@ const unbindHotkeys = bindGlobalHotkeys({
     await router.push('/terminal')
   },
   openSettings: () => void router.push('/settings'),
-  refresh: () => void distros.refresh(),
+  refresh: () => {
+    // Ctrl+R 按路由分发（review 0.1.2 根治）：终端页没有「刷新发行版」语义，
+    // 触发假刷新会误导用户；其他页保持 distros.refresh。
+    if (route.name === 'terminal') return
+    void distros.refresh()
+  },
   toggleRawCommand: () => void settings.setShowRawCommand(!settings.showRawCommand),
   switchTab: (index) => {
     const session = terminal.sessions[index]

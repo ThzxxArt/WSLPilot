@@ -94,8 +94,28 @@ function requireField(value: string, label: string): string | null {
   return null
 }
 
+/** 路径中的控制字符（含 NUL/换行等）：进入文件系统/命令行前拦截（review 0.1.2 根治） */
+// eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/
+
+/** 路径字段校验：必填（可选）+ 控制字符 */
+function validatePathField(value: string, label: string, required = true): string | null {
+  if (required) {
+    const err = requireField(value, label)
+    if (err) return err
+  }
+  if (value && CONTROL_CHARS_RE.test(value)) return `${label}包含非法控制字符`
+  return null
+}
+
 export function validateExportForm(form: ExportForm): string | null {
-  return requireField(form.name, '发行版') ?? requireField(form.path, '导出路径')
+  const name = form.name.trim()
+  if (!name) return '请填写发行版'
+  // 与执行边界 assertSafeDistroName 同源：非法名不得一路「下一步」到长任务里才炸（review 0.1.2 根治）
+  if (!isValidDistroName(name)) {
+    return '发行版名称不合法（不能包含 \\ / : * ? " < > | 等字符）'
+  }
+  return validatePathField(form.path, '导出路径')
 }
 
 export function buildExportRequest(form: ExportForm): IoExportRequest {
@@ -130,12 +150,12 @@ export function validateImportForm(
   if (existingNames.some((d) => d === n)) {
     return `发行版「${n}」已存在，请换一个名称，或先注销原有发行版`
   }
-  const err = requireField(form.archivePath, '备份文件路径')
+  const err = validatePathField(form.archivePath, '备份文件路径')
   if (err) return err
   if (form.inPlace && form.format !== 'vhd') {
     return '就地导入仅支持 vhd（.vhdx）文件，请改用归档导入'
   }
-  if (!form.inPlace) return requireField(form.installPath, '安装位置')
+  if (!form.inPlace) return validatePathField(form.installPath, '安装位置')
   return null
 }
 
@@ -170,7 +190,7 @@ export function importCommandPreview(form: ImportForm): string {
 }
 
 export function validateMoveForm(form: MoveForm): string | null {
-  return requireField(form.name, '发行版') ?? requireField(form.path, '迁移目标位置')
+  return requireField(form.name, '发行版') ?? validatePathField(form.path, '迁移目标位置')
 }
 
 export function buildMoveRequest(form: MoveForm): IoMoveRequest {

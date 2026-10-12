@@ -19,6 +19,8 @@ export const useDevicesStore = defineStore('devices', {
     items: [] as UsbDevice[],
     loading: false,
     lastError: null as AppError | null,
+    /** 代际守卫：重叠 load 时只认最新一次发起的响应（review 0.1.2 根治） */
+    loadGen: 0,
   }),
 
   getters: {
@@ -29,24 +31,31 @@ export const useDevicesStore = defineStore('devices', {
   actions: {
     /** 读取 usbipd 状态与设备清单（未安装时只置 status，不抛错） */
     async load() {
+      const gen = ++this.loadGen
       this.loading = true
       this.lastError = null
       try {
-        this.status = await window.wslAPI.devices.status()
-        if (this.status.installed) {
+        const status = await window.wslAPI.devices.status()
+        if (gen !== this.loadGen) return
+        this.status = status
+        if (status.installed) {
           const list = await window.wslAPI.devices.list()
+          // 旧响应晚到不得覆盖新状态（重叠调用：刷新按钮 + 操作后刷新）
+          if (gen !== this.loadGen) return
           this.items = Array.isArray(list) ? list : []
         } else {
           this.items = []
         }
       } catch (e) {
+        if (gen !== this.loadGen) return
         this.lastError = toAppError(e)
         this.items = []
       } finally {
-        this.loading = false
+        if (gen === this.loadGen) this.loading = false
       }
     },
 
+    /** 对外 API 兼容别名：语义即 load（合并重复实现 — review 0.1.2 根治） */
     async refresh() {
       await this.load()
     },

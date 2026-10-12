@@ -20,6 +20,8 @@ const loadingOnline = ref(false)
 const selected = ref<string | null>(null)
 const activeTaskId = ref('')
 const startedAt = ref(0)
+/** 启动安装在途锁：双击不并发两个安装任务（review 0.1.2 根治） */
+const starting = ref(false)
 
 const { task, percentLabel, isRunning, isDone, cancel } = useTaskProgress(activeTaskId)
 
@@ -32,6 +34,8 @@ const onlineOptions = computed(() => online.value.map((n) => ({ label: n, value:
 const logTail = computed(() => (task.value?.logs ?? []).slice(-8))
 const failed = computed(() => task.value?.status === 'failed')
 const succeeded = computed(() => task.value?.status === 'success')
+/** 任务记录已被 trim 淘汰（task 为 null 但 activeTaskId 还在）：不能成死路（review 0.1.2 根治） */
+const taskLost = computed(() => !!activeTaskId.value && !task.value)
 /** 步骤指示：0 选择 → 1 安装中 → 2 结果 */
 const step = computed(() => (!activeTaskId.value ? 0 : isDone.value ? 2 : 1))
 
@@ -47,40 +51,56 @@ async function loadOnline() {
   }
 }
 
+function stopTimer() {
+  if (timer) {
+    window.clearInterval(timer)
+    timer = undefined
+  }
+}
+
 watch(
   () => props.show,
   (show) => {
     if (show) {
       activeTaskId.value = ''
+      // 重新打开必须清零用时，不沿用上一次安装的读数（review 0.1.2 根治）
+      elapsed.value = '00:00'
+      startedAt.value = 0
+      stopTimer()
       void loadOnline()
-    } else if (timer) {
-      window.clearInterval(timer)
-      timer = undefined
+    } else {
+      stopTimer()
     }
   },
+  // 初始即 show（路由/父级直接渲染）也要拉列表，否则「开始安装」永远禁用
+  { immediate: true },
 )
 
 async function startInstall() {
-  const name = selected.value ?? undefined
-  const entry = await tasks.startInstall(name)
-  if (!entry) {
-    message.error(errorLine(tasks.lastError, '启动安装失败'))
-    return
+  if (starting.value) return
+  starting.value = true
+  try {
+    const name = selected.value ?? undefined
+    const entry = await tasks.startInstall(name)
+    if (!entry) {
+      message.error(errorLine(tasks.lastError, '启动安装失败'))
+      return
+    }
+    activeTaskId.value = entry.taskId
+    startedAt.value = Date.now()
+    stopTimer()
+    timer = window.setInterval(() => {
+      const sec = Math.floor((Date.now() - startedAt.value) / 1000)
+      elapsed.value = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
+    }, 1000)
+  } finally {
+    starting.value = false
   }
-  activeTaskId.value = entry.taskId
-  startedAt.value = Date.now()
-  timer = window.setInterval(() => {
-    const sec = Math.floor((Date.now() - startedAt.value) / 1000)
-    elapsed.value = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
-  }, 1000)
 }
 
 watch(isDone, (done) => {
   if (done) {
-    if (timer) {
-      window.clearInterval(timer)
-      timer = undefined
-    }
+    stopTimer()
     void distros.refresh()
     if (task.value?.status === 'success') message.success('安装完成')
     if (task.value?.status === 'canceled') message.info('安装已取消')
@@ -91,10 +111,7 @@ watch(isDone, (done) => {
 
 // 组件卸载（切路由）时清理计时器，防泄漏（核验修复）
 onUnmounted(() => {
-  if (timer) {
-    window.clearInterval(timer)
-    timer = undefined
-  }
+  stopTimer()
 })
 
 async function onCancel() {
@@ -114,15 +131,19 @@ function close() {
   emit('update:show', false)
 }
 
-/** 完成后直达终端（首次启动即进入用户创建向导） */
+/** 完成后直达终端（首次启动即进入用户创建向导）；携带发行版，终端直接落在该发行版（review 0.1.2 根治） */
 function openTerminal() {
+  const name = task.value?.distro || selected.value || undefined
   close()
-  void router.push('/terminal')
+  void router.push(name ? { path: '/terminal', query: { distro: name } } : '/terminal')
 }
 
-/** 失败重试：清任务回选择步 */
+/** 失败重试 / 记录被 trim：清任务回选择步（review 0.1.2 根治死路） */
 function resetAndPick() {
   activeTaskId.value = ''
+  startedAt.value = 0
+  elapsed.value = '00:00'
+  stopTimer()
 }
 </script>
 
@@ -165,7 +186,14 @@ function resetAndPick() {
       </n-spin>
       <div class="actions">
         <n-button @click="close"> 取消 </n-button>
-        <n-button type="primary" :disabled="!selected" @click="startInstall"> 开始安装 </n-button>
+        <n-button
+          type="primary"
+          :disabled="!selected || starting"
+          :loading="starting"
+          @click="startInstall"
+        >
+          开始安装
+        </n-button>
       </div>
     </div>
 
@@ -204,6 +232,11 @@ function resetAndPick() {
         {{ task.error }}
       </div>
 
+      <!-- 任务记录被 trim 淘汰（activeTaskId 还在但 task 为 null）：给兜底出口，别让弹窗成死路 -->
+      <div v-if="taskLost" class="error">
+        安装任务记录已滚动清理（可能因应用重启或任务列表淘汰），当前无法再查看进度。
+      </div>
+
       <!-- 安装完成：行动导向（review：新装发行版用户名/密码无处可寻根治） -->
       <div v-if="succeeded" class="user-guide">
         <div class="guide-title">✓ 安装完成 — 下一步</div>
@@ -218,7 +251,12 @@ function resetAndPick() {
 
       <div class="actions">
         <n-button v-if="isRunning" secondary type="error" @click="onCancel"> 取消安装 </n-button>
-        <template v-if="succeeded">
+        <!-- 记录被 trim：给「关闭 / 重新开始」兜底，而不是无按钮死路（review 0.1.2 根治） -->
+        <template v-if="taskLost">
+          <n-button @click="close"> 关闭 </n-button>
+          <n-button type="primary" @click="resetAndPick">重新开始</n-button>
+        </template>
+        <template v-else-if="succeeded">
           <n-button @click="close"> 完成 </n-button>
           <n-button type="primary" @click="openTerminal">打开终端</n-button>
         </template>

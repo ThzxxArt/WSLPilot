@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { NButton, NInput, NPopover, NTooltip } from 'naive-ui'
 
-defineProps<{
+const props = defineProps<{
   canZoom: boolean
   /** 是否存在活动会话：无会话时清屏/复制/导出一律禁用（导出另有兜底提示） */
   hasSession: boolean
@@ -20,13 +20,27 @@ const emit = defineEmits<{
 }>()
 
 const query = ref('')
+
+/** 字号夹取范围与 XtermPane.zoom 一致（8..32） */
+const MIN_FONT_SIZE = 8
+const MAX_FONT_SIZE = 32
+
+// 到达边界时禁用对应按钮，避免点了不动的假反馈（review 0.1.2 根治）
+const canShrink = computed(() => props.canZoom && props.fontSize > MIN_FONT_SIZE)
+const canGrow = computed(() => props.canZoom && props.fontSize < MAX_FONT_SIZE)
 </script>
 
 <template>
   <div class="terminal-toolbar">
     <n-tooltip trigger="hover">
       <template #trigger>
-        <n-button size="tiny" secondary :disabled="!hasSession" @click="emit('clear')">
+        <n-button
+          size="tiny"
+          secondary
+          aria-label="清屏"
+          :disabled="!hasSession"
+          @click="emit('clear')"
+        >
           清屏
         </n-button>
       </template>
@@ -35,7 +49,7 @@ const query = ref('')
 
     <n-popover trigger="click" placement="bottom-end">
       <template #trigger>
-        <n-button size="tiny" secondary> 搜索 </n-button>
+        <n-button size="tiny" secondary aria-label="搜索终端内容"> 搜索 </n-button>
       </template>
       <div class="search-box">
         <n-input
@@ -53,14 +67,36 @@ const query = ref('')
     </n-popover>
 
     <div class="zoom">
-      <n-button size="tiny" secondary :disabled="!canZoom" @click="emit('zoom', -1)"> A- </n-button>
-      <span class="fs">{{ fontSize }}</span>
-      <n-button size="tiny" secondary :disabled="!canZoom" @click="emit('zoom', 1)"> A+ </n-button>
+      <n-button
+        size="tiny"
+        secondary
+        aria-label="缩小终端字号"
+        :disabled="!canShrink"
+        @click="emit('zoom', -1)"
+      >
+        A-
+      </n-button>
+      <span class="fs" aria-live="polite">{{ fontSize }}</span>
+      <n-button
+        size="tiny"
+        secondary
+        aria-label="增大终端字号"
+        :disabled="!canGrow"
+        @click="emit('zoom', 1)"
+      >
+        A+
+      </n-button>
     </div>
 
     <n-tooltip trigger="hover">
       <template #trigger>
-        <n-button size="tiny" secondary :disabled="!hasSession" @click="emit('copy')">
+        <n-button
+          size="tiny"
+          secondary
+          aria-label="复制选中内容"
+          :disabled="!hasSession"
+          @click="emit('copy')"
+        >
           复制
         </n-button>
       </template>
@@ -69,7 +105,13 @@ const query = ref('')
 
     <n-tooltip trigger="hover">
       <template #trigger>
-        <n-button size="tiny" secondary :disabled="!hasSession" @click="emit('export')">
+        <n-button
+          size="tiny"
+          secondary
+          aria-label="导出当前会话缓冲"
+          :disabled="!hasSession"
+          @click="emit('export')"
+        >
           导出
         </n-button>
       </template>

@@ -73,15 +73,20 @@ export const useTasksStore = defineStore('tasks', {
       if (typeof p.percent === 'number' && Number.isFinite(p.percent)) e.percent = p.percent
       if (p.message) e.message = p.message
       if (p.distro && !e.distro) e.distro = p.distro
+      const wasRunning = e.status === 'running'
       e.status = p.status
       if (p.logLine !== undefined && p.logLine !== '') {
         e.logs.push(p.logLine)
         if (e.logs.length > MAX_TASK_LOGS) e.logs.splice(0, e.logs.length - MAX_TASK_LOGS)
       }
       if (p.status !== 'running') {
-        e.finishedAt = Date.now()
-        if (p.status === 'failed') e.error = p.message
-        if (p.status === 'canceled') e.error = e.error ?? '任务已取消'
+        // 终态重复事件不刷新 finishedAt（时间只会前移，重复到达不得把结束时间后拨）
+        if (wasRunning) e.finishedAt = Date.now()
+        if (p.status === 'failed') {
+          // 失败原因取主进程端到端携带的 error，绝不用最后一条 message 冒充（review 0.1.2 根治）
+          e.error = p.error?.trim() || e.error || '任务执行失败'
+        }
+        if (p.status === 'canceled') e.error = p.error?.trim() || e.error || '任务已取消'
         this.trimFinished()
       }
     },

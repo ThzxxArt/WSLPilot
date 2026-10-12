@@ -8,7 +8,12 @@ function initialState() {
     releaseNotes: '',
     percent: 0,
     error: '',
+    /** 聚合 busys（兼容旧调用方：任一更新操作在途） */
     busy: false,
+    /** 检查更新在途（与下载拆分 — review 0.1.2 根治：两个按钮互不闪 loading） */
+    checkBusy: false,
+    /** 下载更新在途 */
+    downloadBusy: false,
   }
 }
 
@@ -28,9 +33,18 @@ export const useUpdateStore = defineStore('update', {
       this.error = s.error ?? ''
     },
 
-    /** 订阅主进程状态推送（App 挂载时调用一次）；返回解绑函数 */
+    /** 操作 reject 的错误落地（review 0.1.2 根治）：状态行可见，调用方决定是否再 toast */
+    recordFailure(e: unknown) {
+      this.status = 'error'
+      this.error = e instanceof Error ? e.message : String(e)
+    },
+
+    /**
+     * 订阅主进程状态推送（App 挂载时调用一次）；返回解绑函数。
+     * wslAPI.update 缺失（旧 preload / 测试环境）时返回 no-op 且不抛（review 0.1.2 根治）。
+     */
     attach(): () => void {
-      const off = window.wslAPI?.update.onChanged((s) => this.applyState(s))
+      const off = window.wslAPI?.update?.onChanged?.((s) => this.applyState(s))
       return off ?? (() => {})
     },
 
@@ -40,35 +54,50 @@ export const useUpdateStore = defineStore('update', {
         this.applyState(s)
       } catch (e) {
         // 状态拉取失败如实落 error 字段并置 error 状态（界面状态行可见），不静默
-        this.status = 'error'
-        this.error = e instanceof Error ? e.message : String(e)
+        this.recordFailure(e)
       }
     },
 
     async check() {
+      this.checkBusy = true
       this.busy = true
       try {
         const s = await window.wslAPI.update.check()
         this.applyState(s)
         return s
+      } catch (e) {
+        // reject 不再静默：写 error 状态后继续向上抛，调用方可即时 toast
+        this.recordFailure(e)
+        throw e
       } finally {
+        this.checkBusy = false
         this.busy = false
       }
     },
 
     async download() {
+      this.downloadBusy = true
       this.busy = true
       try {
         const s = await window.wslAPI.update.download()
         this.applyState(s)
         return s
+      } catch (e) {
+        this.recordFailure(e)
+        throw e
       } finally {
+        this.downloadBusy = false
         this.busy = false
       }
     },
 
     async install() {
-      await window.wslAPI.update.install()
+      try {
+        await window.wslAPI.update.install()
+      } catch (e) {
+        this.recordFailure(e)
+        throw e
+      }
     },
   },
 })

@@ -65,6 +65,17 @@ export function groupPaletteItems(
   return order.filter((g) => map.has(g)).map((g) => ({ group: g, items: map.get(g)! }))
 }
 
+/**
+ * 与渲染一致的展平序：按分组顺序（动作→发行版→导航→设置）展开、组内保持传入顺序。
+ * 键盘导航必须走这个序 —— 直接用按分数排序的 filtered 会让高亮在视觉上跳组
+ * （review 0.1.2 根治：键盘顺序 ≠ 视觉顺序）。
+ */
+export function flattenPaletteGroups(
+  groups: Array<{ group: PaletteGroup; items: PaletteItem[] }>,
+): PaletteItem[] {
+  return groups.flatMap((g) => g.items)
+}
+
 /** 最近使用（按 recency 顺序取前 N 个，去重） */
 export function recentPaletteItems(
   items: PaletteItem[],

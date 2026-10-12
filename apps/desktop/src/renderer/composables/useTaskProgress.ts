@@ -1,19 +1,30 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
 import { useTasksStore, type TaskEntry } from '../stores/tasks'
-import type { TaskProgress } from '@wslpilot/shared'
+import type { TaskProgress, TaskStatus, TaskType } from '@wslpilot/shared'
 
 /**
  * 应用级 task:progress 订阅（设计书 §8.2 事件桥）。
  * 在 App.vue 挂载时调用一次：任务在任何页面运行，进度都持续更新。
  * 返回解绑函数。
+ *
+ * 幂等（review 0.1.2 根治）：重复调用直接复用同一订阅，
+ * 防止同一进度事件被两个 handler 应用两次（App 重挂载/热更新场景）。
  */
+let detachTaskProgress: (() => void) | null = null
+
 export function attachTaskProgress(onEvent?: (p: TaskProgress) => void): () => void {
+  if (detachTaskProgress) return detachTaskProgress
   const store = useTasksStore()
   const off = window.wslAPI?.task.onProgress((p) => {
     store.applyProgress(p)
     onEvent?.(p)
   })
-  return off ?? (() => {})
+  const detach = () => {
+    off?.()
+    detachTaskProgress = null
+  }
+  detachTaskProgress = detach
+  return detach
 }
 
 export interface TaskProgressView {
@@ -73,42 +84,33 @@ export function formatElapsed(ms: number): string {
   return `${m}:${s}`
 }
 
-/** 任务类型中文名 */
+/**
+ * 任务类型中文名（Record<TaskType, string> satisfies：类型新增时必须同步补全 — review 0.1.2）。
+ * 未知类型（跨版本事件）回退显示原值，不显示 undefined。
+ */
+const TASK_TYPE_LABELS = {
+  export: '导出备份',
+  import: '导入恢复',
+  move: '迁移磁盘',
+  install: '安装',
+  convert: '版本转换',
+  action: '自定义动作',
+  network: '网络转发',
+  device: 'USB 设备',
+} satisfies Record<TaskType, string>
+
 export function taskTypeLabel(type: string): string {
-  switch (type) {
-    case 'export':
-      return '导出备份'
-    case 'import':
-      return '导入恢复'
-    case 'move':
-      return '迁移磁盘'
-    case 'install':
-      return '安装'
-    case 'convert':
-      return '版本转换'
-    case 'action':
-      return '自定义动作'
-    case 'network':
-      return '网络转发'
-    case 'device':
-      return 'USB 设备'
-    default:
-      return type
-  }
+  return (TASK_TYPE_LABELS as Record<string, string>)[type] ?? type
 }
 
-/** 任务状态中文名 */
+/** 任务状态中文名（同上：穷尽 TaskStatus） */
+const TASK_STATUS_LABELS = {
+  running: '进行中',
+  success: '已完成',
+  failed: '失败',
+  canceled: '已取消',
+} satisfies Record<TaskStatus, string>
+
 export function taskStatusLabel(status: string): string {
-  switch (status) {
-    case 'running':
-      return '进行中'
-    case 'success':
-      return '已完成'
-    case 'failed':
-      return '失败'
-    case 'canceled':
-      return '已取消'
-    default:
-      return status
-  }
+  return (TASK_STATUS_LABELS as Record<string, string>)[status] ?? status
 }

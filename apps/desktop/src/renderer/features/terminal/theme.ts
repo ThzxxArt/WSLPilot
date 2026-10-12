@@ -1,3 +1,4 @@
+import type { ITheme } from '@xterm/xterm'
 import { ACCENT_MAPS, defaultConfig, type AccentName, type TerminalTheme } from '@wslpilot/shared'
 
 /** 明亮终端配色 — 与浅色应用协调（设计书 §12.5） */
@@ -23,7 +24,7 @@ export const TERMINAL_LIGHT_THEME = {
   brightMagenta: '#C084FC',
   brightCyan: '#06B6D4',
   brightWhite: '#F8FAFC',
-} as const
+} as const satisfies ITheme
 
 /** 高对比浅色（terminal.theme = custom）— 满足正文 ≥ 4.5:1 对比度 */
 export const TERMINAL_CONTRAST_THEME = {
@@ -48,7 +49,7 @@ export const TERMINAL_CONTRAST_THEME = {
   brightMagenta: '#9333EA',
   brightCyan: '#0891B2',
   brightWhite: '#FFFFFF',
-} as const
+} as const satisfies ITheme
 
 export interface TerminalFontPrefs {
   fontFamily: string
@@ -88,11 +89,14 @@ export function normalizeFontFamily(value: string): string {
     .join(', ')
 }
 
-/** #rrggbb → rgba()（xterm 主题选区着色） */
-function hexToRgba(hex: string, alpha: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+/** #rrggbb / #rgb → rgba()（xterm 主题选区着色；短写法自动展开） */
+export function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim())
   if (!m) return `rgba(99, 102, 241, ${alpha})`
-  const n = Number.parseInt(m[1]!, 16)
+  let h = m[1]!
+  // #rgb → #rrggbb（每一位复制成两位）
+  if (h.length === 3) h = h.replace(/./g, (c) => c + c)
+  const n = Number.parseInt(h, 16)
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 

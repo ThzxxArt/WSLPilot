@@ -43,8 +43,12 @@ let term: Terminal | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
 let ro: ResizeObserver | null = null
-let fitTimer: number | undefined
 let unsubs: Array<() => void> = []
+/**
+ * 组件已卸载：async onMounted 在 `await host()` 期间可能被卸载，
+ * 续体必须二次校验，否则会向已置空的 host 调 open()（泄漏 + unhandled rejection — review 0.1.2 根治）。
+ */
+let disposed = false
 
 function applyPrefs(t: Terminal, p: Partial<TerminalFontPrefs>) {
   const full = { ...DEFAULT_TERMINAL_PREFS, ...p }
@@ -62,6 +66,10 @@ let lastFitH = 0
 let rafFit: number | null = null
 /** 上次确认同步到 PTY 的尺寸（带验证的尺寸同步 — review 终端错位根治） */
 let lastSent = { cols: 0, rows: 0 }
+/** 单飞：并发调用共享同一在途同步，避免重复 resize（review 0.1.2 根治） */
+let syncInFlight: Promise<void> | null = null
+/** 失败提示节流：同一失败只提示一次，成功同步后重置（review 0.1.2 根治） */
+let sizeErrorShown = false
 
 function desiredSize() {
   return {
@@ -75,23 +83,37 @@ function desiredSize() {
  * ConPTY 会按 80 列折行/填充重绘 → 行截断、碎片错位（review 用户实测根治）。
  * 失败重试 3 次；未同步成功不记账，输出流间隙会再次自愈。
  */
-async function syncPtySize(): Promise<void> {
-  if (!term) return
+async function doSyncPtySize(): Promise<void> {
   const want = desiredSize()
   if (want.cols === lastSent.cols && want.rows === lastSent.rows) return
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await window.wslAPI.terminal.resize(props.ptyId, want.cols, want.rows)
       lastSent = want
+      sizeErrorShown = false
       return
     } catch (e) {
       if (attempt === 2) {
-        message.error(errorLine(e, '终端尺寸同步失败'))
+        // 同一失败只提示一次：输出流间隙会反复触发自愈，绝不刷屏（review 0.1.2 根治）
+        if (!sizeErrorShown) {
+          sizeErrorShown = true
+          message.error(errorLine(e, '终端尺寸同步失败'))
+        }
         return
       }
       await new Promise((r) => setTimeout(r, 150))
     }
   }
+}
+
+/** 单飞入口：在途同步未完成时直接复用，不再发重复 IPC */
+async function syncPtySize(): Promise<void> {
+  if (!term) return
+  if (syncInFlight) return syncInFlight
+  syncInFlight = doSyncPtySize().finally(() => {
+    syncInFlight = null
+  })
+  return syncInFlight
 }
 
 /** 尺寸漂移检测（输出到达时的零成本校验） */
@@ -177,6 +199,10 @@ onMounted(async () => {
     /* 宿主信息不可用：不启用对策（等价旧行为） */
   }
 
+  // await 期间组件可能已卸载：续体不得再创建 Terminal
+  //（否则 host 已置空 → open() 抛错 + 实例无人 dispose 泄漏 — review 0.1.2 根治）
+  if (disposed) return
+
   const t = new Terminal({
     allowProposedApi: true,
     // 真 PTY 数据：不要 convertEol，避免 TUI 光标异常（评审 M2）
@@ -198,8 +224,19 @@ onMounted(async () => {
   // Unicode 11 宽字符（中文/emoji 表格不错位）评审 M3
   t.loadAddon(new Unicode11Addon())
   t.unicode.activeVersion = '11'
+  // 创建后、open 前最后一次校验（防御性：卸载路径统一 dispose，绝不留孤儿实例）
+  if (disposed || !host.value) {
+    try {
+      t.dispose()
+    } catch {
+      /* ignore */
+    }
+    if (term === t) term = null
+    if (termRef === t) termRef = null
+    return
+  }
   t.open(host.value)
-  if (host.value) host.value.style.background = t.options.theme?.background ?? '#FBFCFE'
+  host.value.style.background = t.options.theme?.background ?? '#FBFCFE'
 
   // 恢复历史缓冲后放行实时流（保序：初始缓冲 → 队列 → 直写）
   if (props.initialBuffer) {
@@ -241,25 +278,25 @@ onMounted(async () => {
   ro = new ResizeObserver(() => scheduleFit())
   ro.observe(host.value)
   void document.fonts?.ready?.then(() => {
+    // 卸载后的字体就绪续体不得再调度 fit（rAF 泄漏 — review 0.1.2 根治）
+    if (disposed) return
     invalidateFit()
     scheduleFit()
   })
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   if (rafFit !== null) {
     cancelAnimationFrame(rafFit)
     rafFit = null
-  }
-  if (fitTimer !== undefined) {
-    window.clearTimeout(fitTimer)
-    fitTimer = undefined
   }
   for (const u of unsubs) u()
   unsubs = []
   ro?.disconnect()
   ro = null
   search = null
+  // 卸载路径统一 dispose（含 async 续体可能已创建的实例）
   try {
     term?.dispose()
   } catch {

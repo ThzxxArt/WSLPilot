@@ -13,6 +13,7 @@ import {
   NInputNumber,
   NSelect,
   NSpin,
+  useDialog,
   useMessage,
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
@@ -22,6 +23,7 @@ import { HOTKEY_TABLE } from '../composables/useHotkeys'
 import {
   ACCENT_GRADIENTS,
   ACCENT_PRIMARY,
+  defaultConfig,
   type AccentName,
   type SignatureStatus,
 } from '@wslpilot/shared'
@@ -30,6 +32,7 @@ import { applyAccentToDom, Kbd } from '@wslpilot/ui'
 const settings = useSettingsStore()
 const update = useUpdateStore()
 const message = useMessage()
+const dialog = useDialog()
 
 // ── M7：签名状态（未签名时给 SmartScreen 说明）──
 const signature = ref<SignatureStatus | null>(null)
@@ -78,8 +81,46 @@ const previewPrimary = computed(() => ACCENT_PRIMARY[selectedAccent.value] ?? AC
 async function onAccentChange(name: AccentName) {
   selectedAccent.value = name
   applyAccentToDom(name) // 实时预览，无需保存
-  await settings.setAccent(name)
-  message.success(`强调色已切换为 ${accents.find((a) => a.name === name)?.label ?? name}`)
+  // persistField 失败返回 false 且不抛：必须判返回值，失败不得报成功（review 0.1.2 根治）
+  const ok = await settings.setAccent(name)
+  if (ok) {
+    message.success(`强调色已切换为 ${accents.find((a) => a.name === name)?.label ?? name}`)
+  } else {
+    // 失败时 store 已回滚 settings.accent，watch 会把 selectedAccent 同步回来；
+    // DOM 预览由 App.vue 的 accent watch 统一还原
+    message.error(errorLine(settings.lastError, '强调色保存失败，已还原'))
+  }
+}
+
+/**
+ * 恢复默认设置（review 0.1.2 根治）：用现有 config.set 全量 patch
+ * defaultConfig('settings') 的值（schema 默认值唯一事实源），再 reload 同步 store。
+ */
+function onResetSettings() {
+  dialog.warning({
+    title: '恢复默认设置',
+    content: '将把全部设置项重置为默认值并写入 settings.jsonc，确定吗？',
+    positiveText: '恢复默认',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      const defaults = defaultConfig('settings')
+      try {
+        await window.wslAPI.config.set('settings', {
+          general: defaults.general,
+          advanced: defaults.advanced,
+          wsl: defaults.wsl,
+          terminal: defaults.terminal,
+          backup: defaults.backup,
+        })
+        await settings.load()
+        selectedAccent.value = settings.accent
+        applyAccentToDom(settings.accent as AccentName)
+        message.success('已恢复默认设置')
+      } catch (e) {
+        message.error(errorLine(e, '恢复默认设置失败'))
+      }
+    },
+  })
 }
 
 function openConfigDir() {
@@ -103,24 +144,37 @@ async function browseBackupDir() {
  * 文本类设置的防抖落盘。
  * 失败回滚与提示由 settings store 的 persistField + 布局层统一处理
  * （review M-3 根治后此处不再自管回滚，避免双重回滚把值写反）。
- * 卸载时清理挂起的防抖定时器（review timer 纪律）。
+ * 卸载时对挂起值立即 flush（review 0.1.2 根治）：
+ * 400ms 内切换页面不再丢失用户最后一次编辑。
  */
-const pendingTimers = new Set<number>()
+const pendingFlushes = new Set<() => void>()
 onUnmounted(() => {
-  for (const t of pendingTimers) window.clearTimeout(t)
-  pendingTimers.clear()
+  for (const flush of [...pendingFlushes]) flush()
+  pendingFlushes.clear()
 })
 
 function makeDebouncedSetter<T>(write: (v: T) => Promise<unknown>) {
   let timer: number | undefined
-  return (value: T) => {
-    if (timer) window.clearTimeout(timer)
-    timer = window.setTimeout(() => {
-      pendingTimers.delete(timer!)
+  let pendingValue: T | undefined
+  let hasPending = false
+
+  const flush = () => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer)
       timer = undefined
-      void write(value)
-    }, 400)
-    pendingTimers.add(timer)
+    }
+    pendingFlushes.delete(flush)
+    if (!hasPending) return
+    hasPending = false
+    void write(pendingValue as T)
+  }
+
+  return (value: T) => {
+    pendingValue = value
+    hasPending = true
+    if (timer !== undefined) window.clearTimeout(timer)
+    timer = window.setTimeout(flush, 400)
+    pendingFlushes.add(flush)
   }
 }
 
@@ -611,6 +665,15 @@ async function exportDiagnostics() {
           @update:value="(v: boolean) => settings.setAutoUpdate(v)"
         />
       </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">恢复默认设置</div>
+          <div class="hint">将全部设置项重置为默认值并写入 settings.jsonc</div>
+        </div>
+        <n-button size="small" secondary type="error" @click="onResetSettings">
+          恢复默认设置
+        </n-button>
+      </div>
     </n-card>
 
     <n-card title="快捷键" class="block">
@@ -655,12 +718,14 @@ async function exportDiagnostics() {
         <div id="about-update" class="label">软件更新</div>
         <div class="hint" role="status" aria-live="polite">{{ updateStatusLabel }}</div>
         <n-space style="margin-top: 10px" align="center">
-          <n-button size="small" :loading="update.busy" @click="onCheckUpdate">检查更新</n-button>
+          <n-button size="small" :loading="update.checkBusy" @click="onCheckUpdate">
+            检查更新
+          </n-button>
           <n-button
             v-if="update.status === 'available'"
             size="small"
             type="primary"
-            :loading="update.busy"
+            :loading="update.downloadBusy"
             @click="onDownloadUpdate"
           >
             下载更新

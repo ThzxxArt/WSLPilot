@@ -12,6 +12,21 @@ import {
 import { useTasksStore } from './tasks'
 
 /**
+ * 规则写队列（review 0.1.2 并发 RMW 丢更新根治）：
+ * upsert / remove / setEnabled 都是「读 this.rules → 构造 next → 落盘」的读改写，
+ * 并发调用各自基于旧快照，后写覆盖先写 → 先前的修改被丢弃。
+ * 入队任务在**轮到执行时**才读快照，保证每次 RMW 基于上一次的结果。
+ * （参照主进程 config-service.enqueueWrite 的串行写思路）
+ */
+let rulesWriteQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueRulesWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const next = rulesWriteQueue.then(fn, fn)
+  rulesWriteQueue = next.catch(() => {})
+  return next
+}
+
+/**
  * 网络仓（M6）。
  * - 规则与代理的持久化真相源是 network.jsonc（config:get/set 通道）
  * - 应用/移除走 network:* 通道（主进程生成 netsh 参数数组，渲染层只传 id）
@@ -66,9 +81,10 @@ export const useNetworkStore = defineStore('network', {
       }
     },
 
-    async loadStatus() {
+    /** silent：轮询等后台刷新不点亮 statusLoading，避免按钮反复闪 loading */
+    async loadStatus(opts: { silent?: boolean } = {}) {
       const gen = ++this.statusGen
-      this.statusLoading = true
+      if (!opts.silent) this.statusLoading = true
       try {
         const status = await window.wslAPI.network.status()
         if (gen !== this.statusGen) return
@@ -77,7 +93,7 @@ export const useNetworkStore = defineStore('network', {
         if (gen !== this.statusGen) return
         this.lastError = toAppError(e)
       } finally {
-        if (gen === this.statusGen) this.statusLoading = false
+        if (gen === this.statusGen && !opts.silent) this.statusLoading = false
       }
     },
 
@@ -102,37 +118,48 @@ export const useNetworkStore = defineStore('network', {
      * 新增 / 更新 / 重命名一条规则。
      * `originalId`：编辑态改 id 时传入旧 id，命中旧条目整体替换（重命名）；
      * 不传则按 `rule.id` 匹配（同 id 覆盖，否则新增）。
+     * 走写队列：快照在轮到时读取，并发调用不丢更新（review 0.1.2 根治）。
      */
     async upsert(rule: PortForwardRule, originalId?: string) {
-      const next = [...this.rules]
-      const key = originalId?.trim() || rule.id
-      const idx = next.findIndex((r) => r.id === key)
-      if (idx >= 0) next[idx] = rule
-      else next.push(rule)
-      await this.persistRules(next)
+      await enqueueRulesWrite(async () => {
+        const next = [...this.rules]
+        const key = originalId?.trim() || rule.id
+        const idx = next.findIndex((r) => r.id === key)
+        if (idx >= 0) next[idx] = rule
+        else next.push(rule)
+        await this.persistRules(next)
+      })
     },
 
-    /** 删除并暂存（撤销用）；只删配置，系统里的转发由 removeRule 负责 */
-    async remove(id: string) {
-      const target = this.rules.find((r) => r.id === id)
-      if (!target) return
-      await this.persistRules(this.rules.filter((r) => r.id !== id))
-      this.lastRemoved = target
+    /**
+     * 删除并暂存（撤销用）；只删配置，系统里的转发由 removeRule 负责。
+     * 返回被删对象：调用方用闭包快照做撤销，连续删除互不覆盖（review 0.1.2 根治）。
+     */
+    async remove(id: string): Promise<PortForwardRule | null> {
+      return enqueueRulesWrite(async () => {
+        const target = this.rules.find((r) => r.id === id)
+        if (!target) return null
+        await this.persistRules(this.rules.filter((r) => r.id !== id))
+        this.lastRemoved = target
+        return target
+      })
     },
 
-    async undoRestore() {
-      const restored = this.lastRemoved
+    /** 撤销删除：优先用调用方快照（连续删除场景），无快照回退 lastRemoved */
+    async undoRestore(snapshot?: PortForwardRule) {
+      const restored = snapshot ?? this.lastRemoved
       if (!restored) return
       // 成功后才清撤销缓冲：失败时仍可重试，绝不把被删项弄丢（review 乐观清除无回滚）
       await this.upsert(restored)
-      this.lastRemoved = null
+      if (this.lastRemoved?.id === restored.id) this.lastRemoved = null
     },
 
-    /** 启用/停用开关（写回 network.jsonc） */
+    /** 启用/停用开关（写回 network.jsonc）；走写队列防与 upsert/remove 并发互覆 */
     async setEnabled(id: string, enabled: boolean) {
-      const target = this.rules.find((r) => r.id === id)
-      if (!target) return
-      await this.persistRules(this.rules.map((r) => (r.id === id ? { ...r, enabled } : r)))
+      await enqueueRulesWrite(async () => {
+        if (!this.rules.some((r) => r.id === id)) return
+        await this.persistRules(this.rules.map((r) => (r.id === id ? { ...r, enabled } : r)))
+      })
     },
 
     async saveProxy(proxy: ProxyConfig) {
@@ -190,12 +217,18 @@ export const useNetworkStore = defineStore('network', {
       }
     },
 
-    /** 代理写入发行版（/etc/profile.d/wslpilot-proxy.sh） */
+    /**
+     * 代理写入发行版（/etc/profile.d/wslpilot-proxy.sh）。
+     * proxyScript 的赋值走代际守卫：与并发 loadProxyState 交错时只认最新发起的响应
+     * （否则写 A 发行版的结果可能盖掉用户后发起查看的 B 发行版脚本 — review 0.1.2 根治）。
+     */
     async proxyApply(distro: string) {
       this.lastError = null
+      const gen = ++this.proxyStateGen
       try {
         await window.wslAPI.network.proxyApply(distro)
-        this.proxyScript = await window.wslAPI.network.proxyState(distro)
+        const script = await window.wslAPI.network.proxyState(distro)
+        if (gen === this.proxyStateGen) this.proxyScript = script
       } catch (e) {
         this.lastError = toAppError(e)
         throw this.lastError
@@ -204,9 +237,11 @@ export const useNetworkStore = defineStore('network', {
 
     async proxyClear(distro: string) {
       this.lastError = null
+      const gen = ++this.proxyStateGen
       try {
         await window.wslAPI.network.proxyClear(distro)
-        this.proxyScript = await window.wslAPI.network.proxyState(distro)
+        const script = await window.wslAPI.network.proxyState(distro)
+        if (gen === this.proxyStateGen) this.proxyScript = script
       } catch (e) {
         this.lastError = toAppError(e)
         throw this.lastError

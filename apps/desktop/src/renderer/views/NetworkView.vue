@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import { useMessage, useDialog, useNotification, NButton } from 'naive-ui'
 import type { PortForwardRule, ProxyConfig } from '@wslpilot/shared'
 import { canApplyRule, ruleSummary } from '@wslpilot/shared'
@@ -24,12 +24,25 @@ const notification = useNotification()
 
 const editorShow = ref(false)
 const editing = ref<PortForwardRule | null>(null)
+const editorSaving = ref(false)
 const proxyApplying = ref(false)
+
+/** 系统转发状态轻量轮询（仅页面可见时 12s）：外部手工改 netsh 也能及时反映 */
+let statusPollTimer: number | undefined
 
 onMounted(() => {
   void network.load()
   void network.loadStatus()
   if (distros.items.length === 0) void distros.refresh()
+  statusPollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    // silent：轮询不点亮刷新按钮的 loading，避免每 12s 一次视觉抖动
+    void network.loadStatus({ silent: true })
+  }, 12_000)
+})
+
+onUnmounted(() => {
+  if (statusPollTimer !== undefined) window.clearInterval(statusPollTimer)
 })
 
 function openCreate() {
@@ -43,11 +56,17 @@ function openEdit(rule: PortForwardRule) {
 }
 
 async function onSave(rule: PortForwardRule, originalId?: string) {
+  editorSaving.value = true
   try {
     await network.upsert(rule, originalId)
     message.success(`规则已保存：${rule.id}`)
+    // 受控关闭：只有 upsert 成功才关弹窗（失败保留表单供修正 — review 0.1.2 根治）
+    editorShow.value = false
+    editing.value = null
   } catch (e) {
     message.error(errorLine(e, '保存规则失败'))
+  } finally {
+    editorSaving.value = false
   }
 }
 
@@ -59,8 +78,11 @@ function onRemove(rule: PortForwardRule) {
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        await network.remove(rule.id)
-        // §13.4 可撤销：通知内提供「撤销」
+        const removed = await network.remove(rule.id)
+        if (!removed) return
+        // §13.4 可撤销：通知内提供「撤销」。
+        // 撤销闭包携带本次删除的快照：连续删 A、B 后点 A 的撤销恢复 A，
+        // 而不是被 lastRemoved=B 覆盖（review 0.1.2 根治）。
         const n = notification.warning({
           title: '规则已删除',
           content: `「${rule.id}」`,
@@ -73,7 +95,7 @@ function onRemove(rule: PortForwardRule) {
                 onClick: () => {
                   n.destroy()
                   void network
-                    .undoRestore()
+                    .undoRestore(removed)
                     .then(() => message.success('已恢复规则'))
                     .catch((e: unknown) => message.error(errorLine(e, '恢复规则失败')))
                 },
@@ -96,11 +118,53 @@ async function onToggle(rule: PortForwardRule, enabled: boolean) {
   }
 }
 
+async function copyText(text: string, okMsg: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(okMsg)
+  } catch {
+    message.warning('复制失败，请手动选择文本')
+  }
+}
+
+/**
+ * 确认弹窗内容（render 函数）：命令块带「复制」按钮——
+ * 提权被拒时用户可就地把命令贴进管理员终端，不必手抄（review 0.1.2 根治）。
+ * 内联样式：dialog 内容 teleport 出组件作用域，scoped 样式不生效。
+ */
+function commandConfirmContent(intro: string, commands: string, outro: string) {
+  return () =>
+    h('div', [
+      h('p', { style: 'margin:0 0 8px' }, intro),
+      h('div', { style: 'display:flex;gap:8px;align-items:flex-start;margin-bottom:8px' }, [
+        h(
+          'code',
+          {
+            style:
+              'flex:1;white-space:pre-wrap;word-break:break-all;font-size:12px;' +
+              'background:var(--color-bg-sunken,#f1f5f9);padding:8px 10px;border-radius:8px',
+          },
+          commands,
+        ),
+        h(
+          NButton,
+          { size: 'tiny', secondary: true, onClick: () => void copyText(commands, '命令已复制') },
+          { default: () => '复制' },
+        ),
+      ]),
+      h('p', { style: 'margin:0;font-size:12px;color:var(--color-text-secondary,#64748b)' }, outro),
+    ])
+}
+
 async function onApply(rule: PortForwardRule) {
   // §13.4 / §9.6：应用会在系统里开端口，必须展示等价命令并二次确认
   dialog.warning({
     title: '应用转发规则',
-    content: `将在系统中添加端口转发：\n${ruleApplyCommand(rule)}\n\n该操作可能触发 UAC 提权确认；权限不足时可复制上述命令到管理员终端执行。`,
+    content: commandConfirmContent(
+      '将在系统中添加端口转发：',
+      ruleApplyCommand(rule),
+      '该操作可能触发 UAC 提权确认；权限不足时可复制上述命令到管理员终端执行。',
+    ),
     positiveText: '应用',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -123,12 +187,16 @@ function onApplyAll() {
     return
   }
   const skipped = enabled.length - applicable.length
+  const commands = applicable.map((r) => ruleApplyCommand(r)).join('\n')
   dialog.warning({
     title: '应用全部转发规则',
-    content:
+    content: commandConfirmContent(
       `将按顺序执行 ${applicable.length} 条 netsh portproxy 命令` +
-      (skipped > 0 ? `（跳过 ${skipped} 条 UDP 规则）` : '') +
-      `：\n${applicable.map((r) => ruleApplyCommand(r)).join('\n')}`,
+        (skipped > 0 ? `（跳过 ${skipped} 条 UDP 规则）` : '') +
+        '：',
+      commands,
+      '该操作可能触发 UAC 提权确认；权限不足时可复制上述命令到管理员终端执行。',
+    ),
     positiveText: '全部应用',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -297,6 +365,7 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
       :rule="editing"
       :rules="network.rules"
       :distros="distros.items"
+      :saving="editorSaving"
       @save="onSave"
     />
   </div>

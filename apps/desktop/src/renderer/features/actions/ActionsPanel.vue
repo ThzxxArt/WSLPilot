@@ -57,22 +57,32 @@ function preview(a: WslAction): string {
   return previewActionCommandForDistro(a, props.distroName, startupCwd.value)
 }
 
+/**
+ * 每个动作的运行中标记：在弹出确认框**之前**加锁，
+ * 双击「运行」不会叠两个确认框、更不会执行两次（review 0.1.2 根治）。
+ */
+const runningActions = reactive(new Set<string>())
+
 async function runAction(a: WslAction) {
-  // §13.4 破坏性确认：confirm 动作必须显式确认，且展示等价命令
-  if (a.confirm) {
-    const ok = await confirmDangerous({
-      title: `执行动作「${a.label}」`,
-      content: `将运行：\n${preview(a)}`,
-    })
-    if (!ok) return
-  }
+  if (runningActions.has(a.id)) return
+  runningActions.add(a.id)
   try {
+    // §13.4 破坏性确认：confirm 动作必须显式确认，且展示等价命令
+    if (a.confirm) {
+      const ok = await confirmDangerous({
+        title: `执行动作「${a.label}」`,
+        content: `将运行：\n${preview(a)}`,
+      })
+      if (!ok) return
+    }
     const handle = await actions.run(a.id, props.distroName)
     message.success(
       handle.ptyId ? `已在终端中运行「${a.label}」` : `已开始执行「${a.label}」，进度见底部状态栏`,
     )
   } catch (e) {
     message.error(errorLine(e, `执行动作失败：${a.label}`))
+  } finally {
+    runningActions.delete(a.id)
   }
 }
 
@@ -175,8 +185,11 @@ async function removeAction(a: WslAction) {
   })
   if (!ok) return
   try {
-    await actions.remove(a.id)
-    // §13.4 可撤销：Toast 内提供「撤销」
+    const removed = await actions.remove(a.id)
+    if (!removed) return
+    // §13.4 可撤销：Toast 内提供「撤销」。
+    // 撤销闭包携带本次删除的快照：连续删 A、B 后点 A 的撤销恢复 A，
+    // 而不是被 lastRemoved=B 覆盖（review 0.1.2 根治）。
     const n = notification.warning({
       title: '动作已删除',
       content: `「${a.label}」`,
@@ -189,7 +202,7 @@ async function removeAction(a: WslAction) {
             onClick: () => {
               n.destroy()
               void actions
-                .undoRestore()
+                .undoRestore(removed)
                 .then(() => message.success('已恢复动作'))
                 .catch((e: unknown) => message.error(errorLine(e, '恢复动作失败')))
             },
@@ -248,7 +261,16 @@ function openActionsFile() {
                 <n-tag v-if="a.confirm" size="tiny" :bordered="false" type="warning">需确认</n-tag>
               </div>
               <div class="card-actions">
-                <n-button size="tiny" type="primary" secondary @click="runAction(a)">运行</n-button>
+                <n-button
+                  size="tiny"
+                  type="primary"
+                  secondary
+                  :loading="runningActions.has(a.id)"
+                  :disabled="runningActions.has(a.id)"
+                  @click="runAction(a)"
+                >
+                  运行
+                </n-button>
                 <n-button size="tiny" quaternary @click="openEdit(a)">编辑</n-button>
                 <n-button size="tiny" quaternary type="error" @click="removeAction(a)">
                   ⚠ 删除

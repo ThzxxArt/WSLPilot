@@ -33,13 +33,30 @@ const emit = defineEmits<{
 }>()
 
 const rows = computed(() =>
-  props.rules.map((rule) => ({
-    rule,
-    state: ruleSystemState(rule, props.status) as RuleSystemState,
-    stateLabel: ruleSystemStateLabel(ruleSystemState(rule, props.status)),
-    applyCommand: ruleApplyCommand(rule),
-    canApply: canApplyRule(rule),
-  })),
+  props.rules.map((rule) => {
+    const state = ruleSystemState(rule, props.status) as RuleSystemState
+    const tcp = canApplyRule(rule)
+    return {
+      rule,
+      state,
+      stateLabel: ruleSystemStateLabel(state),
+      applyCommand: ruleApplyCommand(rule),
+      // 停用规则不单独应用（与「全部应用」只处理 enabledRules 的语义一致 — review 0.1.2 根治）
+      canApply: tcp && rule.enabled,
+      applyTip: !tcp
+        ? 'netsh portproxy 仅支持 TCP'
+        : !rule.enabled
+          ? '规则已停用，启用后才能应用'
+          : ruleApplyCommand(rule),
+      // 系统转发表里没有该监听（state=none）时无物可移除
+      canRemoveSystem: tcp && state !== 'none',
+      removeTip: !tcp
+        ? 'netsh portproxy 仅支持 TCP'
+        : state === 'none'
+          ? '系统中没有该监听，无需移除'
+          : '从 netsh 转发表删除该监听',
+    }
+  }),
 )
 
 const stateType = (s: RuleSystemState): 'success' | 'warning' | 'error' | 'default' | 'info' => {
@@ -135,20 +152,20 @@ const stateType = (s: RuleSystemState): 'success' | 'warning' | 'error' | 'defau
                     应用
                   </n-button>
                 </template>
-                {{ row.canApply ? row.applyCommand : 'netsh portproxy 仅支持 TCP' }}
+                {{ row.applyTip }}
               </n-tooltip>
               <n-tooltip>
                 <template #trigger>
                   <n-button
                     size="tiny"
                     secondary
-                    :disabled="!row.canApply"
+                    :disabled="!row.canRemoveSystem"
                     @click="emit('removeSystem', row.rule)"
                   >
                     从系统移除
                   </n-button>
                 </template>
-                {{ row.canApply ? '从 netsh 转发表删除该监听' : 'netsh portproxy 仅支持 TCP' }}
+                {{ row.removeTip }}
               </n-tooltip>
               <n-button size="tiny" quaternary @click="emit('edit', row.rule)">编辑</n-button>
               <n-button size="tiny" quaternary type="error" @click="emit('remove', row.rule)">
@@ -240,5 +257,21 @@ const stateType = (s: RuleSystemState): 'success' | 'warning' | 'error' | 'defau
   display: flex;
   gap: 6px;
   flex-wrap: nowrap;
+}
+
+/* 列表增删 FLIP（§13.2）：transition-group 提供移动插值 + 增删淡入淡出。
+   （此前注释声明了 FLIP 但没有过渡规则，注释与实现不一致 — review 0.1.2 根治） */
+.list-move {
+  transition: transform var(--dur-base, 0.18s) var(--ease-standard, ease);
+}
+
+.list-enter-active,
+.list-leave-active {
+  transition: opacity var(--dur-base, 0.18s) var(--ease-standard, ease);
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
 }
 </style>

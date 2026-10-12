@@ -85,11 +85,20 @@ export const useTerminalStore = defineStore('terminal', {
     activeId: '' as string,
     lastError: null as AppError | null,
     maxSessions: 10,
+    /**
+     * 创建中的发行版名单（review 0.1.2 TOCTOU 根治）：
+     * open() 的「检查上限 → await create → push 会话」跨越 await，并发调用
+     * 会同时通过上限检查从而突破 maxSessions；同一发行版双击也会开两个标签。
+     * 在同步段预留名额并做同 distro 去重，跨 await 期间名额不被重复占用。
+     */
+    creatingDistros: [] as string[],
   }),
 
   getters: {
     active: (s) => s.sessions.find((t) => t.ptyId === s.activeId) ?? null,
-    canCreate: (s) => s.sessions.filter((t) => t.alive).length < s.maxSessions,
+    /** 创建中的名额同样计入（否则并发创建绕过上限） */
+    canCreate: (s) =>
+      s.sessions.filter((t) => t.alive).length + s.creatingDistros.length < s.maxSessions,
     aliveCount: (s) => s.sessions.filter((t) => t.alive).length,
   },
 
@@ -107,6 +116,8 @@ export const useTerminalStore = defineStore('terminal', {
       opts: { shell?: string; cwd?: string } = {},
     ): Promise<string | null> {
       this.lastError = null
+      // 同一发行版的创建在途：拒绝重复创建（TerminalTabs 双击 / 双入口并发去重）
+      if (this.creatingDistros.includes(distro)) return null
       // 状态硬门禁（review「启动只能走启动按钮」根治）：终端会话绝不隐式启动发行版。
       // 未启动 → 拒绝并给出行动指引；查不到状态（列表未加载）时放行，交由 wsl 自身报错。
       const known = useDistrosStore().byName(distro)
@@ -128,6 +139,8 @@ export const useTerminalStore = defineStore('terminal', {
         }
         return null
       }
+      // 同步段占用名额：await 期间其他 open() 会看到 creatingDistros 并拒绝（TOCTOU 封死）
+      this.creatingDistros.push(distro)
       try {
         const info = await window.wslAPI.terminal.create({
           distro,
@@ -150,6 +163,10 @@ export const useTerminalStore = defineStore('terminal', {
       } catch (e) {
         this.lastError = toAppError(e)
         return null
+      } finally {
+        // 只释放自己的名额（并发不同发行版各自清理，不误删他人）
+        const i = this.creatingDistros.indexOf(distro)
+        if (i >= 0) this.creatingDistros.splice(i, 1)
       }
     },
 

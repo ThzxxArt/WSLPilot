@@ -63,6 +63,8 @@ const backups = ref<BackupFileInfo[]>([])
 const backupsLoading = ref(false)
 /** 备份列表读取失败：与「目录里还没有文件」的空态分开呈现 */
 const backupsError = ref('')
+/** 启动中锁：双击「开始」会并行拉起两个长任务（review 0.1.2 根治） */
+const starting = ref(false)
 
 const exportForm = ref<ExportForm>({ ...DEFAULT_EXPORT_FORM })
 const importForm = ref<ImportForm>({ ...DEFAULT_IMPORT_FORM })
@@ -99,25 +101,36 @@ const {
 const elapsedMs = ref(0)
 let elapsedTimer: number | undefined
 
+function stopElapsed() {
+  if (elapsedTimer !== undefined) {
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = undefined
+  }
+}
+
+function tickElapsed() {
+  const t = task.value
+  if (t) elapsedMs.value = Date.now() - t.startedAt
+}
+
+// 秒表仅在「进度步骤 + 任务运行中」时驱动：其余时刻停表，
+// 避免每 500ms 一次的无意义重渲染（review 0.1.2 根治）
 watch(
-  isRunning,
-  (running) => {
-    if (running) {
-      elapsedMs.value = 0
-      elapsedTimer = window.setInterval(() => {
-        const t = task.value
-        if (t) elapsedMs.value = Date.now() - t.startedAt
-      }, 500)
-    } else if (elapsedTimer) {
-      window.clearInterval(elapsedTimer)
-      elapsedTimer = undefined
-    }
+  () => isRunning.value && step.value === 4,
+  (active) => {
+    stopElapsed()
+    if (!active) return
+    tickElapsed()
+    elapsedTimer = window.setInterval(tickElapsed, 500)
   },
   { immediate: true },
 )
 
-onUnmounted(() => {
-  if (elapsedTimer) window.clearInterval(elapsedTimer)
+onUnmounted(stopElapsed)
+
+// 任务终结时刷新最近备份列表：导出的文件立即可见，无需手动点「刷新」
+watch(isDone, (done) => {
+  if (done) void refreshBackups()
 })
 
 const modeOptions: { label: string; value: WizardMode }[] = [
@@ -146,6 +159,14 @@ const canNext = computed(() => {
 
 const needAck = computed(() => mode.value === 'move' && settings.confirmDestructive)
 
+/** 路径规范化：Windows 路径大小写不敏感，尾部分隔符忽略 */
+function normalizePath(p: string): string {
+  return p
+    .trim()
+    .replace(/[\\/]+$/, '')
+    .toLowerCase()
+}
+
 function validateCurrent(): string | null {
   if (mode.value === 'export') return validateExportForm(exportForm.value)
   if (mode.value === 'import') {
@@ -155,7 +176,20 @@ function validateCurrent(): string | null {
       distros.items.map((d) => d.name),
     )
   }
-  return validateMoveForm(moveForm.value)
+  const moveErr = validateMoveForm(moveForm.value)
+  if (moveErr) return moveErr
+  // 目标 = 当前位置：MoveWizard 内已提示，这里硬拦截「下一步/开始」
+  //（basePath 不可得时跳过，不误拦 — review 0.1.2 根治）
+  const selected = distros.items.find((d) => d.name === moveForm.value.name)
+  const base = selected?.basePath ?? ''
+  if (
+    base &&
+    moveForm.value.path.trim() &&
+    normalizePath(base) === normalizePath(moveForm.value.path)
+  ) {
+    return '目标位置与发行版当前位置相同，请选择新的目录'
+  }
+  return null
 }
 
 const summaryRows = computed(() => {
@@ -212,12 +246,15 @@ function reset() {
   step.value = 1
   ackDestructive.value = false
   activeTaskId.value = ''
-  exportForm.value = { ...DEFAULT_EXPORT_FORM }
-  importForm.value = { ...DEFAULT_IMPORT_FORM }
+  // 保留设置中的默认格式：reset 不得把「默认 vhd」悄悄打回 tar（review 0.1.2 根治）
+  exportForm.value = { ...DEFAULT_EXPORT_FORM, format: settings.backupFormat }
+  importForm.value = { ...DEFAULT_IMPORT_FORM, format: settings.backupFormat }
   moveForm.value = { ...DEFAULT_MOVE_FORM }
 }
 
 async function start() {
+  // 启动锁：双击会在两条 await 链上各拉起一个长任务（review 0.1.2 根治）
+  if (starting.value) return
   const err = validateCurrent()
   if (err) {
     message.warning(err)
@@ -228,22 +265,26 @@ async function start() {
     return
   }
 
-  let entry = null
-  if (mode.value === 'export') {
-    entry = await tasks.startExport(buildExportRequest(exportForm.value))
-  } else if (mode.value === 'import') {
-    entry = await tasks.startImport(buildImportRequest(importForm.value))
-  } else {
-    entry = await tasks.startMove(buildMoveRequest(moveForm.value))
-  }
+  starting.value = true
+  try {
+    let entry = null
+    if (mode.value === 'export') {
+      entry = await tasks.startExport(buildExportRequest(exportForm.value))
+    } else if (mode.value === 'import') {
+      entry = await tasks.startImport(buildImportRequest(importForm.value))
+    } else {
+      entry = await tasks.startMove(buildMoveRequest(moveForm.value))
+    }
 
-  if (!entry) {
-    message.error(errorLine(tasks.lastError, '任务启动失败'))
-    return
+    if (!entry) {
+      message.error(errorLine(tasks.lastError, '任务启动失败'))
+      return
+    }
+    activeTaskId.value = entry.taskId
+    step.value = 4
+  } finally {
+    starting.value = false
   }
-  activeTaskId.value = entry.taskId
-  step.value = 4
-  void refreshBackups()
 }
 
 async function cancel() {
@@ -291,7 +332,30 @@ onMounted(() => {
   importForm.value = { ...DEFAULT_IMPORT_FORM, format: settings.backupFormat }
   void distros.refresh()
   void refreshBackups()
+
+  // 本页发起的长任务仍在运行（切页回来 / 窗口重载）：接续到进度视图，
+  // 不要求用户重新走一遍向导（review 0.1.2 根治）
+  const running = [...tasks.entries]
+    .filter(
+      (e) =>
+        e.status === 'running' && (e.type === 'export' || e.type === 'import' || e.type === 'move'),
+    )
+    .sort((a, b) => b.startedAt - a.startedAt)[0]
+  if (running) {
+    mode.value = running.type as WizardMode
+    activeTaskId.value = running.taskId
+    step.value = 4
+  }
 })
+
+/** 日志抽屉只渲染尾部：全量 join 2000 行会在每次进度事件时重排（review 0.1.2 根治） */
+const LOG_TAIL_LIMIT = 500
+const logLines = computed(() => task.value?.logs ?? [])
+const logTail = computed(() => {
+  const lines = logLines.value
+  return lines.length > LOG_TAIL_LIMIT ? lines.slice(-LOG_TAIL_LIMIT) : lines
+})
+const logTruncated = computed(() => logLines.value.length > LOG_TAIL_LIMIT)
 
 const statusType = computed(() => {
   const s = task.value?.status
@@ -429,7 +493,13 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
         <n-button v-if="step < 3" type="primary" :disabled="!canNext" @click="next">
           下一步
         </n-button>
-        <n-button v-else type="primary" :disabled="needAck && !ackDestructive" @click="start">
+        <n-button
+          v-else
+          type="primary"
+          :loading="starting"
+          :disabled="starting || (needAck && !ackDestructive)"
+          @click="start"
+        >
           开始{{ modeOptions.find((m) => m.value === mode)?.label }}
         </n-button>
       </footer>
@@ -478,10 +548,13 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
       </n-spin>
     </section>
 
-    <!-- 实时日志抽屉 -->
+    <!-- 实时日志抽屉（只渲染尾部 ≤500 行，防高频全量重排） -->
     <n-drawer v-model:show="logOpen" :width="480" placement="right">
       <n-drawer-content title="任务日志" closable>
-        <pre class="log">{{ (task?.logs ?? []).join('\n') || '（暂无日志）' }}</pre>
+        <p v-if="logTruncated" class="log-note">
+          仅显示最后 {{ LOG_TAIL_LIMIT }} 行（共 {{ logLines.length }} 行）
+        </p>
+        <pre class="log">{{ logTail.join('\n') || '（暂无日志）' }}</pre>
       </n-drawer-content>
     </n-drawer>
   </div>
@@ -756,6 +829,12 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
 .file-cell {
   font-family: 'Cascadia Mono', Consolas, monospace;
   word-break: break-all;
+}
+
+.log-note {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
 }
 
 .log {

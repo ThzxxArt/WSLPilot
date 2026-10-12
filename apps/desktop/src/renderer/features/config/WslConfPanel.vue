@@ -43,7 +43,7 @@ const previewOpen = computed({
 /** 当前已载入的发行版（取消切换时据此还原选择） */
 const currentName = ref(props.distroName)
 
-/** 用户已确认丢弃：卸载时不再重复提示 */
+/** 用户已确认丢弃：卸载时不再重复提示（仅对本次载入/切换有效，见下方复位） */
 let discardConfirmed = false
 
 /** 未保存修改的丢弃确认（§13.4）：与 FileBrowserPanel 同一确认语义 */
@@ -63,6 +63,14 @@ function confirmDiscard(): Promise<boolean> {
       onClose: () => resolve(false),
     })
   })
+}
+
+/** 「重新载入」先过脏编辑守卫（review 0.1.2 根治：此前直接 load 静默丢编辑） */
+async function onReload() {
+  if (!(await confirmDiscard())) return
+  await conf.load()
+  // 本次放弃已生效：后续新编辑再卸载时仍须如实提示（review 0.1.2 根治）
+  discardConfirmed = false
 }
 
 /** 本面板是否已完成过一次读取（防重复读/防误覆盖脏编辑） */
@@ -97,6 +105,8 @@ watch(
       loadedOnce.value = true
       await conf.load()
     }
+    // 本次放弃已随切换生效：后续新编辑再卸载时仍须如实提示（review 0.1.2 根治）
+    discardConfirmed = false
   },
 )
 
@@ -201,6 +211,8 @@ async function confirmSave() {
         ? 'wsl.conf 已保存 · 已按设置终止该发行版，约 8 秒后重新启动生效'
         : 'wsl.conf 已保存 · 完全停止发行版后（约 8 秒）生效',
     )
+    // autoShutdown 后 store 里的运行状态已失真：保存成功即刷新（review 0.1.2 根治）
+    await distros.refresh()
   } catch (e) {
     message.error(errorLine(e, '保存 wsl.conf 失败'))
   }
@@ -234,9 +246,9 @@ async function confirmSave() {
         <n-button
           size="small"
           quaternary
-          :disabled="!isRunning"
+          :disabled="!isRunning || conf.loading.value"
           :loading="conf.loading.value"
-          @click="conf.load()"
+          @click="onReload"
         >
           重新载入
         </n-button>

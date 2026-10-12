@@ -49,6 +49,11 @@ export const router = createRouter({
       component: () => import('../views/SettingsView.vue'),
       meta: { title: '设置' },
     },
+    {
+      // 非法 hash / 托盘导航未知路径兜底（review 0.1.2 根治）：重定向驾驶舱，不再白屏
+      path: '/:pathMatch(.*)*',
+      redirect: '/dashboard',
+    },
   ],
 })
 

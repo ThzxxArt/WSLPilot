@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NTooltip } from 'naive-ui'
 
@@ -8,6 +8,23 @@ const emit = defineEmits<{ 'update:collapsed': [boolean] }>()
 
 const route = useRoute()
 const router = useRouter()
+
+/** 窄窗口断点：小于该宽度时强制折叠展示（不覆盖用户偏好） */
+const NARROW_BREAKPOINT = 960
+const narrow = ref(typeof window !== 'undefined' && window.innerWidth < NARROW_BREAKPOINT)
+
+function onResize() {
+  narrow.value = window.innerWidth < NARROW_BREAKPOINT
+}
+
+onMounted(() => window.addEventListener('resize', onResize))
+onUnmounted(() => window.removeEventListener('resize', onResize))
+
+/**
+ * 实际折叠态 = 窄屏强制折叠 || 用户偏好折叠；
+ * 窗口恢复宽于断点后回到用户偏好（review 0.1.2 根治：窄屏不再撑破布局）。
+ */
+const effectiveCollapsed = computed(() => props.collapsed || narrow.value)
 
 const navItems = [
   { name: 'dashboard', title: '驾驶舱', icon: '🛫' },
@@ -31,26 +48,37 @@ function toggle() {
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ collapsed }">
+  <aside class="sidebar" :class="{ collapsed: effectiveCollapsed }">
     <nav class="nav">
-      <n-tooltip v-for="item in navItems" :key="item.name" placement="right" :disabled="!collapsed">
+      <n-tooltip
+        v-for="item in navItems"
+        :key="item.name"
+        placement="right"
+        :disabled="!effectiveCollapsed"
+      >
         <template #trigger>
           <button
             class="nav-item"
             :class="{ active: activeName === item.name }"
             :aria-label="item.title"
+            :aria-current="activeName === item.name ? 'page' : undefined"
             @click="go(item.name)"
           >
             <span class="nav-icon">{{ item.icon }}</span>
-            <span v-if="!collapsed" class="nav-title">{{ item.title }}</span>
+            <span v-if="!effectiveCollapsed" class="nav-title">{{ item.title }}</span>
           </button>
         </template>
         {{ item.title }}
       </n-tooltip>
     </nav>
 
-    <button class="collapse-btn" :aria-label="collapsed ? '展开侧栏' : '折叠侧栏'" @click="toggle">
-      <span class="chevron" :class="{ flipped: collapsed }">‹</span>
+    <button
+      class="collapse-btn"
+      :aria-label="effectiveCollapsed ? '展开侧栏' : '折叠侧栏'"
+      :aria-expanded="!effectiveCollapsed"
+      @click="toggle"
+    >
+      <span class="chevron" :class="{ flipped: effectiveCollapsed }">‹</span>
     </button>
   </aside>
 </template>

@@ -35,7 +35,22 @@ function setName(v: string | number | null) {
 }
 
 function setArchivePath(v: string | number | null) {
-  emit('update:form', { ...props.form, archivePath: String(v ?? '') })
+  const s = String(v ?? '')
+  const trimmed = s.trim()
+  if (!trimmed) {
+    // 清空输入不擅自改格式（用户可能正在重输路径）
+    emit('update:form', { ...props.form, archivePath: s })
+    return
+  }
+  // 手动输入的路径同样按扩展名同步格式（与浏览按钮同一规则 — review 0.1.2 根治），
+  // 非 vhdx 自动退出就地导入（非法组合 — review M12）
+  const looksVhd = /\.vhdx?$/i.test(trimmed)
+  emit('update:form', {
+    ...props.form,
+    archivePath: s,
+    format: looksVhd ? 'vhd' : 'tar',
+    inPlace: looksVhd ? props.form.inPlace : false,
+  })
 }
 
 function setInstallPath(v: string | number | null) {

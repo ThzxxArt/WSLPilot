@@ -51,9 +51,43 @@ const confPanel = ref<InstanceType<typeof WslConfPanel> | null>(null)
 /** 文件面板（关窗的未保存守卫入口 — 文件页同样不得静默丢编辑） */
 const filePanel = ref<InstanceType<typeof FileBrowserPanel> | null>(null)
 
+/** 详情操作在途标记（review 0.1.2 根治：转换/注销双击重复发起） */
+const converting = ref(false)
+const unregistering = ref(false)
+
 const distro = computed(() => distros.byName(props.distroName))
 /** 运行状态单一事实源：按钮组严格状态驱动（review 停/启按钮错位根治） */
 const isRunning = computed(() => distro.value?.state === 'Running')
+
+// ── 元数据编辑（meta:set 闭环 — 全字段可编辑，不留半套编辑面）──
+const actionsStore = useActionsStore()
+const editing = ref(false)
+const editAlias = ref('')
+const editNote = ref('')
+const editTags = ref('')
+const editIcon = ref('')
+const editColor = ref('')
+const editStartupCwd = ref('')
+const editPinned = ref(false)
+const editQuickActions = ref<string[]>([])
+
+/** 快捷动作可选项（来自 actions.jsonc 白名单） */
+const quickActionOptions = computed(() =>
+  actionsStore.items.map((a) => ({ label: a.label, value: a.id })),
+)
+
+/** 复位编辑态（review 0.1.2 根治：切换发行版后不得沿用上一发行版的编辑值写回） */
+function resetEditing() {
+  editing.value = false
+  editAlias.value = ''
+  editNote.value = ''
+  editTags.value = ''
+  editIcon.value = ''
+  editColor.value = ''
+  editStartupCwd.value = ''
+  editPinned.value = false
+  editQuickActions.value = []
+}
 
 /** 需确认操作统一走 naive dialog（全仓一致，禁止 window.confirm） */
 function confirmDangerous(opts: { title: string; content: string }): Promise<boolean> {
@@ -70,47 +104,98 @@ function confirmDangerous(opts: { title: string; content: string }): Promise<boo
   })
 }
 
+/** detail 代际守卫：切换发行版后旧响应不得覆盖新发行版（review 0.1.2 根治） */
+let detailGen = 0
+let detailOwner = ''
+
 async function loadDetail() {
-  if (!props.distroName) return
+  const name = props.distroName
+  if (!name) return
+  const g = ++detailGen
+  // 切换发行版：先清旧详情（含采样与最近任务），防新名字下闪现旧值
+  if (detailOwner !== name) {
+    detailOwner = name
+    detail.value = null
+    metrics.value = null
+    lastTask.value = null
+  }
   loading.value = true
   try {
-    detail.value = await window.wslAPI.distros.registryDetail(props.distroName)
+    const d = await window.wslAPI.distros.registryDetail(name)
+    if (g !== detailGen) return
+    detail.value = d
   } catch {
-    detail.value = null
+    if (g === detailGen) detail.value = null
   } finally {
-    loading.value = false
+    if (g === detailGen) loading.value = false
   }
+  if (g !== detailGen) return
   // 资源 Mini 仪表盘（§12.4）：仅运行中采样
   if (distro.value?.state === 'Running') {
-    metrics.value = await metricsStore.sampleDistro(props.distroName)
+    const m = await metricsStore.sampleDistro(name)
+    if (g !== detailGen) return
+    metrics.value = m
   } else {
     metrics.value = null
   }
+  if (g !== detailGen) return
   // 最近任务（§12.4）：state.jsonc.lastTaskResult
   try {
     const s = await window.wslAPI.config.get('state')
+    if (g !== detailGen) return
     lastTask.value = s.lastTaskResult ?? null
   } catch {
-    lastTask.value = null
+    if (g === detailGen) lastTask.value = null
   }
 }
 
-/** 关窗守卫：wsl.conf / 文件页有未保存修改时都先确认（两处同语义，绝不静默丢编辑） */
-async function requestClose() {
-  const confOk = (await confPanel.value?.confirmDiscard()) ?? true
-  if (!confOk) return
-  const fileOk = (await filePanel.value?.confirmDiscard()) ?? true
-  if (!fileOk) return
-  emit('update:show', false)
+/** 关窗守卫在途标记：连点 Esc/遮罩不叠加确认框（review 0.1.2 根治） */
+let closeGuardRunning = false
+
+/**
+ * 脏守卫（不关窗，返回 true 表示可以通过）：
+ * wsl.conf / 文件页有未保存修改时都先确认（两处同语义，绝不静默丢编辑）。
+ * onConvert / onUnregister 先走它、通过后再执行并关窗（review 0.1.2 根治：
+ * 此前两处直接 emit('update:show', false)，绕过守卫静默丢弃未保存编辑）。
+ */
+async function requestClose(): Promise<boolean> {
+  if (closeGuardRunning) return false
+  closeGuardRunning = true
+  try {
+    // 面板可能是 stub/未挂载（方法缺失）：缺方法按「无脏编辑」处理，而不是抛 TypeError
+    const confFn = confPanel.value?.confirmDiscard
+    const confOk = typeof confFn === 'function' ? await confFn() : true
+    if (!confOk) return false
+    const fileFn = filePanel.value?.confirmDiscard
+    const fileOk = typeof fileFn === 'function' ? await fileFn() : true
+    if (!fileOk) return false
+    return true
+  } finally {
+    closeGuardRunning = false
+  }
 }
 
+/** 弹窗自身关闭路径（Esc / 遮罩 / 右上角 ×）：守卫通过才真正收起 */
+async function onModalClose() {
+  if (await requestClose()) emit('update:show', false)
+}
+
+/**
+ * 打开 / 切换发行版统一入口（review 0.1.2 根治）：
+ * - 仅「关闭 → 打开」沿复位页签为概览；同一弹窗内 distroName 变化
+ *   （含 restore-distro 回切）保持当前页签
+ * - 打开与换发行版都复位编辑态，杜绝用新名字写回旧值
+ */
+let wasOpen = false
 watch(
-  () => [props.show, props.distroName],
+  () => [props.show, props.distroName] as const,
   ([show]) => {
     if (show) {
-      activeTab.value = 'overview'
+      if (!wasOpen) activeTab.value = 'overview'
+      resetEditing()
       void loadDetail()
     }
+    wasOpen = show
   },
   { immediate: true },
 )
@@ -177,35 +262,42 @@ async function act(fn: () => Promise<void>, ok: string) {
 }
 
 function onStart() {
+  // 双击/重复点击防抖：busy 集合在 store 中同步占位（review 0.1.2 根治）
+  if (distros.isBusy(props.distroName, 'start')) return
   void act(() => distros.start(props.distroName), `已启动 ${props.distroName}`)
 }
 function onTerminate() {
+  if (distros.isBusy(props.distroName, 'terminate')) return
   void act(() => distros.terminate(props.distroName), `已停止 ${props.distroName}`)
 }
 function onSetDefault() {
+  if (distros.isBusy(props.distroName, 'setDefault')) return
   void act(() => distros.setDefault(props.distroName), `已设 ${props.distroName} 为默认`)
 }
 
 /** WSL1 ↔ WSL2 转换（wsl --set-version，长任务；运行中必须先停止） */
 async function onConvert() {
   const d = distro.value
-  if (!d) return
+  if (!d || converting.value) return
   // wsl --set-version 要求发行版处于已停止状态：先拦截，别让用户等长任务失败
   if (d.state === 'Running') {
     message.warning(`请先停止 ${props.distroName}，再进行 WSL 版本转换`)
     return
   }
   const target: 1 | 2 = d.version === 1 ? 2 : 1
-  if (settings.confirmDestructive) {
-    const ok = await confirmDangerous({
-      title: `转换为 WSL${target}`,
-      content:
-        `将 ${props.distroName} 转换为 WSL${target}？\n\n` +
-        `该操作耗时较长（虚拟磁盘转换），且要求发行版处于已停止状态。`,
-    })
-    if (!ok) return
-  }
+  converting.value = true
   try {
+    // 关窗前先过脏守卫：配置/文件页未保存编辑不得静默丢弃（review 0.1.2 根治）
+    if (!(await requestClose())) return
+    if (settings.confirmDestructive) {
+      const ok = await confirmDangerous({
+        title: `转换为 WSL${target}`,
+        content:
+          `将 ${props.distroName} 转换为 WSL${target}？\n\n` +
+          `该操作耗时较长（虚拟磁盘转换），且要求发行版处于已停止状态。`,
+      })
+      if (!ok) return
+    }
     const entry = await tasks.startConvert(props.distroName, target)
     if (!entry) {
       message.error(errorLine(tasks.lastError, '转换任务启动失败'))
@@ -215,45 +307,35 @@ async function onConvert() {
     emit('update:show', false)
   } catch (e) {
     message.error(errorLine(e, '启动版本转换失败'))
+  } finally {
+    converting.value = false
   }
 }
 
 async function onUnregister() {
-  if (!distro.value) return
-  // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）
-  if (settings.confirmDestructive) {
-    const ok = await confirmDangerous({
-      title: '注销发行版',
-      content: `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。`,
-    })
-    if (!ok) return
-  }
+  if (!distro.value || unregistering.value) return
+  unregistering.value = true
   try {
+    // 先过脏守卫，再走破坏性确认；两步都通过才执行并关窗（review 0.1.2 根治）
+    if (!(await requestClose())) return
+    // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）
+    if (settings.confirmDestructive) {
+      const ok = await confirmDangerous({
+        title: '注销发行版',
+        content: `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。`,
+      })
+      if (!ok) return
+    }
     await window.wslAPI.distros.unregister(props.distroName)
     message.success(`已注销 ${props.distroName}`)
     await distros.refresh()
     emit('update:show', false)
   } catch (e) {
     message.error(errorLine(e, '注销失败'))
+  } finally {
+    unregistering.value = false
   }
 }
-
-// ── 元数据编辑（meta:set 闭环 — 全字段可编辑，不留半套编辑面）──
-const actionsStore = useActionsStore()
-const editing = ref(false)
-const editAlias = ref('')
-const editNote = ref('')
-const editTags = ref('')
-const editIcon = ref('')
-const editColor = ref('')
-const editStartupCwd = ref('')
-const editPinned = ref(false)
-const editQuickActions = ref<string[]>([])
-
-/** 快捷动作可选项（来自 actions.jsonc 白名单） */
-const quickActionOptions = computed(() =>
-  actionsStore.items.map((a) => ({ label: a.label, value: a.id })),
-)
 
 /** 打开编辑表单：用 meta:get 读回「当前」元数据预填，避免列表快照过期后整表写回覆盖；读失败退回快照并如实提示 */
 async function startEdit() {
@@ -311,7 +393,7 @@ async function saveMeta() {
     class="detail-modal"
     :style="{ width: '760px', maxWidth: '94vw', maxHeight: '90vh' }"
     :content-style="{ overflow: 'auto' }"
-    @update:show="(v: boolean) => (v ? emit('update:show', true) : requestClose())"
+    @update:show="(v: boolean) => (v ? emit('update:show', true) : onModalClose())"
   >
     <!-- config pane 的 display-directive=show（naive 按 pane 读取）：
          切页签不卸载 wsl.conf 面板，否则脏编辑随页签切换静默丢失 -->
@@ -447,18 +529,47 @@ async function saveMeta() {
           >
             打开终端
           </n-button>
-          <n-button v-if="distro && !isRunning" type="primary" @click="onStart"> 启动 </n-button>
-          <n-button v-else-if="distro" type="error" @click="onTerminate"> 停止 </n-button>
-          <n-button secondary :disabled="!distro || distro.isDefault" @click="onSetDefault">
+          <n-button
+            v-if="distro && !isRunning"
+            type="primary"
+            :loading="distros.isBusy(distroName, 'start')"
+            @click="onStart"
+          >
+            启动
+          </n-button>
+          <n-button
+            v-else-if="distro"
+            type="error"
+            :loading="distros.isBusy(distroName, 'terminate')"
+            @click="onTerminate"
+          >
+            停止
+          </n-button>
+          <n-button
+            secondary
+            :disabled="!distro || distro.isDefault || distros.isBusy(distroName, 'setDefault')"
+            @click="onSetDefault"
+          >
             设为默认
           </n-button>
           <n-button secondary :disabled="!distro" @click="startEdit"> 编辑元数据 </n-button>
-          <!-- wsl --set-version 要求已停止：运行中禁用并在点击路径拦截 -->
-          <n-button secondary :disabled="!distro || distro.state === 'Running'" @click="onConvert">
+          <!-- wsl --set-version 要求已停止：运行中禁用并在点击路径拦截；converting 防双击 -->
+          <n-button
+            secondary
+            :disabled="!distro || distro.state === 'Running' || converting"
+            :loading="converting"
+            @click="onConvert"
+          >
             转换为 WSL{{ distro && distro.version === 1 ? '2' : '1' }}
           </n-button>
-          <!-- 危险操作：图标 + 文字双编码（§11.4 不仅靠颜色区分） -->
-          <n-button quaternary type="error" :disabled="!distro" @click="onUnregister">
+          <!-- 危险操作：图标 + 文字双编码（§11.4 不仅靠颜色区分）；unregistering 防双击 -->
+          <n-button
+            quaternary
+            type="error"
+            :disabled="!distro || unregistering"
+            :loading="unregistering"
+            @click="onUnregister"
+          >
             ⚠ 注销发行版
           </n-button>
         </div>
@@ -480,7 +591,11 @@ async function saveMeta() {
 
       <!-- 文件 -->
       <n-tab-pane name="files" tab="文件">
-        <FileBrowserPanel ref="filePanel" :distro-name="distroName" />
+        <FileBrowserPanel
+          ref="filePanel"
+          :distro-name="distroName"
+          @restore-distro="(name: string) => emit('update:distroName', name)"
+        />
       </n-tab-pane>
     </n-tabs>
   </n-modal>

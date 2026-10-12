@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, NRadioGroup, NRadioButton, NSelect, NTag, useMessage } from 'naive-ui'
+import {
+  NButton,
+  NInput,
+  NPopconfirm,
+  NRadioGroup,
+  NRadioButton,
+  NSelect,
+  NTag,
+  useMessage,
+} from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useDistrosStore } from '../stores/distros'
-import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
@@ -15,7 +23,6 @@ import DistroDetailModal from '../features/distros/DistroDetailModal.vue'
 const route = useRoute()
 const router = useRouter()
 const distros = useDistrosStore()
-const metrics = useMetricsStore()
 const message = useMessage()
 const settings = useSettingsStore()
 
@@ -24,12 +31,22 @@ const search = ref('')
 const tagFilter = ref<string | null>(null)
 const detailOpen = ref(false)
 const detailName = ref('')
+/** 手动刷新标识（review 0.1.2 根治）：轮询刷新不得让按钮周期性闪 loading */
+const refreshing = ref(false)
+
+async function manualRefresh() {
+  refreshing.value = true
+  try {
+    await distros.refresh()
+  } finally {
+    refreshing.value = false
+  }
+}
 
 onMounted(() => {
   // settings.general.autoRefreshOnStart：关闭后仅在尚无数据时兜底拉取一次
   if (settings.autoRefreshOnStart || distros.items.length === 0) {
     void distros.refresh()
-    void metrics.sample()
   }
 })
 
@@ -70,7 +87,10 @@ const filtered = computed(() => {
 watch(
   () => route.query.focus,
   (name) => {
-    if (typeof name === 'string' && name) search.value = name
+    if (typeof name === 'string' && name) {
+      search.value = name
+      clearQuery('focus')
+    }
   },
   { immediate: true },
 )
@@ -82,10 +102,25 @@ watch(
     if (typeof name === 'string' && name) {
       detailName.value = name
       detailOpen.value = true
+      clearQuery('detail')
     }
   },
   { immediate: true },
 )
+
+/**
+ * 消费查询参数后清理（review 0.1.2 根治）：
+ * 此前 focus/detail 永久留在 hash 上，刷新/撤销返回会重复过滤与弹窗。
+ * router.replace 在部分嵌入/测试环境可能缺失，缺失时静默跳过（不影响页面功能）。
+ */
+function clearQuery(key: 'focus' | 'detail') {
+  const replace = (router as { replace?: (to: { query: Record<string, unknown> }) => unknown })
+    .replace
+  if (typeof replace !== 'function') return
+  const rest = { ...route.query }
+  delete rest[key]
+  void replace.call(router, { query: rest })
+}
 
 function stateLabelFn(s: string) {
   return stateLabel(s)
@@ -96,7 +131,6 @@ async function act(fn: () => Promise<void>, ok: string) {
     await fn()
     message.success(ok)
     await distros.refresh()
-    await metrics.sample()
   } catch (e) {
     message.error(errorLine(e))
   }
@@ -157,7 +191,7 @@ function onDetailTerminal(name: string) {
           <n-radio-button value="card"> 卡片 </n-radio-button>
           <n-radio-button value="table"> 表格 </n-radio-button>
         </n-radio-group>
-        <n-button secondary :loading="distros.loading" @click="distros.refresh()"> 刷新 </n-button>
+        <n-button secondary :loading="refreshing" @click="manualRefresh"> 刷新 </n-button>
       </div>
     </header>
 
@@ -180,7 +214,9 @@ function onDetailTerminal(name: string) {
         <n-button v-if="search || tagFilter" size="small" secondary @click="clearFilters">
           清除筛选
         </n-button>
-        <n-button v-else size="small" secondary @click="distros.refresh()"> 重新扫描 </n-button>
+        <n-button v-else size="small" secondary :loading="refreshing" @click="manualRefresh">
+          重新扫描
+        </n-button>
       </EmptyState>
 
       <!-- 卡片网格 -->
@@ -200,14 +236,17 @@ function onDetailTerminal(name: string) {
 
       <!-- 紧凑表格 -->
       <table v-else class="table">
+        <caption class="sr-only">
+          发行版列表（状态 / 名称 / 别名 / 版本 / 标签 / 操作）
+        </caption>
         <thead>
           <tr>
-            <th>状态</th>
-            <th>名称</th>
-            <th>别名</th>
-            <th>版本</th>
-            <th>标签</th>
-            <th>操作</th>
+            <th scope="col">状态</th>
+            <th scope="col">名称</th>
+            <th scope="col">别名</th>
+            <th scope="col">版本</th>
+            <th scope="col">标签</th>
+            <th scope="col">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -239,23 +278,22 @@ function onDetailTerminal(name: string) {
             </td>
             <td>
               <div class="row-actions">
+                <n-popconfirm v-if="d.state === 'Running'" @positive-click="onTerminate(d.name)">
+                  <template #trigger>
+                    <n-button size="tiny" type="error" :loading="distros.isBusy(d.name)">
+                      停止
+                    </n-button>
+                  </template>
+                  将停止 {{ d.name }}，其中的运行中进程会被终止，确定吗？
+                </n-popconfirm>
                 <n-button
-                  v-if="d.state !== 'Running'"
+                  v-else
                   size="tiny"
                   type="primary"
                   :loading="distros.isBusy(d.name)"
                   @click="act(() => distros.start(d.name), `已启动 ${d.name}`)"
                 >
                   启动
-                </n-button>
-                <n-button
-                  v-else
-                  size="tiny"
-                  type="error"
-                  :loading="distros.isBusy(d.name)"
-                  @click="act(() => distros.terminate(d.name), `已停止 ${d.name}`)"
-                >
-                  停止
                 </n-button>
                 <n-button
                   size="tiny"
@@ -391,5 +429,18 @@ function onDetailTerminal(name: string) {
 
 .muted {
   color: var(--color-text-tertiary);
+}
+
+/* 表格 caption 仅供读屏（最小 a11y） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

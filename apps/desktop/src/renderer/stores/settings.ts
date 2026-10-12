@@ -122,6 +122,9 @@ export const useSettingsStore = defineStore('settings', {
      * 早期 21 个 setter 都是「先改 state 再 await config.set，不 catch」——
      * 落盘失败时开关显示已改、settings.jsonc 未改，重启后悄悄回滚，用户完全不知情。
      * 现在：失败回滚 UI 值 + 记录 lastError + 推进 persistErrorAt 供界面提示。
+     *
+     * 失败语义（review 0.1.2 明确）：返回 false 且绝不抛出；
+     * 调用方必须判返回值决定「成功提示 / 失败提示」，不得依赖 catch 或无条件 success。
      */
     async persistField<K extends keyof SettingsState>(
       field: K,
