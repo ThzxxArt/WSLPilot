@@ -70,6 +70,24 @@ async function launchIsolated() {
   return { app, close }
 }
 
+/**
+ * 固定窗口内容尺寸 —— 视觉基线与运行机器的屏幕尺寸解耦。
+ *
+ * 背景（CI 首跑实锤）：默认窗口 1180×760 在小屏机器（GitHub windows runner 屏幕 1024×768，
+ * 工作区 1024×720）上会被系统压到 1024×720 → 与基线尺寸失配（42% 像素差）。
+ * 统一把内容区固定为 1024×720（所有目标环境都装得下、不会被裁剪），基线按此尺寸生成与比对。
+ */
+const SCREENSHOT_SIZE = { width: 1024, height: 720 } as const
+
+async function fixWindowSize(app: Awaited<ReturnType<typeof electron.launch>>): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, size) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    win?.setContentSize(size.width, size.height)
+  }, SCREENSHOT_SIZE)
+  // 等 resize 引发的布局/resize 事件稳定后再截图
+  await new Promise((resolve) => setTimeout(resolve, 300))
+}
+
 test.describe('视觉回归 @visual', () => {
   test('驾驶舱 / 设置 / 网络 渲染一致', async () => {
     const { app, close } = await launchIsolated()
@@ -78,6 +96,7 @@ test.describe('视觉回归 @visual', () => {
       await expect(window.getByRole('button', { name: '驾驶舱', exact: true })).toBeVisible({
         timeout: 15_000,
       })
+      await fixWindowSize(app)
 
       // 驾驶舱骨架（版式 + 标题区 + 指标卡布局）
       await expect(window).toHaveScreenshot('m7-dashboard.png', {
@@ -122,6 +141,7 @@ test.describe('视觉回归 @visual', () => {
       await expect(window.getByRole('button', { name: '驾驶舱', exact: true })).toBeVisible({
         timeout: 15_000,
       })
+      await fixWindowSize(app)
 
       await window.keyboard.press('Control+KeyK')
       await expect(window.locator('input[aria-label="命令面板搜索"]')).toBeVisible({
