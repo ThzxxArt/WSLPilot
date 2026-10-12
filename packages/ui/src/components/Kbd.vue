@@ -3,19 +3,25 @@
  * 快捷键提示（设计书 §10.7.2 Kbd）。
  * keys 传按键序列，如 ['Ctrl', 'K']；单键可用 text。
  */
-withDefaults(
+import { computed } from 'vue'
+
+const props = withDefaults(
   defineProps<{
     keys?: string[]
     text?: string
   }>(),
   { keys: () => [], text: '' },
 )
+
+// 空输入守卫（review 0.1.2 根治）：空串/纯空白按键不渲染空 <kbd> 占位
+const visibleKeys = computed(() => props.keys.filter((k) => k.trim().length > 0))
+const hasContent = computed(() => visibleKeys.value.length > 0 || props.text.trim().length > 0)
 </script>
 
 <template>
-  <span class="kbd" role="img" :aria-label="text || keys.join(' + ')">
-    <template v-if="keys.length">
-      <kbd v-for="(k, i) in keys" :key="k + i" class="key">
+  <span v-if="hasContent" class="kbd" role="img" :aria-label="text || visibleKeys.join(' + ')">
+    <template v-if="visibleKeys.length">
+      <kbd v-for="(k, i) in visibleKeys" :key="k + i" class="key">
         {{ k }}
       </kbd>
     </template>

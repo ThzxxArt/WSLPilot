@@ -1,6 +1,6 @@
 {
   "name": "@wslpilot/ui",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "WSLPilot 设计令牌、Naive UI 主题适配与业务组件",
   "license": "MIT",

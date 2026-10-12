@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 空状态（设计书 §10.7.2 / §12.8）：插画槽 + 说明 + 主 CTA 槽。
- * 基于 NEmpty 封装，统一空态视觉与语义。
+ * 纯 div 实现（非 NEmpty 封装，review 0.1.2 注释与实现对齐），统一空态视觉与语义。
  */
 withDefaults(
   defineProps<{

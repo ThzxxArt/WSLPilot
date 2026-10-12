@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { primitiveGradients } from '../tokens'
+
+// 默认渐变从 shared PRIMITIVE_GRADIENTS.aurora 解析色停（唯一事实源，禁止手写品牌 hex）
+const AURORA_STOPS = primitiveGradients.aurora.match(/#[0-9a-f]{6}/gi) ?? []
+const AURORA_FROM = AURORA_STOPS[0] ?? 'currentColor'
+const AURORA_TO = AURORA_STOPS[1] ?? AURORA_FROM
 
 const props = withDefaults(
   defineProps<{
@@ -20,10 +26,14 @@ const props = withDefaults(
     stroke: 12,
     label: '',
     sublabel: '',
-    gradientFrom: '#22D3EE',
-    gradientTo: '#6366F1',
+    gradientFrom: '',
+    gradientTo: '',
   },
 )
+
+// 未显式传渐变时落到 aurora 色停（withDefaults 不能引用局部变量，故用 computed 兜底）
+const fromColor = computed(() => props.gradientFrom || AURORA_FROM)
+const toColor = computed(() => props.gradientTo || AURORA_TO)
 
 const uid = `pring-${Math.random().toString(36).slice(2, 9)}`
 
@@ -34,7 +44,8 @@ const clamped = computed(() => {
 
 const indeterminate = computed(() => clamped.value === null)
 
-const radius = computed(() => (props.size - props.stroke) / 2)
+// 半径守卫（review 0.1.2 根治）：stroke ≥ size 时原式产生负半径，SVG r<0 非法；clamp 到 0
+const radius = computed(() => Math.max(0, (props.size - props.stroke) / 2))
 const circumference = computed(() => 2 * Math.PI * radius.value)
 const dashOffset = computed(() => {
   const p = (clamped.value ?? 0) / 100
@@ -63,8 +74,8 @@ const displayLabel = computed(() => {
     <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`">
       <defs>
         <linearGradient :id="uid" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" :stop-color="gradientFrom" />
-          <stop offset="100%" :stop-color="gradientTo" />
+          <stop offset="0%" :stop-color="fromColor" />
+          <stop offset="100%" :stop-color="toColor" />
         </linearGradient>
       </defs>
       <circle

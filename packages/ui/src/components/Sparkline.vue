@@ -12,15 +12,21 @@ const props = withDefaults(
 )
 
 const path = computed(() => {
-  const vals = props.values?.length ? props.values : [0, 0]
+  const raw = props.values?.length ? props.values : [0, 0]
+  // 非有限值（NaN/Infinity）不参与构图（review 0.1.2 根治）：此前 min/max/坐标被污染，
+  // 会产出非法 path d（NaN,Infinity 坐标），SVG 直接拒绘。
+  const finite = raw.filter((v) => Number.isFinite(v))
+  const vals = finite.length > 0 ? finite : [0]
   const min = Math.min(...vals)
   const max = Math.max(...vals)
-  const span = max - min || 1
+  const span = max - min
   const step = vals.length > 1 ? props.width / (vals.length - 1) : props.width
+  // 恒定序列（span=0）画中线（review 0.1.2 根治）：此前 min 恒映射贴底边，视觉误读为 0 值
+  const flatY = props.height / 2
   return vals
     .map((v, i) => {
       const x = i * step
-      const y = props.height - 2 - ((v - min) / span) * (props.height - 4)
+      const y = span === 0 ? flatY : props.height - 2 - ((v - min) / span) * (props.height - 4)
       return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')

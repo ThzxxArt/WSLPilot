@@ -1,19 +1,22 @@
 import type { AccentName } from './tokens'
-import { accentMaps } from './tokens'
+import { accentMaps, motion } from './tokens'
 
-/** 强调色切换过渡时长（§13.2：全局强调色 320ms 平滑过渡；与 motion.scss 过渡时长一致） */
-const ACCENT_TRANSITION_MS = 320
+/** 强调色切换过渡时长（§13.2：320ms 平滑过渡；引用 motion dur-slow 令牌，禁止魔法数） */
+const ACCENT_TRANSITION_MS = Number.parseInt(motion.duration.slow, 10)
 let accentAnimTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 将强调色的 CSS 变量写入 :root，实现全局强调色切换 */
 export function applyAccentToDom(accent: AccentName): void {
+  // SSR 守卫（与 vRipple 一致）：无 document 环境直接放弃 DOM 写入
+  if (typeof document === 'undefined') return
   const a = accentMaps[accent] ?? accentMaps.aurora
   const root = document.documentElement
-  // 切换窗口内给颜色属性插过渡（motion.scss：:root[data-accent-anim]）
-  root.dataset.accentAnim = 'true'
+  // 切换窗口内给颜色属性插过渡（motion.scss：:root[data-accent-anim='true']）
+  root.setAttribute('data-accent-anim', 'true')
   if (accentAnimTimer !== null) clearTimeout(accentAnimTimer)
   accentAnimTimer = setTimeout(() => {
-    root.dataset.accentAnim = 'false'
+    // 属性语义（review 0.1.2 根治）：窗口结束移除属性，而非留 'false' 值污染 dataset
+    root.removeAttribute('data-accent-anim')
     accentAnimTimer = null
   }, ACCENT_TRANSITION_MS)
 

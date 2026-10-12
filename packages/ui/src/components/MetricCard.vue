@@ -2,6 +2,10 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import Sparkline from './Sparkline.vue'
 import { useReducedMotion } from '../composables/useReducedMotion'
+import { motion } from '../tokens'
+
+/** 数值滚动时长：引用 motion 令牌最长档 dur-slower（原 600ms 为魔法数，review 0.1.2 根治） */
+const VALUE_ANIM_MS = Number.parseInt(motion.duration.slower, 10)
 
 const props = withDefaults(
   defineProps<{
@@ -19,19 +23,32 @@ const props = withDefaults(
 const display = ref<string>(String(props.value))
 const { reduced } = useReducedMotion()
 let rafId: number | null = null
+// 动画目标值：reduced-motion 中途开启时据此立即落终值（review 0.1.2 根治）
+let animTarget: number | null = null
 
 watch(
   () => props.value,
   (v) => {
     const target = typeof v === 'number' ? v : Number(v)
-    if (Number.isFinite(target) && typeof v === 'number') {
+    // 字符串数字（props 类型允许）不参与动画，直接展示（review 0.1.2 明确契约）
+    if (typeof v === 'number' && Number.isFinite(target)) {
       animateTo(target)
     } else {
       cancelAnimation()
+      animTarget = null
       display.value = String(v)
     }
   },
 )
+
+// 动画途中开启 reduced-motion：取消 rAF 并立即落终值，不等残余帧（review 0.1.2 根治）
+watch(reduced, (isReduced) => {
+  if (!isReduced) return
+  if (rafId !== null) {
+    cancelAnimation()
+    if (animTarget !== null) display.value = String(animTarget)
+  }
+})
 
 function cancelAnimation() {
   if (rafId !== null) {
@@ -45,11 +62,13 @@ function animateTo(target: number) {
   // 应用内「减弱动效」与系统偏好都必须生效（review M5；M7 统一走 useReducedMotion）
   if (reduced.value) {
     display.value = String(target)
+    animTarget = null
     return
   }
+  animTarget = target
   const from = Number(display.value.replace(/[^\d.-]/g, '')) || 0
   const start = performance.now()
-  const dur = 600
+  const dur = VALUE_ANIM_MS
   const step = (now: number) => {
     const t = Math.min(1, (now - start) / dur)
     const eased = 1 - Math.pow(1 - t, 3)
@@ -58,6 +77,7 @@ function animateTo(target: number) {
       rafId = requestAnimationFrame(step)
     } else {
       rafId = null
+      animTarget = null
     }
   }
   rafId = requestAnimationFrame(step)

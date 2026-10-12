@@ -26,15 +26,26 @@ function spawnRipple(host: HTMLElement, ev: PointerEvent): void {
   wave.style.left = `${ev.clientX - rect.left - size / 2}px`
   wave.style.top = `${ev.clientY - rect.top - size / 2}px`
   host.appendChild(wave)
-  const remove = () => wave.remove()
+  // 双删路径收敛（review 0.1.2 根治）：animationend 与兜底定时器谁先到都撤销另一个，
+  // 否则 wave 节点移除后定时器仍持有引用 500ms。
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const remove = () => {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    wave.removeEventListener('animationend', remove)
+    wave.remove()
+  }
   wave.addEventListener('animationend', remove)
   // 兜底：动画被跳过（reduced-motion 例外）时 500ms 后清节点，杜绝泄漏
-  setTimeout(remove, 500)
+  timer = setTimeout(remove, 500)
 }
 
 function onPointerDown(this: RippleHost, ev: Event): void {
   if (prefersReducedMotion()) return
-  if ((ev as PointerEvent).button !== undefined && (ev as PointerEvent).button !== 0) return
+  // pointerdown 必然携带 button；仅主键（0）触发（review 0.1.2：删除恒真的 undefined 判断）
+  if ((ev as PointerEvent).button !== 0) return
   spawnRipple(this, ev as PointerEvent)
 }
 

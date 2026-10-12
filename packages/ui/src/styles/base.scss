@@ -17,6 +17,9 @@ body,
 }
 
 html {
+  /* 钉死浅色（review 0.1.2 根治）：Windows 暗色模式下原生滚动条/表单控件
+     会跟随系统变暗，与应用的浅色主题割裂 */
+  color-scheme: light;
   font-family: #{tokens.$pilot-font-sans};
   font-size: 14px;
   line-height: 1.55;

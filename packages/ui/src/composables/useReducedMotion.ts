@@ -26,6 +26,9 @@ export function useReducedMotion(): { reduced: Ref<boolean> } {
   }
 
   onMounted(() => {
+    // 先同步一次（review 0.1.2 根治）：setup 与 mounted 之间 data-reduce-motion/媒体查询
+    // 若已变化，初始 ref 会停留在旧值，挂载后立即对账避免漏报。
+    update()
     if (typeof matchMedia === 'function') {
       mediaQuery = matchMedia('(prefers-reduced-motion: reduce)')
       mediaQuery.addEventListener('change', update)
