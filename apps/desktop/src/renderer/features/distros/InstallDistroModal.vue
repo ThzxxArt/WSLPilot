@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NModal, NSelect, NSpin, NTag, NProgress, useMessage } from 'naive-ui'
+import type { OnlineDistro } from '@wslpilot/shared'
 import { useDistrosStore } from '../../stores/distros'
 import { useTasksStore } from '../../stores/tasks'
 import { useTaskProgress, taskStatusLabel } from '../../composables/useTaskProgress'
@@ -15,8 +16,10 @@ const tasks = useTasksStore()
 const message = useMessage()
 const router = useRouter()
 
-const online = ref<string[]>([])
+const online = ref<OnlineDistro[]>([])
 const loadingOnline = ref(false)
+/** 在线列表读取失败（常见：未启用 WSL）：与「列表为空」区分，给一键安装 WSL 兜底（0.1.3） */
+const onlineError = ref('')
 const selected = ref<string | null>(null)
 const activeTaskId = ref('')
 const startedAt = ref(0)
@@ -28,7 +31,12 @@ const { task, percentLabel, isRunning, isDone, cancel } = useTaskProgress(active
 const elapsed = ref('00:00')
 let timer: number | undefined
 
-const onlineOptions = computed(() => online.value.map((n) => ({ label: n, value: n })))
+const onlineOptions = computed(() =>
+  online.value.map((d) => ({
+    label: d.friendlyName && d.friendlyName !== d.name ? `${d.friendlyName}（${d.name}）` : d.name,
+    value: d.name,
+  })),
+)
 
 /** 实时日志尾（安装过程可见 — review 弹框简陋根治） */
 const logTail = computed(() => (task.value?.logs ?? []).slice(-8))
@@ -40,14 +48,22 @@ const canceled = computed(() => task.value?.status === 'canceled')
 const taskLost = computed(() => !!activeTaskId.value && !task.value)
 /** 步骤指示：0 选择 → 1 安装中 → 2 结果 */
 const step = computed(() => (!activeTaskId.value ? 0 : isDone.value ? 2 : 1))
+/** 本次安装的是 WSL 本体（而非某个发行版） */
+const isWslBodyInstall = computed(() => !task.value?.distro)
+/** 安装程序提示需要重启 Windows（0.1.3）：日志文本识别，如实展示 */
+const restartHinted = computed(
+  () => !!task.value && task.value.logs.some((l) => /重启|重新启动|restart|reboot/i.test(l)),
+)
 
 async function loadOnline() {
   loadingOnline.value = true
+  onlineError.value = ''
   try {
     online.value = await window.wslAPI.distros.listOnline()
-    if (!selected.value && online.value.length > 0) selected.value = online.value[0]!
+    if (!selected.value && online.value.length > 0) selected.value = online.value[0]!.name
   } catch (e) {
-    message.error(errorLine(e, '获取可安装发行版列表失败'))
+    online.value = []
+    onlineError.value = errorLine(e, '获取可安装发行版列表失败')
   } finally {
     loadingOnline.value = false
   }
@@ -78,11 +94,11 @@ watch(
   { immediate: true },
 )
 
-async function startInstall() {
+/** 启动安装任务（name 为空 = 安装 WSL 本体 — 0.1.3 兜底路径） */
+async function startInstallNamed(name?: string) {
   if (starting.value) return
   starting.value = true
   try {
-    const name = selected.value ?? undefined
     const entry = await tasks.startInstall(name)
     if (!entry) {
       message.error(errorLine(tasks.lastError, '启动安装失败'))
@@ -98,6 +114,15 @@ async function startInstall() {
   } finally {
     starting.value = false
   }
+}
+
+async function startInstall() {
+  await startInstallNamed(selected.value ?? undefined)
+}
+
+/** 一键安装 WSL 本体（在线列表失败 / 未启用 WSL 的兜底入口） */
+async function installWslBody() {
+  await startInstallNamed(undefined)
 }
 
 watch(isDone, (done) => {
@@ -140,12 +165,13 @@ function openTerminal() {
   void router.push(name ? { path: '/terminal', query: { distro: name } } : '/terminal')
 }
 
-/** 失败重试 / 记录被 trim：清任务回选择步（review 0.1.2 根治死路） */
+/** 失败重试 / 记录被 trim / WSL 本体装完后再装发行版：清任务回选择步（review 0.1.2 根治死路） */
 function resetAndPick() {
   activeTaskId.value = ''
   startedAt.value = 0
   elapsed.value = '00:00'
   stopTimer()
+  if (online.value.length === 0) void loadOnline()
 }
 </script>
 
@@ -176,7 +202,24 @@ function resetAndPick() {
     </div>
 
     <div v-if="!activeTaskId" class="form">
-      <n-spin :show="loadingOnline">
+      <!-- 在线列表失败（常见：未启用 WSL）：给「安装 WSL 本体」兜底，而不是死路 — 0.1.3 -->
+      <div v-if="onlineError" class="online-error" role="alert">
+        <div class="error-title">无法获取可安装发行版列表</div>
+        <p class="hint">{{ onlineError }}</p>
+        <p class="hint">
+          如果系统尚未启用 WSL，可直接一键安装 WSL 本体（安装后回到本窗口选择发行版）。
+        </p>
+        <div class="actions">
+          <n-button size="small" secondary :loading="loadingOnline" @click="loadOnline">
+            重试获取列表
+          </n-button>
+          <n-button size="small" type="primary" :disabled="starting" @click="installWslBody">
+            一键安装 WSL
+          </n-button>
+        </div>
+      </div>
+
+      <n-spin v-else :show="loadingOnline">
         <div class="field">
           <div class="label">选择发行版（来自 wsl --list --online）</div>
           <n-select
@@ -195,6 +238,7 @@ function resetAndPick() {
       <div class="actions">
         <n-button @click="close"> 取消 </n-button>
         <n-button
+          v-if="!onlineError"
           type="primary"
           :disabled="!selected || starting"
           :loading="starting"
@@ -247,16 +291,27 @@ function resetAndPick() {
         安装任务记录已滚动清理（可能因应用重启或任务列表淘汰），当前无法再查看进度。
       </div>
 
+      <!-- 安装程序提示需要重启 Windows（0.1.3）：如实透传，不假报"即刻可用" -->
+      <div v-if="restartHinted" class="restart-note" role="status">
+        安装程序提示需要<strong>重启 Windows</strong>后才能使用 WSL。请重启系统，然后回到「发行版」
+        页刷新。
+      </div>
+
       <!-- 安装完成：行动导向（review：新装发行版用户名/密码无处可寻根治） -->
       <div v-if="succeeded" class="user-guide">
         <div class="guide-title">✓ 安装完成 — 下一步</div>
-        <div class="hint">
-          首次在终端打开该发行版时，多数发行版会进入
-          <b>UNIX 用户创建向导</b> ——按提示输入用户名与密码即可。<br />
-          若直接进入了 root（未见向导）：终端执行 <code>adduser 用户名</code> 创建用户， 再到「详情
-          → 配置」给 <code>/etc/wsl.conf</code> 写入 <code>[user]</code> 段
-          <code>default=用户名</code>，停止并重开终端生效。
-        </div>
+        <template v-if="isWslBodyInstall">
+          <div class="hint">WSL 本体已安装。点击「安装发行版」选择一个 Linux 发行版开始使用。</div>
+        </template>
+        <template v-else>
+          <div class="hint">
+            首次在终端打开该发行版时，多数发行版会进入
+            <b>UNIX 用户创建向导</b> ——按提示输入用户名与密码即可。<br />
+            若直接进入了 root（未见向导）：终端执行 <code>adduser 用户名</code> 创建用户，
+            再到「详情 → 配置」给 <code>/etc/wsl.conf</code> 写入 <code>[user]</code> 段
+            <code>default=用户名</code>，停止并重开终端生效。
+          </div>
+        </template>
       </div>
 
       <div class="actions">
@@ -265,6 +320,11 @@ function resetAndPick() {
         <template v-if="taskLost">
           <n-button @click="close"> 关闭 </n-button>
           <n-button type="primary" @click="resetAndPick">重新开始</n-button>
+        </template>
+        <template v-if="succeeded && isWslBodyInstall">
+          <!-- WSL 本体安装完成：引导继续安装发行版（而不是打开终端死路） -->
+          <n-button @click="close"> 完成 </n-button>
+          <n-button type="primary" @click="resetAndPick">安装发行版</n-button>
         </template>
         <template v-else-if="succeeded">
           <n-button @click="close"> 完成 </n-button>
@@ -409,5 +469,30 @@ function resetAndPick() {
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
   color: var(--color-danger);
   font-size: 12.5px;
+}
+
+.online-error {
+  border: 1px solid color-mix(in srgb, var(--color-warning) 40%, transparent);
+  border-radius: var(--radius-md, 12px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
+}
+
+.error-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--color-text-primary);
+}
+
+.restart-note {
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 12px);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
 </style>

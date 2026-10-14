@@ -217,6 +217,14 @@ describe('镜像网络模式解析', () => {
     expect(parseWslConfigMode('').mode).toBe('unknown')
   })
 
+  it('行内注释（# / ; 空白前缀）与旧实现语义一致（0.1.3 单一事实源委托）', () => {
+    expect(parseWslConfigMode('[wsl2]\nnetworkingMode=bridged # 备注').mode).toBe('bridged')
+    expect(parseWslConfigMode('[wsl2]\nnetworkingMode=bridged ; 备注').mode).toBe('bridged')
+    expect(parseWslConfigMode('[wsl2]\nnetworkingMode="mirrored" # 引号值').mode).toBe('mirrored')
+    // 段落名/键名大小写不敏感（旧实现 lowercase 比较的等价语义）
+    expect(parseWslConfigMode('[WSL2]\nNetworkingMode=Mirrored\n').mode).toBe('mirrored')
+  })
+
   it('引导文案与配置片段', () => {
     expect(mirrorModeSnippet()).toContain('networkingMode=mirrored')
     const g = mirrorModeGuidance('nat')

@@ -1,20 +1,35 @@
 <script setup lang="ts">
+/**
+ * 终端标签栏（0.1.3 分屏模型）：
+ * - 标签 = 一棵分屏面板树（组件只关心标签标题 / 存活态 / 排序）
+ * - 新建标签 popover 支持指定发行版、Shell、启动目录（默认值来自设置与发行版元数据）
+ * - 拖拽排序 / 双击重命名 / 中键关闭语义保持
+ */
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { NButton, NInput, NPopover, NSelect } from 'naive-ui'
-import type { TerminalSession } from '../../stores/terminal'
+
+export interface TerminalTabItem {
+  id: string
+  title: string
+  alive: boolean
+  /** 悬浮提示（发行版 / shell / 目录 — 0.1.3） */
+  tooltip: string
+}
 
 const props = defineProps<{
-  sessions: TerminalSession[]
-  activeId: string
+  tabs: TerminalTabItem[]
+  activeTabId: string
   maxSessions: number
   distroOptions: { label: string; value: string }[]
   defaultDistro: string
-  /** store 中「创建中」的发行版名单：按钮据此进入 loading 并防重（review 0.1.2 根治） */
+  /** 默认 Shell 占位（settings.wsl.defaultShell 或 /bin/bash） */
+  defaultShell: string
+  /** 创建中的发行版名单：按钮据此进入 loading 并防重（review 0.1.2 根治） */
   creatingDistros?: string[]
 }>()
 
 const emit = defineEmits<{
-  create: [distro: string]
+  create: [payload: { distro: string; shell?: string; cwd?: string }]
   select: [id: string]
   close: [id: string]
   rename: [id: string, title: string]
@@ -22,11 +37,13 @@ const emit = defineEmits<{
 }>()
 
 /**
- * 新建会话的目标发行版：distros 异步到达后必须同步（否则下拉永远空）。
+ * 新建标签的目标发行版：distros 异步到达后必须同步（否则下拉永远空）。
  * 只在「尚未选择 / 当前选择已不在选项里」时跟随 defaultDistro / 首个选项，
  * 用户手动选过的值不被覆盖。
  */
 const newDistro = ref('')
+const newShell = ref('')
+const newCwd = ref('')
 watch(
   () => [props.defaultDistro, props.distroOptions] as const,
   () => {
@@ -38,7 +55,7 @@ watch(
   { immediate: true },
 )
 
-const canCreate = computed(() => props.sessions.filter((s) => s.alive).length < props.maxSessions)
+const canCreate = computed(() => props.tabs.filter((t) => t.alive).length < props.maxSessions)
 
 /** 当前下拉目标正在创建：按钮 loading，双击/重入被挡在 store 去重之外还有视觉反馈 */
 const creating = computed(() => (props.creatingDistros ?? []).includes(newDistro.value))
@@ -52,8 +69,8 @@ onUnmounted(() => {
 function onTabMouseDown(e: MouseEvent, index: number) {
   if (e.button === 1) {
     e.preventDefault()
-    const s = props.sessions[index]
-    if (s) emit('close', s.ptyId)
+    const t = props.tabs[index]
+    if (t) emit('close', t.id)
     return
   }
   // 拖拽排序只认左键：右键（button 2）等其余按键不得触发标签重排（review 根治）
@@ -66,7 +83,7 @@ function onTabMouseDown(e: MouseEvent, index: number) {
     if (Math.abs(dx) > 40) {
       const dir = dx > 0 ? 1 : -1
       const target = dragged + dir
-      if (target >= 0 && target < props.sessions.length) {
+      if (target >= 0 && target < props.tabs.length) {
         emit('reorder', dragged, target)
         dragged = target
         startX = ev.clientX // 清零阈值，避免连环乱序
@@ -95,9 +112,9 @@ function onTabMouseDown(e: MouseEvent, index: number) {
 const renamingId = ref('')
 const renameDraft = ref('')
 
-async function startRename(s: TerminalSession) {
-  renamingId.value = s.ptyId
-  renameDraft.value = s.title
+async function startRename(t: TerminalTabItem) {
+  renamingId.value = t.id
+  renameDraft.value = t.title
   await nextTick()
   // class 挂在 n-input 包裹层上，真正的 <input> 是它的后代（review 自查）
   const el = document.querySelector<HTMLElement>('.tab .rename-input')?.querySelector('input')
@@ -110,11 +127,11 @@ async function startRename(s: TerminalSession) {
  * Enter 提交后输入框被 v-if 卸载，blur 会再触发一次；Esc 取消同样会触发 blur。
  * 没有这道守卫就会「重复 emit」甚至「Esc 也改名」（review 自查发现）。
  */
-function commitRename(s: TerminalSession) {
-  if (renamingId.value !== s.ptyId) return
-  const t = renameDraft.value.trim()
+function commitRename(t: TerminalTabItem) {
+  if (renamingId.value !== t.id) return
+  const v = renameDraft.value.trim()
   renamingId.value = ''
-  if (t && t !== s.title) emit('rename', s.ptyId, t)
+  if (v && v !== t.title) emit('rename', t.id, v)
 }
 
 function cancelRename() {
@@ -124,7 +141,11 @@ function cancelRename() {
 function submitNew() {
   const d = newDistro.value || props.defaultDistro
   if (!d) return
-  emit('create', d)
+  emit('create', {
+    distro: d,
+    shell: newShell.value.trim() || undefined,
+    cwd: newCwd.value.trim() || undefined,
+  })
 }
 </script>
 
@@ -134,33 +155,34 @@ function submitNew() {
     <transition-group name="tab" tag="div" class="tabs-scroll" role="tablist" aria-label="终端标签">
       <!-- 外层不是 button：内部含关闭按钮，嵌套交互元素非法 HTML（review M4） -->
       <div
-        v-for="(s, i) in sessions"
-        :key="s.ptyId"
+        v-for="(t, i) in tabs"
+        :key="t.id"
         class="tab"
         role="tab"
         tabindex="0"
-        :aria-selected="s.ptyId === activeId"
-        :class="{ active: s.ptyId === activeId, dead: !s.alive }"
+        :title="t.tooltip"
+        :aria-selected="t.id === activeTabId"
+        :class="{ active: t.id === activeTabId, dead: !t.alive }"
         @mousedown="onTabMouseDown($event, i)"
-        @click="emit('select', s.ptyId)"
-        @dblclick="startRename(s)"
-        @keydown.enter.prevent="emit('select', s.ptyId)"
-        @keydown.space.prevent="emit('select', s.ptyId)"
+        @click="emit('select', t.id)"
+        @dblclick="startRename(t)"
+        @keydown.enter.prevent="emit('select', t.id)"
+        @keydown.space.prevent="emit('select', t.id)"
       >
-        <span class="dot" :class="{ on: s.alive }" />
+        <span class="dot" :class="{ on: t.alive }" />
         <n-input
-          v-if="renamingId === s.ptyId"
+          v-if="renamingId === t.id"
           v-model:value="renameDraft"
           class="rename-input"
           size="tiny"
           :autosize="{ minRows: 1, maxRows: 1 }"
           @click.stop
-          @blur="commitRename(s)"
-          @keyup.enter="commitRename(s)"
+          @blur="commitRename(t)"
+          @keyup.enter="commitRename(t)"
           @keyup.esc="cancelRename"
         />
-        <span v-else class="label">{{ s.title }}</span>
-        <button class="close" :aria-label="`关闭 ${s.title}`" @click.stop="emit('close', s.ptyId)">
+        <span v-else class="label">{{ t.title }}</span>
+        <button class="close" :aria-label="`关闭 ${t.title}`" @click.stop="emit('close', t.id)">
           ×
         </button>
       </div>
@@ -178,7 +200,21 @@ function submitNew() {
             :options="distroOptions"
             size="small"
             filterable
-            style="width: 220px"
+            style="width: 240px"
+          />
+          <div class="hint">Shell（可空 = 默认）</div>
+          <n-input
+            v-model:value="newShell"
+            size="small"
+            :placeholder="defaultShell || '/bin/bash'"
+            style="width: 240px"
+          />
+          <div class="hint">启动目录（可空 = 发行版默认）</div>
+          <n-input
+            v-model:value="newCwd"
+            size="small"
+            placeholder="~/project 或 /home/me/project"
+            style="width: 240px"
           />
           <n-button
             size="small"

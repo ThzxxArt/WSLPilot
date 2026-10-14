@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
+import { summarizeWslConfChanges } from '@wslpilot/shared'
 import {
   createWslConfService,
   assertParsableWslConf,
-  summarizeWslConfChanges,
   WSL_CONF_MAX_BYTES,
 } from '../../src/main/services/wslconf-service'
 

@@ -1266,8 +1266,8 @@ describe('IoService + TaskRunner integration (cancel)', () => {
   })
 })
 
-describe('IoService lockKey 与 runExclusive 严格互斥（review 0.1.2 审计修复）', () => {
-  it('注销排他段（lockKey=name.toLowerCase）排在同发行版导出任务之后', async () => {
+describe('IoService lockKey 与注销任务严格互斥（0.1.3 注销任务化同构）', () => {
+  it('注销任务（lockKey=name.toLowerCase）排在同发行版导出任务之后', async () => {
     const runner: TaskRunner = createTaskRunner({ logger: logger(), onProgress: () => {} })
     const distroDir = await tmp()
     await fs.writeFile(join(distroDir, 'ext4.vhdx'), Buffer.alloc(64))
@@ -1305,17 +1305,140 @@ describe('IoService lockKey 与 runExclusive 严格互斥（review 0.1.2 审计�
       },
     })
     await vi.waitFor(() => expect(exitFn).not.toBeNull())
-    // 与 handler 注销同构：runExclusive(name.toLowerCase(), fn)
-    const exclusive = runner.runExclusive('ubuntu', async () => {
-      order.push('unregister')
+    // 与 handler 注销同构：0.1.3 起注销即同 lockKey 任务（由任务化路径保证原子排队）
+    const unregister = runner.start({
+      type: 'unregister',
+      distro: 'Ubuntu',
+      message: '注销 Ubuntu',
+      lockKey: 'ubuntu',
+      run: async () => {
+        order.push('unregister')
+      },
     })
     await new Promise((r) => setTimeout(r, 20))
     // 导出未结束：注销必须被锁排队，绝不并发
     expect(order).toEqual(['export:start'])
     exitFn!(0)
-    await exclusive
+    await runner.waitFor(unregister.taskId)
     const rec = await runner.waitFor(handle.taskId)
     expect(rec.status).toBe('success')
     expect(order).toEqual(['export:start', 'export:end', 'unregister'])
+  })
+})
+
+describe('IoService.runClone（0.1.3 克隆发行版）', () => {
+  let outDir: string
+
+  beforeEach(async () => {
+    vi.mocked(runWsl).mockClear()
+    vi.mocked(runWsl).mockResolvedValue({ stdout: '', stderr: '', code: 0 } as never)
+    outDir = await tmp()
+  })
+
+  it('导出临时归档 → 导入新名（版本随源）→ 清理临时目录', async () => {
+    const calls: string[][] = []
+    let tempArchive = ''
+    let imported = false
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        if (args[0] === '--export') {
+          tempArchive = args[2]!
+          await fs.writeFile(tempArchive, Buffer.alloc(128))
+        }
+        if (args[0] === '--import') imported = true
+      },
+    }))
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+      spawn,
+    }) as unknown as ReturnType<typeof makeDeps> & { wsl: { list: ReturnType<typeof vi.fn> } }
+    deps.wsl.list = vi.fn(async () => [
+      { name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true },
+      ...(imported ? [{ name: 'Ubuntu-Dev', state: 'Stopped', version: 2, isDefault: false }] : []),
+    ]) as never
+    const io = createIoService(deps as never)
+    const ctl = makeCtl([]) as unknown as Parameters<typeof io.runClone>[1]
+
+    await io.runClone({ name: 'Ubuntu', newName: 'Ubuntu-Dev', installPath: outDir }, ctl)
+    expect(calls[0]![0]).toBe('--export')
+    expect(calls[1]![0]).toBe('--import')
+    expect(calls[1]).toContain('Ubuntu-Dev')
+    expect(calls[1]).toContain(outDir)
+    expect(calls[1]).toContain('--version')
+    // 临时归档目录已清理（无论成功）
+    const tempDir =
+      tempArchive.slice(0, tempArchive.lastIndexOf('/')) ||
+      tempArchive.slice(0, tempArchive.lastIndexOf('\\'))
+    expect(tempDir).toContain('wslpilot-clone-')
+    expect(fsSync.existsSync(tempDir)).toBe(false)
+  })
+
+  it('校验：同名（大小写归一）/重名/源不存在 → 拒绝且不产生任何 spawn', async () => {
+    const calls: string[][] = []
+    const deps = makeDeps({
+      distros: [
+        { name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true },
+        { name: 'Ubuntu-Dev', state: 'Stopped', version: 2, isDefault: false },
+      ],
+      spawn: makeSpawnFn(calls, () => ({})),
+    })
+    const io = createIoService(deps)
+    const ctl = makeCtl([]) as unknown as Parameters<typeof io.runClone>[1]
+    await expect(
+      io.runClone({ name: 'Ubuntu', newName: 'ubuntu', installPath: outDir }, ctl),
+    ).rejects.toMatchObject({ message: expect.stringContaining('相同') })
+    await expect(
+      io.runClone({ name: 'Ubuntu', newName: 'Ubuntu-Dev', installPath: outDir }, ctl),
+    ).rejects.toMatchObject({ message: expect.stringContaining('已存在') })
+    await expect(
+      io.runClone({ name: 'Nope', newName: 'X', installPath: outDir }, ctl),
+    ).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('导入失败：注销不完整注册 + 临时归档清理（不留残档）', async () => {
+    const calls: string[][] = []
+    let tempArchive = ''
+    let phase = 0
+    let importStarted = false
+    const spawn = makeSpawnFn(calls, () => {
+      phase++
+      if (phase === 1) {
+        return {
+          before: async (args) => {
+            tempArchive = args[2]!
+            await fs.writeFile(tempArchive, Buffer.alloc(64))
+          },
+        }
+      }
+      importStarted = true
+      return { code: 1, lines: ['import boom'] }
+    })
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+      spawn,
+    }) as unknown as ReturnType<typeof makeDeps> & { wsl: { list: ReturnType<typeof vi.fn> } }
+    // 导入前列表只有源发行版；导入开始后新名出现（不完整注册 → 触发回滚注销）
+    deps.wsl.list = vi.fn(async () => [
+      { name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true },
+      ...(importStarted
+        ? [{ name: 'Ubuntu-Dev', state: 'Stopped', version: 2, isDefault: false }]
+        : []),
+    ]) as never
+    const io = createIoService(deps as never)
+    const ctl = makeCtl([]) as unknown as Parameters<typeof io.runClone>[1]
+
+    await expect(
+      io.runClone({ name: 'Ubuntu', newName: 'Ubuntu-Dev', installPath: outDir }, ctl),
+    ).rejects.toBeTruthy()
+    // 回滚：runWsl 收到 --unregister Ubuntu-Dev
+    const unregisterCall = vi.mocked(runWsl).mock.calls.find((c) => c[0]?.[0] === '--unregister')
+    expect(unregisterCall).toBeTruthy()
+    expect(unregisterCall![0]).toEqual(['--unregister', 'Ubuntu-Dev'])
+    // 临时目录清理
+    const tempDir =
+      tempArchive.slice(0, tempArchive.lastIndexOf('/')) ||
+      tempArchive.slice(0, tempArchive.lastIndexOf('\\'))
+    expect(fsSync.existsSync(tempDir)).toBe(false)
   })
 })

@@ -1,6 +1,6 @@
 {
   "name": "wslpilot",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "WSLPilot — WSL 的驾驶舱。现代化 Windows Subsystem for Linux 图形化控制中枢。",
   "license": "MIT",

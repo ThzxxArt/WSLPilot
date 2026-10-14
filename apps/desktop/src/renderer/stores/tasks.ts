@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   toAppError,
   type AppError,
+  type IoCloneRequest,
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
@@ -161,6 +162,80 @@ export const useTasksStore = defineStore('tasks', {
           distro: name,
           message: name ? `安装 ${name}` : '安装 WSL',
         })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 更新 WSL 本体（wsl --update — 0.1.3） */
+    async startUpdate(opts?: { preRelease?: boolean }): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.app.wslUpdate(opts)
+        return this.track(handle, {
+          type: 'update',
+          message: opts?.preRelease ? '更新 WSL（预发布通道）' : '更新 WSL',
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 回滚最近一次 WSL 更新（wsl --update --rollback — 0.1.3） */
+    async startUpdateRollback(): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.app.wslUpdateRollback()
+        return this.track(handle, { type: 'update', message: '回滚 WSL 更新' })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 稀疏磁盘（wsl --manage --set-sparse — 0.1.3） */
+    async startSparse(name: string, sparse: boolean): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.setSparse(name, sparse)
+        return this.track(handle, {
+          type: 'manage',
+          distro: name,
+          message: sparse ? `启用 ${name} 的稀疏磁盘` : `关闭 ${name} 的稀疏磁盘`,
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 克隆发行版（0.1.3）：导出临时归档 → 导入新名 → 自动清理 */
+    async startClone(req: IoCloneRequest): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.io.clone(req)
+        return this.track(handle, {
+          type: 'clone',
+          distro: req.name,
+          message: `克隆 ${req.name} → ${req.newName}`,
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 注销发行版（0.1.3 任务化；可选注销前自动备份） */
+    async startUnregister(
+      name: string,
+      opts?: { backupFirst?: boolean },
+    ): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.unregister(name, opts)
+        return this.track(handle, { type: 'unregister', distro: name, message: `注销 ${name}` })
       } catch (e) {
         this.lastError = toAppError(e)
         return null

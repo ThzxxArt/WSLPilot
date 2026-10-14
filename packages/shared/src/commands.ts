@@ -86,6 +86,32 @@ export function buildMoveArgs(name: string, path: string): string[] {
 }
 
 /**
+ * `wsl --manage <name> --set-sparse <true|false>` argv（0.1.3 磁盘管理）。
+ * 唯一事实源：WslService 实跑与提权 elevation 共用（需 WSL 2.0+）。
+ */
+export function buildSetSparseArgs(name: string, sparse: boolean): string[] {
+  return ['--manage', name, '--set-sparse', sparse ? 'true' : 'false']
+}
+
+/**
+ * `wsl --update [--pre-release]` argv（0.1.3 WSL 本体更新）。
+ * 唯一事实源：WslService 实跑与提权 elevation 共用。
+ */
+export function buildUpdateArgs(preRelease = false): string[] {
+  return ['--update', ...(preRelease ? ['--pre-release'] : [])]
+}
+
+/** `wsl --update --rollback` argv（0.1.3 回滚最近一次更新；唯一事实源） */
+export function buildUpdateRollbackArgs(): string[] {
+  return ['--update', '--rollback']
+}
+
+/** `wsl --set-default-version <1|2>` argv（0.1.3；唯一事实源） */
+export function buildSetDefaultVersionArgs(version: 1 | 2): string[] {
+  return ['--set-default-version', version === 1 ? '1' : '2']
+}
+
+/**
  * 等价命令行预览（仅展示，绝不执行 — 设计书 §9.1）。
  * 与实跑同源（build*Args）：导出目标路径做扩展名归一（`.vhd` → `.vhdx`、补扩展名）；
  * 环境变量展开与绝对化发生在执行侧（renderer 无 process.env），故预览保留用户书写的路径主体。

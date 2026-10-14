@@ -16,10 +16,12 @@ function key(
     shiftKey?: boolean
     altKey?: boolean
     repeat?: boolean
+    code?: string
   } = {},
 ): Event {
   const e = new Event('keydown', { cancelable: true }) as Event & Record<string, unknown>
   e.key = k
+  e.code = opts.code ?? ''
   e.ctrlKey = !!opts.ctrlKey
   e.metaKey = !!opts.metaKey
   e.shiftKey = !!opts.shiftKey
@@ -220,5 +222,48 @@ describe('输入上下文守卫（xterm/输入框内不劫持快捷键）', () =
     expect(h.openPalette).toHaveBeenCalledTimes(1)
     expect(h.switchTab).toHaveBeenCalledWith(1)
     off()
+  })
+
+  // ── 0.1.3：终端专属组合在输入/终端语境也放行（VS Code 集成终端同语义）──
+
+  it('Ctrl+Shift+T / Ctrl+Tab / Ctrl+Shift+5/6 在 xterm 内也触发', () => {
+    const h = {
+      ...makeHandlers(),
+      newTerminalTab: vi.fn(),
+      nextTerminalTab: vi.fn(),
+      prevTerminalTab: vi.fn(),
+      splitTerminalRow: vi.fn(),
+      splitTerminalCol: vi.fn(),
+    }
+    const el = new FakeElement(['.xterm'])
+    const off = bindGlobalHotkeys(h, el as never)
+    el.dispatchEvent(key('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' }))
+    el.dispatchEvent(key('Tab', { ctrlKey: true }))
+    el.dispatchEvent(key('Tab', { ctrlKey: true, shiftKey: true }))
+    el.dispatchEvent(key('%', { ctrlKey: true, shiftKey: true, code: 'Digit5' }))
+    el.dispatchEvent(key('^', { ctrlKey: true, shiftKey: true, code: 'Digit6' }))
+    expect(h.newTerminalTab).toHaveBeenCalledTimes(1)
+    expect(h.nextTerminalTab).toHaveBeenCalledTimes(1)
+    expect(h.prevTerminalTab).toHaveBeenCalledTimes(1)
+    expect(h.splitTerminalRow).toHaveBeenCalledTimes(1)
+    expect(h.splitTerminalCol).toHaveBeenCalledTimes(1)
+    off()
+
+    // 普通语境（非输入）同样工作；非 Shift 的 Ctrl+T 不误触
+    const plain = new FakeElement([])
+    const h2 = { ...makeHandlers(), newTerminalTab: vi.fn() }
+    const off2 = bindGlobalHotkeys(h2, plain as never)
+    plain.dispatchEvent(key('t', { ctrlKey: true }))
+    expect(h2.newTerminalTab).not.toHaveBeenCalled()
+    plain.dispatchEvent(key('T', { ctrlKey: true, shiftKey: true, code: 'KeyT' }))
+    expect(h2.newTerminalTab).toHaveBeenCalledTimes(1)
+    off2()
+  })
+
+  it('快捷键说明表包含 0.1.3 新增项（设置页展示唯一事实源）', () => {
+    const ids = HOTKEY_TABLE.map((h) => h.id)
+    for (const id of ['newTerminalTab', 'switchTabCycle', 'splitRow', 'splitCol']) {
+      expect(ids).toContain(id)
+    }
   })
 })

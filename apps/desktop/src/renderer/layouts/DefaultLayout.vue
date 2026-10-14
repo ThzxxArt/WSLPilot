@@ -73,25 +73,12 @@ watch(
 
 const unbindHotkeys = bindGlobalHotkeys({
   openPalette: togglePalette,
-  newTerminal: async () => {
-    // 会话上限预检（review 0.1.2 根治）：此前静默失败后靠 lastError 异步提示，
-    // 快捷键场景看不出反馈；这里先行拦截并给出明确指引。
-    if (!terminal.canCreate) {
-      message.warning(`终端会话数已达上限 ${terminal.maxSessions}，请先关闭部分终端标签`)
-      return
-    }
-    const name = distros.defaultDistro?.name ?? distros.items[0]?.name
-    if (!name) {
-      message.warning('没有可用的发行版')
-      return
-    }
-    const id = await terminal.open(name)
-    if (!id) {
-      message.error(errorLine(terminal.lastError, '新建终端失败'))
-      return
-    }
-    await router.push('/terminal')
-  },
+  newTerminal: () => void openNewTerminal(),
+  newTerminalTab: () => void openNewTerminal(),
+  nextTerminalTab: () => cycleTerminalTab(1),
+  prevTerminalTab: () => cycleTerminalTab(-1),
+  splitTerminalRow: () => void splitActiveTerminal('row'),
+  splitTerminalCol: () => void splitActiveTerminal('col'),
   openSettings: () => void router.push('/settings'),
   refresh: () => {
     // Ctrl+R 按路由分发（review 0.1.2 根治）：终端页没有「刷新发行版」语义，
@@ -101,13 +88,56 @@ const unbindHotkeys = bindGlobalHotkeys({
   },
   toggleRawCommand: () => void settings.setShowRawCommand(!settings.showRawCommand),
   switchTab: (index) => {
-    const session = terminal.sessions[index]
-    if (session) {
-      terminal.setActive(session.ptyId)
+    const tab = terminal.tabs[index]
+    if (tab) {
+      terminal.setActiveTab(tab.id)
       void router.push('/terminal')
     }
   },
 })
+
+/** 新建终端标签（Ctrl+N / Ctrl+Shift+T 共用；含会话上限预检 — review 0.1.2） */
+async function openNewTerminal() {
+  if (!terminal.canCreate) {
+    message.warning(`终端会话数已达上限 ${terminal.maxSessions}，请先关闭部分终端面板`)
+    return
+  }
+  const name = distros.defaultDistro?.name ?? distros.items[0]?.name
+  if (!name) {
+    message.warning('没有可用的发行版')
+    return
+  }
+  const id = await terminal.openDefault(name)
+  if (!id) {
+    message.error(errorLine(terminal.lastError, '新建终端失败'))
+    return
+  }
+  await router.push('/terminal')
+}
+
+/** 循环切换终端标签（Ctrl+Tab / Ctrl+Shift+Tab — 0.1.3） */
+function cycleTerminalTab(delta: number) {
+  const tabs = terminal.tabs
+  if (tabs.length === 0) return
+  const idx = tabs.findIndex((t) => t.id === terminal.activeTabId)
+  const next = (idx + delta + tabs.length) % tabs.length
+  terminal.setActiveTab(tabs[next]!.id)
+  void router.push('/terminal')
+}
+
+/** 分屏活动终端面板（Ctrl+Shift+5/6 — 0.1.3） */
+async function splitActiveTerminal(dir: 'row' | 'col') {
+  if (!terminal.activeId) {
+    message.warning('没有活动的终端面板')
+    return
+  }
+  const id = await terminal.splitActive(dir)
+  if (!id) {
+    message.error(errorLine(terminal.lastError, '分屏失败'))
+    return
+  }
+  await router.push('/terminal')
+}
 onUnmounted(unbindHotkeys)
 </script>
 

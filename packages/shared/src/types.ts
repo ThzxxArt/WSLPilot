@@ -32,6 +32,11 @@ export interface DistroMeta {
 /** 运行时 + 元数据的合并视图 */
 export interface DistroView extends DistroRuntime {
   meta?: DistroMeta
+  /**
+   * 宿主侧虚拟磁盘文件大小（`<BasePath>\ext4.vhdx`，字节；WSL2 且文件存在时才提供）。
+   * 与发行版内 `df` 的「已用」对照，可看出宿主磁盘膨胀程度（0.1.3）。
+   */
+  hostDiskBytes?: number
 }
 
 export type LocaleCode = 'system' | 'zh-CN' | 'en-US'
@@ -233,7 +238,22 @@ export const EMPTY_OVERVIEW: OverviewMetrics = {
 }
 
 export type TaskType =
-  'install' | 'export' | 'import' | 'move' | 'convert' | 'action' | 'network' | 'device'
+  | 'install'
+  | 'export'
+  | 'import'
+  | 'move'
+  | 'convert'
+  | 'action'
+  | 'network'
+  | 'device'
+  /** WSL 本体更新 / 回滚（0.1.3） */
+  | 'update'
+  /** 发行版磁盘管理（稀疏磁盘等，0.1.3） */
+  | 'manage'
+  /** 发行版克隆（0.1.3） */
+  | 'clone'
+  /** 注销发行版（0.1.3：备份前置流程任务化） */
+  | 'unregister'
 export type TaskStatus = 'running' | 'success' | 'failed' | 'canceled'
 
 export interface TaskProgress {
@@ -316,6 +336,16 @@ export interface IoMoveRequest {
   terminateFirst: boolean
 }
 
+/** 克隆发行版入参（io:clone — 0.1.3） */
+export interface IoCloneRequest {
+  /** 源发行版名 */
+  name: string
+  /** 新发行版名 */
+  newName: string
+  /** 新发行版安装位置（目录） */
+  installPath: string
+}
+
 /** 系统文件对话框过滤器 */
 export interface FileFilter {
   name: string
@@ -341,11 +371,11 @@ export interface ConfigMap {
     window: { width: number; height: number; x: number; y: number; maximized: boolean }
     sidebarCollapsed: boolean
     recentCommands: string[]
+    /** 终端分屏布局（0.1.3）：窗口重载后恢复标签与分屏结构 */
+    terminalLayout: TerminalTabLayout[]
   }
   state: {
     $schemaVersion: number
-    lastScanAt: string
-    lastMetrics: Record<string, Metrics>
     lastTaskResult?: {
       type: TaskType
       distro: string
@@ -386,6 +416,60 @@ export interface WslConfWriteResult {
   terminated: boolean
   /** 文件已写入但终止发行版失败时的原因（8 秒规则需重启才生效） */
   terminateError?: string
+}
+
+/**
+ * WSL 环境信息（app:wslEnv — 0.1.3）。
+ * 非抛出语义：未安装 WSL 时 installed=false 并携带原始输出，供引导界面渲染「一键安装」。
+ */
+export interface WslEnvInfo {
+  installed: boolean
+  wslVersion: string
+  kernelVersion: string
+  /** `wsl --status` 默认发行版（解析不到为空串） */
+  defaultDistro: string
+  /** `wsl --status` 默认版本（解析不到为 null） */
+  defaultVersion: 1 | 2 | null
+  /** `--version` + `--status` 原始输出（诊断/展示用） */
+  statusRaw: string
+}
+
+/** `wsl --list --online` 条目（0.1.3：保留友好名，安装向导展示用） */
+export interface OnlineDistro {
+  /** 传给 `wsl --install -d` 的名称 */
+  name: string
+  /** 友好名（FRIENDLY NAME 列；解析不到时回退为 name） */
+  friendlyName: string
+}
+
+/** `%UserProfile%\.wslconfig` 读结果（wslconfig:read — 0.1.3） */
+export interface WslConfigFileState {
+  /** 绝对路径 */
+  path: string
+  exists: boolean
+  content: string
+}
+
+/**
+ * 终端分屏布局树（0.1.3）。
+ * 叶子 = 一个 pty 会话；split 为二分容器（row=左右、col=上下），ratio 为第一子项占比。
+ * 序列化到 `ui-state.jsonc` 的 `terminalLayout`，供窗口重载后恢复分屏结构。
+ */
+export type TerminalLayoutNode =
+  | { kind: 'leaf'; ptyId: string }
+  | {
+      kind: 'split'
+      dir: 'row' | 'col'
+      ratio: number
+      a: TerminalLayoutNode
+      b: TerminalLayoutNode
+    }
+
+/** 单个终端标签的持久化布局（0.1.3） */
+export interface TerminalTabLayout {
+  id: string
+  title: string
+  layout: TerminalLayoutNode
 }
 
 /** 代码签名状态（M7 签名 + SmartScreen 说明） */

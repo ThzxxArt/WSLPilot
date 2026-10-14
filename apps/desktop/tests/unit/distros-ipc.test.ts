@@ -10,6 +10,21 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }))
 
+// 0.1.3：宿主磁盘占用读取走 node:fs/promises.stat（真实路径不存在时降级；此处注入桩验证接线）
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    promises: {
+      ...actual.promises,
+      stat: vi.fn(async (p: string) => {
+        if (String(p).includes('ext4.vhdx')) return { size: 123456789 }
+        return actual.promises.stat(p)
+      }),
+    },
+  }
+})
+
 import { registerIpcHandlers } from '../../src/main/ipc/router'
 import { CH, CONFIG_FILE_NAMES } from '@wslpilot/shared'
 import { createTaskRunner } from '../../src/main/services/task-runner'
@@ -153,7 +168,6 @@ function makeDeps() {
       get: vi.fn(() => null),
       list: vi.fn(() => []),
       waitFor: vi.fn(async () => ({})),
-      runExclusive: vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn()),
       dispose: vi.fn(),
     } as any,
     wslconf: {
@@ -190,6 +204,12 @@ function makeDeps() {
       unbind: vi.fn(async () => {}),
       attach: vi.fn(async () => {}),
       detach: vi.fn(async () => {}),
+    } as any,
+    // 0.1.3：.wslconfig 服务（router deps 必填）
+    wslconfig: {
+      path: vi.fn(() => '/tmp/.wslconfig'),
+      read: vi.fn(async () => ({ path: '/tmp/.wslconfig', exists: false, content: '' })),
+      write: vi.fn(async () => ({ path: '/tmp/.wslconfig' })),
     } as any,
   }
 }
@@ -238,6 +258,8 @@ describe('distros + meta IPC handlers', () => {
     expect(list[0].guid).toBe('{GUID-1}')
     expect(list[0].basePath).toBe('C:\\WSL\\Ubuntu')
     expect(list[0].defaultUid).toBe(1000)
+    // 0.1.3 链路补齐：宿主磁盘占用从 BasePath/ext4.vhdx 实测（stub 命中 123456789）
+    expect(list[0].hostDiskBytes).toBe(123456789)
   })
 
   it('注册表不可用时降级不阻断（设计书 §9.2）', async () => {
@@ -470,10 +492,10 @@ describe('distros + meta IPC handlers', () => {
     expect(deps.wsl.install).toHaveBeenCalledWith('Ubuntu', ctl)
     expect(flags.install).toBe(1)
 
-    // 省略名字（安装 WSL 本体）：lockKey 走全局
+    // 省略名字（安装 WSL 本体）：lockKey 走全局锁（与 WSL 更新/回滚串行 — 0.1.3）
     await wrapped.get(CH.distrosInstall)({}, {})
     const bareOpts = deps.tasks.start.mock.calls[1]![0]
-    expect(bareOpts.lockKey).toBe('install:*')
+    expect(bareOpts.lockKey).toBe('wsl:global')
     await bareOpts.run(ctl)
     expect(deps.wsl.install).toHaveBeenCalledWith(undefined, ctl)
     expect(flags.install).toBe(2)
@@ -486,40 +508,97 @@ describe('distros + meta IPC handlers', () => {
     expect(deps.wsl.setVersion).toHaveBeenCalledWith('Ubuntu', 1, ctl)
     expect(flags.setVersion).toBe(1)
 
-    // unregister 直达 wsl.unregister
-    await wrapped.get(CH.distrosUnregister)({}, 'Ubuntu')
+    // unregister（0.1.3 任务化）：返回 TaskHandle（router 包装为异步），run 内执行 wsl.unregister
+    const handle = await wrapped.get(CH.distrosUnregister)(
+      {},
+      { name: 'Ubuntu', backupFirst: false },
+    )
+    expect(handle).toEqual({ taskId: 't1' })
+    const unregOpts = deps.tasks.start.mock.calls[3]![0]
+    expect(unregOpts.type).toBe('unregister')
+    expect(unregOpts.distro).toBe('Ubuntu')
+    await unregOpts.run(ctl)
     expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
-    await expect(wrapped.get(CH.distrosUnregister)({}, 'a/b')).rejects.toThrow()
+    // 非法名（对象形态入参）在入口拒绝
+    await expect(
+      wrapped.get(CH.distrosUnregister)({}, { name: 'a/b', backupFirst: false }),
+    ).rejects.toThrow()
   })
 
-  it('unregister 走 TaskRunner 排他锁且大小写归一到同键（review 0.1.2 审计修复）', async () => {
+  it('unregister（0.1.3）：backupFirst=true 先导出备份再注销（同一任务）', async () => {
     const ctx = makeCtx()
     const deps = makeDeps()
-    const runExclusive = vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn())
-    deps.tasks.runExclusive = runExclusive
+    const exportCalls: unknown[] = []
+    deps.io.runExport = vi.fn(async (req: unknown) => {
+      exportCalls.push(req)
+      return {}
+    })
+    // 备份格式与目录走 settings（makeCtx 的 configService.load 返回 { $schemaVersion: 2 }，
+    // 需要带 backup 段的设置值）
+    ;(ctx as any).configService.loadSync = vi.fn(() => ({
+      backup: {
+        defaultDir: '/tmp/backups',
+        format: 'tar',
+        keepRecent: 5,
+        autoBackupBeforeDestructive: true,
+      },
+    }))
+    const { wrapped } = register(ctx, deps)
+    wrapped.get(CH.distrosUnregister)({}, { name: 'Ubuntu', backupFirst: true })
+    const opts = deps.tasks.start.mock.calls[0]![0]
+    const ctl = {
+      taskId: 't9',
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: vi.fn(),
+      onCancel: vi.fn(),
+    }
+    await opts.run(ctl)
+    expect(exportCalls).toHaveLength(1)
+    expect(exportCalls[0]).toMatchObject({ name: 'Ubuntu', format: 'tar' })
+    // 导出在注销之前完成（调用顺序：runExport → wsl.unregister）
+    expect(deps.io.runExport).toHaveBeenCalled()
+    expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('unregister 走 TaskRunner 排他锁且大小写归一到同键（0.1.3 任务化重写）', async () => {
+    const ctx = makeCtx()
+    const deps = makeDeps()
     // 其他发行版的运行中任务不阻塞本发行版注销（busy 检查只按同发行版大小写归一）
     deps.tasks.list = vi.fn(() => [{ taskId: 't9', status: 'running', distro: 'Debian' }])
     const { wrapped } = register(ctx, deps)
-    await wrapped.get(CH.distrosUnregister)({}, 'UBUNTU')
+    wrapped.get(CH.distrosUnregister)({}, { name: 'UBUNTU', backupFirst: false })
     // 与 io 任务同一 lockKey（name.toLowerCase()）：注销绝不与同发行版任务并发
-    expect(runExclusive).toHaveBeenCalledWith('ubuntu', expect.any(Function))
+    const opts = deps.tasks.start.mock.calls[0]![0]
+    expect(opts.lockKey).toBe('ubuntu')
+    expect(opts.distro).toBe('UBUNTU')
+    const ctl = {
+      taskId: 't10',
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: vi.fn(),
+      onCancel: vi.fn(),
+    }
+    await opts.run(ctl)
     expect(deps.wsl.unregister).toHaveBeenCalledWith('UBUNTU')
   })
 
-  it('unregister 有同发行版运行中任务时拒绝，不排队也不执行（含无锁动作 — review 0.1.2 二轮审计）', async () => {
+  it('unregister 有同发行版运行中任务时拒绝，不排队也不执行（含无锁动作 — 0.1.3 保持）', async () => {
     const ctx = makeCtx()
     const deps = makeDeps()
     // 运行中任务（如无锁终端动作）与请求名大小写不同，仍按小写归一命中
     deps.tasks.list = vi.fn(() => [{ taskId: 't1', status: 'running', distro: 'Ubuntu' }])
-    const runExclusive = vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn())
-    deps.tasks.runExclusive = runExclusive
     const { wrapped } = register(ctx, deps)
-    await expect(wrapped.get(CH.distrosUnregister)({}, 'ubuntu')).rejects.toThrow(/有运行中的任务/)
+    await expect(
+      wrapped.get(CH.distrosUnregister)({}, { name: 'ubuntu', backupFirst: false }),
+    ).rejects.toThrow(/有运行中的任务/)
+    expect(deps.tasks.start).not.toHaveBeenCalled()
     expect(deps.wsl.unregister).not.toHaveBeenCalled()
-    expect(runExclusive).not.toHaveBeenCalled()
   })
 
-  it('unregister 与同发行版长任务严格互斥：运行中直接拒绝，任务结束后放行（review 0.1.2 二轮审计）', async () => {
+  it('unregister 与同发行版长任务严格互斥：运行中直接拒绝，任务结束后放行（0.1.3 任务化重写）', async () => {
     const ctx = makeCtx()
     const deps = makeDeps()
     const tasks = createTaskRunner({ logger: ctx.logger, onProgress: () => {} })
@@ -545,13 +624,22 @@ describe('distros + meta IPC handlers', () => {
     await vi.waitFor(() => expect(started).toBe(true))
 
     // 长任务未结束：注销直接拒绝（不得并发执行，也不得排队等待后砸中执行中任务）
-    await expect(wrapped.get(CH.distrosUnregister)({}, 'ubuntu')).rejects.toThrow(/有运行中的任务/)
+    await expect(
+      wrapped.get(CH.distrosUnregister)({}, { name: 'ubuntu', backupFirst: false }),
+    ).rejects.toThrow(/有运行中的任务/)
     expect(unregister).not.toHaveBeenCalled()
 
     release()
     await tasks.waitFor(exportTask.taskId)
-    // 任务结束后 busy 解除，可正常注销
-    await wrapped.get(CH.distrosUnregister)({}, 'ubuntu')
+    // 任务结束后 busy 解除：注销作为任务入队并执行（同一锁键天然串行）
+    const handle = await wrapped.get(CH.distrosUnregister)(
+      {},
+      {
+        name: 'ubuntu',
+        backupFirst: false,
+      },
+    )
+    await tasks.waitFor(handle.taskId)
     expect(unregister).toHaveBeenCalledWith('ubuntu')
   })
 })

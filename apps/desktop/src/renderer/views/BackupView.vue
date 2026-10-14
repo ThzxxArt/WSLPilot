@@ -70,11 +70,25 @@ const exportForm = ref<ExportForm>({ ...DEFAULT_EXPORT_FORM })
 const importForm = ref<ImportForm>({ ...DEFAULT_IMPORT_FORM })
 const moveForm = ref<MoveForm>({ ...DEFAULT_MOVE_FORM })
 
+/**
+ * 导入向导默认版本跟随 WSL 默认版本（0.1.3）：
+ * `settings.wsl.defaultVersion`（app:wslEnv 读取，未安装/解析不到回退 2）。
+ * 用户一旦手动改过版本，后续环境返回不再覆盖（touched 守卫）。
+ */
+const envDefaultVersion = ref<1 | 2 | null>(null)
+let importVersionTouched = false
+function applyEnvDefaultVersion(form: ImportForm): ImportForm {
+  if (importVersionTouched) return form
+  return { ...form, version: envDefaultVersion.value ?? form.version }
+}
+
 function setExportForm(f: ExportForm) {
   exportForm.value = f
 }
 function setImportForm(f: ImportForm) {
-  importForm.value = f
+  // 版本被用户显式改动 → 停止跟随（对比当前值判定，纯表单交互）
+  if (f.version !== importForm.value.version) importVersionTouched = true
+  importForm.value = applyEnvDefaultVersion(f)
 }
 function setMoveForm(f: MoveForm) {
   moveForm.value = f
@@ -248,7 +262,12 @@ function reset() {
   activeTaskId.value = ''
   // 保留设置中的默认格式：reset 不得把「默认 vhd」悄悄打回 tar（review 0.1.2 根治）
   exportForm.value = { ...DEFAULT_EXPORT_FORM, format: settings.backupFormat }
-  importForm.value = { ...DEFAULT_IMPORT_FORM, format: settings.backupFormat }
+  // 新的一轮向导：重新跟随环境默认版本
+  importVersionTouched = false
+  importForm.value = applyEnvDefaultVersion({
+    ...DEFAULT_IMPORT_FORM,
+    format: settings.backupFormat,
+  })
   moveForm.value = { ...DEFAULT_MOVE_FORM }
 }
 
@@ -332,6 +351,19 @@ onMounted(() => {
   importForm.value = { ...DEFAULT_IMPORT_FORM, format: settings.backupFormat }
   void distros.refresh()
   void refreshBackups()
+
+  // 0.1.3：导入默认版本跟随 WSL 默认版本（异步到达；用户未改过版本时才应用）
+  void (async () => {
+    try {
+      const env = await window.wslAPI.app.wslEnv()
+      if (env?.installed && (env.defaultVersion === 1 || env.defaultVersion === 2)) {
+        envDefaultVersion.value = env.defaultVersion
+        importForm.value = applyEnvDefaultVersion(importForm.value)
+      }
+    } catch {
+      /* 环境读取失败：保持 schema 默认（WSL 2），不阻断备份页 */
+    }
+  })()
 
   // 本页发起的长任务仍在运行（切页回来 / 窗口重载）：接续到进度视图，
   // 不要求用户重新走一遍向导（review 0.1.2 根治）

@@ -352,13 +352,16 @@ describe('WslService', () => {
       vi.clearAllMocks()
     })
 
-    it('listOnline 解析名字列并跳过表头', async () => {
+    it('listOnline 解析名字列并跳过表头（含友好名 — 0.1.3）', async () => {
       ;(runWsl as any).mockResolvedValue(
         ok(
           'NAME            FRIENDLY NAME\nUbuntu          Ubuntu\nDebian          Debian GNU/Linux',
         ),
       )
-      expect(await svc.listOnline()).toEqual(['Ubuntu', 'Debian'])
+      expect(await svc.listOnline()).toEqual([
+        { name: 'Ubuntu', friendlyName: 'Ubuntu' },
+        { name: 'Debian', friendlyName: 'Debian GNU/Linux' },
+      ])
       expect((runWsl as any).mock.calls[0][0]).toEqual(['--list', '--online'])
     })
 
@@ -368,7 +371,18 @@ describe('WslService', () => {
           '以下是可安装的发行版的列表。\n名称            友好名称\nUbuntu          Ubuntu\nAlpine          Alpine WSL',
         ),
       )
-      expect(await svc.listOnline()).toEqual(['Ubuntu', 'Alpine'])
+      expect(await svc.listOnline()).toEqual([
+        { name: 'Ubuntu', friendlyName: 'Ubuntu' },
+        { name: 'Alpine', friendlyName: 'Alpine WSL' },
+      ])
+    })
+
+    it('listOnline 友好名缺失时回退为 name（绝不空标签 — 0.1.3）', async () => {
+      ;(runWsl as any).mockResolvedValue(ok('NAME\nUbuntu\nDebian'))
+      expect(await svc.listOnline()).toEqual([
+        { name: 'Ubuntu', friendlyName: 'Ubuntu' },
+        { name: 'Debian', friendlyName: 'Debian' },
+      ])
     })
 
     it('listOnline 失败抛 TASK_FAILED', async () => {
@@ -514,6 +528,33 @@ describe('WslService', () => {
       expect((runWsl as any).mock.calls[0][0]).toEqual(['--unregister', 'Ubuntu'])
     })
 
+    it('install 输出含「重启」提示：完成文案如实标注（0.1.3）', async () => {
+      ;(spawnWsl as any).mockImplementation(
+        (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+          o.onLine(
+            'The requested operation is successful. Changes will not be effective until the system is rebooted.',
+          )
+          queueMicrotask(() => o.onExit(0))
+          return { kill: vi.fn() }
+        },
+      )
+      const reports: Array<[unknown, unknown]> = []
+      const ctl2 = {
+        ...ctl,
+        report: vi.fn((p: unknown, m?: string) => reports.push([p, m])),
+        log: vi.fn(),
+      }
+      await svc.install(undefined, ctl2 as never)
+      const final = reports[reports.length - 1] as [number, string]
+      expect(final[0]).toBe(100)
+      expect(final[1]).toContain('需要重启')
+      expect(
+        (ctl2.log as ReturnType<typeof vi.fn>).mock.calls.some((c) =>
+          String(c[0]).includes('需要重启'),
+        ),
+      ).toBe(true)
+    })
+
     it('setVersion 流式转换', async () => {
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
         queueMicrotask(() => o.onExit(0))
@@ -531,5 +572,209 @@ describe('WslService', () => {
       code: -1,
     })
     await expect(svc.list()).rejects.toMatchObject({ code: 'WSL_NOT_FOUND' })
+  })
+})
+
+describe('parseWslStatus（0.1.3 环境体检）', () => {
+  it('英文输出：默认发行版/默认版本/内核版本', async () => {
+    const { parseWslStatus } = await import('../../src/main/services/wsl-service')
+    const out = parseWslStatus(
+      [
+        'Default Distribution: Ubuntu',
+        'Default Version: 2',
+        '',
+        'Kernel version: 5.15.153.1-2',
+      ].join('\n'),
+    )
+    expect(out).toEqual({
+      defaultDistro: 'Ubuntu',
+      defaultVersion: 2,
+      kernelVersion: '5.15.153.1-2',
+    })
+  })
+
+  it('中文输出 + 无法解析字段如实为空（不伪造）', async () => {
+    const { parseWslStatus } = await import('../../src/main/services/wsl-service')
+    const out = parseWslStatus('默认分发: Debian\n默认版本: 1\n内核版本: 6.6.87.2-1')
+    expect(out).toEqual({
+      defaultDistro: 'Debian',
+      defaultVersion: 1,
+      kernelVersion: '6.6.87.2-1',
+    })
+    const empty = parseWslStatus('随便什么输出')
+    expect(empty).toEqual({ defaultDistro: '', defaultVersion: null, kernelVersion: '' })
+  })
+})
+
+describe('WslService 0.1.3（getEnv / update / rollback / setDefaultVersion / setSparse）', () => {
+  const svc = createWslService(logger())
+  const ctl = {
+    taskId: 't',
+    type: 'update' as const,
+    report: vi.fn(),
+    log: vi.fn(),
+    isCanceled: () => false,
+    throwIfCanceled: () => {},
+    onCancel: vi.fn(),
+  }
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('getEnv：双命令失败 → installed:false + 原始输出（不抛）', async () => {
+    ;(runWsl as any)
+      .mockResolvedValueOnce({ stdout: '', stderr: 'wsl 缺失', code: 1 })
+      .mockResolvedValueOnce({ stdout: '', stderr: 'wsl 缺失', code: 1 })
+    const env = await svc.getEnv()
+    expect(env.installed).toBe(false)
+    expect(env.statusRaw).toContain('wsl 缺失')
+    expect(env.defaultVersion).toBeNull()
+  })
+
+  it('getEnv：已安装 → 版本/内核/默认项全量解析', async () => {
+    ;(runWsl as any)
+      .mockResolvedValueOnce(ok('WSL version: 2.6.1\nKernel version: 6.6.87.2-1'))
+      .mockResolvedValueOnce(ok('默认分发: Ubuntu\n默认版本: 2\n'))
+    const env = await svc.getEnv()
+    expect(env).toMatchObject({
+      installed: true,
+      wslVersion: '2.6.1',
+      kernelVersion: '6.6.87.2-1',
+      defaultDistro: 'Ubuntu',
+      defaultVersion: 2,
+    })
+  })
+
+  it('update：前后版本对比 + 真实百分比日志 + 需要重启提示（如实报告）', async () => {
+    ;(runWsl as any)
+      .mockResolvedValueOnce(ok('WSL version: 2.3.0')) // before
+      .mockResolvedValueOnce(ok('WSL version: 2.4.0')) // after
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+        o.onLine('Downloading: 42%')
+        o.onLine('Restart your computer to finish the update')
+        queueMicrotask(() => o.onExit(0))
+        return { kill: vi.fn() }
+      },
+    )
+    const reports: Array<[unknown, unknown]> = []
+    const ctl2 = { ...ctl, report: vi.fn((p: unknown, m?: string) => reports.push([p, m])) }
+    await svc.update(ctl2 as never, { preRelease: true })
+    expect((spawnWsl as any).mock.calls[0][0]).toEqual(['--update', '--pre-release'])
+    const final = reports[reports.length - 1] as [number, string]
+    expect(final[0]).toBe(100)
+    expect(final[1]).toContain('2.3.0 → 2.4.0')
+    expect(final[1]).toContain('需要重启')
+  })
+
+  it('update：版本未变化时如实报告「已是最新/无可用更新」措辞', async () => {
+    ;(runWsl as any)
+      .mockResolvedValueOnce(ok('WSL version: 2.4.0'))
+      .mockResolvedValueOnce(ok('WSL version: 2.4.0'))
+    ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
+      queueMicrotask(() => o.onExit(0))
+      return { kill: vi.fn() }
+    })
+    const reports: Array<[unknown, unknown]> = []
+    const ctl2 = { ...ctl, report: vi.fn((p: unknown, m?: string) => reports.push([p, m])) }
+    await svc.update(ctl2 as never)
+    const final = reports[reports.length - 1] as [number, string]
+    expect(final[1]).toContain('2.4.0')
+    expect(final[1]).not.toContain('→')
+  })
+
+  it('updateRollback：argv 与提权委托', async () => {
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+        o.onLine('The requested operation requires elevation')
+        o.onExit(1)
+        return { kill: vi.fn() }
+      },
+    )
+    const runOne = vi.fn(async () => ({
+      op: 'wsl.updateRollback' as const,
+      ok: true,
+      code: 0,
+      stdout: '',
+      stderr: '',
+    }))
+    const svc2 = createWslService(logger(), { elevation: { runOne } as never })
+    await svc2.updateRollback(ctl as never)
+    expect(runOne).toHaveBeenCalledWith({ op: 'wsl.updateRollback', params: {} })
+  })
+
+  it('setDefaultVersion：直接成功；权限不足转提权；其他失败映射 TASK_FAILED', async () => {
+    ;(runWsl as any).mockResolvedValueOnce(ok(''))
+    await expect(svc.setDefaultVersion(2)).resolves.toBeUndefined()
+    expect((runWsl as any).mock.calls[0][0]).toEqual(['--set-default-version', '2'])
+
+    ;(runWsl as any).mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'The requested operation requires elevation',
+      code: 1,
+    })
+    const runOne = vi.fn(async () => ({
+      op: 'wsl.setDefaultVersion' as const,
+      ok: true,
+      code: 0,
+      stdout: '',
+      stderr: '',
+    }))
+    const svc2 = createWslService(logger(), { elevation: { runOne } as never })
+    await svc2.setDefaultVersion(1)
+    expect(runOne).toHaveBeenCalledWith({ op: 'wsl.setDefaultVersion', params: { version: 1 } })
+
+    ;(runWsl as any).mockResolvedValueOnce({ stdout: '', stderr: 'boom', code: 1 })
+    await expect(svc.setDefaultVersion(2)).rejects.toMatchObject({ code: 'TASK_FAILED' })
+  })
+
+  it('setSparse：argv 正确；不支持时给「更新 WSL」引导；提权委托', async () => {
+    ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
+      queueMicrotask(() => o.onExit(0))
+      return { kill: vi.fn() }
+    })
+    await svc.setSparse('Ubuntu', true, ctl as never)
+    expect((spawnWsl as any).mock.calls[0][0]).toEqual([
+      '--manage',
+      'Ubuntu',
+      '--set-sparse',
+      'true',
+    ])
+    const reports = (ctl.report as ReturnType<typeof vi.fn>).mock.calls
+    expect(reports[reports.length - 1]).toEqual([100, '已启用稀疏磁盘：Ubuntu'])
+
+    // 老 WSL 不识别 --set-sparse：映射为更新引导
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+        o.onLine('Invalid command line option: --set-sparse')
+        queueMicrotask(() => o.onExit(1))
+        return { kill: vi.fn() }
+      },
+    )
+    await expect(svc.setSparse('Ubuntu', true, ctl as never)).rejects.toMatchObject({
+      message: '当前 WSL 不支持稀疏磁盘操作',
+      suggestion: expect.stringContaining('设置 → WSL'),
+    })
+
+    // 权限不足 → 提权助手（结构化参数）
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+        o.onLine('The requested operation requires elevation')
+        queueMicrotask(() => o.onExit(1))
+        return { kill: vi.fn() }
+      },
+    )
+    const runOne = vi.fn(async () => ({
+      op: 'wsl.setSparse' as const,
+      ok: true,
+      code: 0,
+      stdout: '',
+      stderr: '',
+    }))
+    const svc2 = createWslService(logger(), { elevation: { runOne } as never })
+    await svc2.setSparse('Ubuntu', false, ctl as never)
+    expect(runOne).toHaveBeenCalledWith({
+      op: 'wsl.setSparse',
+      params: { name: 'Ubuntu', sparse: false },
+    })
   })
 })

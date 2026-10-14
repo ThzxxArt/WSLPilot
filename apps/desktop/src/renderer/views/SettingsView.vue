@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NButton,
   NCard,
@@ -28,11 +29,13 @@ import {
   type SignatureStatus,
 } from '@wslpilot/shared'
 import { applyAccentToDom, Kbd } from '@wslpilot/ui'
+import WslEnvironmentCard from '../features/wsl/WslEnvironmentCard.vue'
 
 const settings = useSettingsStore()
 const update = useUpdateStore()
 const message = useMessage()
 const dialog = useDialog()
+const router = useRouter()
 
 // ── M7：签名状态（未签名时给 SmartScreen 说明）──
 const signature = ref<SignatureStatus | null>(null)
@@ -423,6 +426,9 @@ async function exportDiagnostics() {
     </n-card>
 
     <n-card title="WSL" class="block">
+      <!-- 0.1.3：WSL 环境体检与本体生命周期（版本 / 更新 / 回滚 / 默认版本） -->
+      <WslEnvironmentCard />
+      <n-divider />
       <div class="setting-line">
         <div style="flex: 1">
           <div class="label">默认 Shell</div>
@@ -447,6 +453,15 @@ async function exportDiagnostics() {
           :value="settings.wslAutoShutdownAfterConfigChange"
           @update:value="(v: boolean) => settings.setWslAutoShutdownAfterConfigChange(v)"
         />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">全局配置（.wslconfig）</div>
+          <div class="hint">内存/处理器/网络模式等全局设置（影响所有发行版）— 在「网络」页编辑</div>
+        </div>
+        <n-button size="small" secondary @click="router.push('/network')">
+          去编辑 .wslconfig
+        </n-button>
       </div>
     </n-card>
 

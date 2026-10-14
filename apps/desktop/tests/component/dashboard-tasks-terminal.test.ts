@@ -98,7 +98,10 @@ beforeEach(() => {
   wslAPI.config.get.mockImplementation(configGetImpl())
   wslAPI.distros.list.mockResolvedValue([])
   wslAPI.terminal.list.mockResolvedValue([])
-  wslAPI.distros.listOnline.mockResolvedValue(['Ubuntu', 'Debian'])
+  wslAPI.distros.listOnline.mockResolvedValue([
+    { name: 'Ubuntu', friendlyName: 'Ubuntu' },
+    { name: 'Debian', friendlyName: 'Debian GNU/Linux' },
+  ])
 })
 
 describe('DashboardView 卡片与清理', () => {
@@ -336,12 +339,14 @@ describe('InstallDistroModal', () => {
     return w
   }
 
-  it('listOnline 失败给错误提示；成功列出可选项', async () => {
+  it('listOnline 失败给内联兜底（一键安装 WSL）；成功列出可选项', async () => {
     wslAPI.distros.listOnline.mockRejectedValueOnce(appError('网络不可达'))
     await openModal()
     expect(wslAPI.distros.listOnline).toHaveBeenCalled()
-    // errorLine 对有 message 的错误展示根因（不吞真实原因）
-    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('网络不可达'))
+    // 0.1.3：失败不再只弹 toast，弹窗内给「无法获取列表 + 一键安装 WSL」兜底
+    expect(document.body.textContent).toContain('无法获取可安装发行版列表')
+    expect(document.body.textContent).toContain('网络不可达')
+    expect(findBodyButton('一键安装 WSL')).toBeTruthy()
     // n-modal teleport 到 body
     expect(document.body.querySelector('.install-modal')).toBeTruthy()
   })
@@ -490,13 +495,13 @@ describe('TerminalView 会话错误面', () => {
     await flushPromises()
     // mock 会话返回 distro 'Ubuntu'（大小写归一比较的基准）
     expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
-    expect(useTerminalStore().sessions).toHaveLength(1)
+    expect(useTerminalStore().tabs).toHaveLength(1)
 
     // 大小写变体请求同一发行版：命中已有 alive 会话 → 激活而非二次创建
     routeMock.query = { distro: 'ubuntu' }
     await flushPromises()
     expect(wslAPI.terminal.create).toHaveBeenCalledTimes(1)
-    expect(useTerminalStore().sessions).toHaveLength(1)
+    expect(useTerminalStore().tabs).toHaveLength(1)
     expect(useTerminalStore().activeId).toBe('p1')
   })
 
@@ -520,7 +525,7 @@ describe('TerminalView 会话错误面', () => {
 
     releaseCreate({ ptyId: 'p1', distro: 'Ubuntu', createdAt: 1 })
     await flushPromises()
-    expect(useTerminalStore().sessions).toHaveLength(1)
+    expect(useTerminalStore().tabs).toHaveLength(1)
   })
 
   it('关闭会话失败给错误提示', async () => {

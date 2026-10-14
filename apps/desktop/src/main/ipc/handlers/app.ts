@@ -1,14 +1,19 @@
-import { app, dialog, shell } from 'electron'
+import { app, clipboard, dialog, shell } from 'electron'
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
 import {
   CH,
+  WSL_GLOBAL_LOCK,
   createAppError,
   type DiagnosticsExportResult,
   type FileFilter,
   type SignatureStatus,
+  type TaskHandle,
+  type WslEnvInfo,
 } from '@wslpilot/shared'
 import type { IpcContext } from '../router'
+import type { WslService } from '../../services/wsl-service'
+import type { TaskRunner } from '../../services/task-runner'
 import { normalizeDiagnosticsTarget } from '../../services/diagnostics-service'
 import { SMARTSCREEN_NOTE } from '../../services/signature-service'
 
@@ -17,12 +22,17 @@ type AddFn = (
   handler: (ctx: IpcContext, arg: never) => unknown,
 ) => void
 
+export interface AppHandlerDeps {
+  wsl: WslService
+  tasks: TaskRunner
+}
+
 function toElectronFilters(filters?: FileFilter[]): Electron.FileFilter[] | undefined {
   if (!filters || filters.length === 0) return undefined
   return filters.map((f) => ({ name: f.name, extensions: f.extensions }))
 }
 
-export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
+export function registerAppHandlers(add: AddFn, _ctx: IpcContext, deps: AppHandlerDeps): void {
   add(CH.appGetVersion, () => app.getVersion())
 
   add(CH.appOpenConfigDir, async (c): Promise<void> => {
@@ -38,9 +48,54 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext): void {
     }
   })
 
-  add(CH.appGetWslVersion, async (c) => {
-    if (!c.wsl) return { raw: '', wslVersion: '', kernelVersion: '' }
-    return c.wsl.getVersion()
+  add(CH.appGetWslVersion, async () => {
+    return deps.wsl.getVersion()
+  })
+
+  /**
+   * WSL 环境体检（0.1.3）：非抛出语义 —— 未安装 WSL 时返回 installed:false + 原始输出，
+   * 由「一键安装」引导消费；调用失败（服务异常）也降级为未安装态并携带原因。
+   */
+  add(CH.appWslEnv, async (): Promise<WslEnvInfo> => {
+    return deps.wsl.getEnv()
+  })
+
+  /**
+   * 更新 WSL（0.1.3）：长任务（流式日志 + 可取消 + 提权降级）。
+   * 与「安装 WSL 本体」共用 WSL_GLOBAL_LOCK，本体级操作严格串行。
+   */
+  add(CH.appWslUpdate, (_c, arg: never): TaskHandle => {
+    const o = (arg ?? {}) as { preRelease?: boolean }
+    return deps.tasks.start({
+      type: 'update',
+      message: o.preRelease ? '更新 WSL（预发布通道）' : '更新 WSL',
+      lockKey: WSL_GLOBAL_LOCK,
+      run: (ctl) => deps.wsl.update(ctl, { preRelease: o.preRelease === true }),
+    })
+  })
+
+  /** 回滚最近一次 WSL 更新（0.1.3）：危险操作，二次确认由渲染层负责 */
+  add(CH.appWslUpdateRollback, (): TaskHandle => {
+    return deps.tasks.start({
+      type: 'update',
+      message: '回滚 WSL 更新',
+      lockKey: WSL_GLOBAL_LOCK,
+      run: (ctl) => deps.wsl.updateRollback(ctl),
+    })
+  })
+
+  /** 设置默认 WSL 版本（0.1.3）：仅影响新导入的发行版 */
+  add(CH.appWslSetDefaultVersion, async (_c, arg: never): Promise<void> => {
+    const o = arg as { version: 1 | 2 }
+    await deps.wsl.setDefaultVersion(o.version)
+  })
+
+  /** 剪贴板读取（0.1.3 终端粘贴可靠通道 — Electron clipboard，不受 file:// 权限限制） */
+  add(CH.clipboardRead, (): string => clipboard.readText())
+
+  /** 剪贴板写入（0.1.3 终端复制可靠通道） */
+  add(CH.clipboardWrite, (_c, arg: never): void => {
+    clipboard.writeText(String(arg ?? ''))
   })
 
   add(CH.appWindowMinimize, (c) => {

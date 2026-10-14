@@ -9,6 +9,7 @@ import {
   CONFIG_FILE_NAMES,
   FS_WRITE_LIMIT_BYTES,
   WSL_CONF_MAX_BYTES,
+  WSL_CONFIG_MAX_BYTES,
 } from './constants'
 
 /**
@@ -203,7 +204,19 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     name: nameSchema,
     version: z.union([z.literal(1), z.literal(2)]),
   }),
-  [CH.distrosUnregister]: nameSchema,
+  [CH.distrosUnregister]: z.object({
+    name: nameSchema,
+    /**
+     * 注销前自动备份（0.1.3）：任务内先导出再注销（同一排他锁），
+     * 默认 false，由渲染层按 settings.backup.autoBackupBeforeDestructive 传入。
+     */
+    backupFirst: z.boolean().default(false),
+  }),
+  // 磁盘管理（0.1.3）：wsl --manage <name> --set-sparse <true|false>（WSL 2.0+）
+  [CH.distrosSetSparse]: z.object({
+    name: nameSchema,
+    sparse: z.boolean(),
+  }),
   // 安装走 `wsl --install [-d name]`，无「安装源」参数（installSource 幽灵配置已删除）
   [CH.distrosInstall]: z.object({
     name: nameSchema.optional(),
@@ -270,6 +283,12 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     path: ioPathSchema,
     terminateFirst: z.boolean().default(false),
   }),
+  // 克隆发行版（0.1.3）：导出临时归档 → 以新名导入 → 清理临时文件
+  [CH.ioClone]: z.object({
+    name: nameSchema,
+    newName: nameSchema,
+    installPath: ioPathSchema,
+  }),
   [CH.ioListBackups]: z
     .object({
       dir: ioPathSchema.optional(),
@@ -306,6 +325,17 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   // 外链：只放行 http/https（review 0.1.2 审计修复），handler 侧再做二次协议校验（纵深防御）
   [CH.appOpenExternal]: httpUrlSchema,
 
+  // WSL 本体更新（0.1.3）：长任务，preRelease 走实验通道
+  [CH.appWslUpdate]: z
+    .object({
+      preRelease: z.boolean().default(false),
+    })
+    .default({}),
+  // 设置默认 WSL 版本（0.1.3）：仅影响新导入的发行版
+  [CH.appWslSetDefaultVersion]: z.object({
+    version: z.union([z.literal(1), z.literal(2)]),
+  }),
+
   // 诊断包（M7）：可选默认保存目录，其余由主进程弹保存对话框
   [CH.diagnosticsExportPackage]: z
     .object({
@@ -322,6 +352,22 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
       message: `内容超过 ${WSL_CONF_MAX_BYTES} 字节上限`,
     }),
   }),
+
+  // .wslconfig 全局配置（0.1.3）：同一「字符 + 字节」双重上限（执行边界 wslconfig-service 同一常量）
+  [CH.wslconfigWrite]: z.object({
+    content: textNoControl(WSL_CONFIG_MAX_BYTES).refine(
+      (s) => utf8Bytes(s) <= WSL_CONFIG_MAX_BYTES,
+      {
+        message: `内容超过 ${WSL_CONFIG_MAX_BYTES} 字节上限`,
+      },
+    ),
+  }),
+
+  // 剪贴板（0.1.3 终端复制/粘贴可靠通道）：写入负载允许换行等文本字符，禁止 NUL
+  [CH.clipboardWrite]: z
+    .string()
+    .max(4 * 1024 * 1024)
+    .refine((s) => !s.includes('\u0000'), { message: '剪贴板内容包含非法字符' }),
 
   // 发行版内文件（M5）：路径经 wsl.localhost 桥，一律拒绝控制字符
   [CH.fsReadDir]: z.object({

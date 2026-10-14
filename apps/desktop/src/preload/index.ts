@@ -11,11 +11,13 @@ import {
   type DistroView,
   type FileFilter,
   type FsReadResult,
+  type IoCloneRequest,
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
   type Metrics,
   type NetworkStatus,
+  type OnlineDistro,
   type OverviewMetrics,
   type PortForwardRule,
   type ProxyConfig,
@@ -29,6 +31,8 @@ import {
   type UsbipdStatus,
   type WslAction,
   type WslConfWriteResult,
+  type WslConfigFileState,
+  type WslEnvInfo,
 } from '@wslpilot/shared'
 
 /**
@@ -77,13 +81,24 @@ const api = {
     setDefault: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosSetDefault, name),
     registryDetail: (name: string): Promise<RegistryDetail | null> =>
       ipcRenderer.invoke(CH.registryDetail, name),
-    listOnline: (): Promise<string[]> => ipcRenderer.invoke(CH.distrosListOnline),
+    /** 可安装发行版清单（含友好名 — 0.1.3） */
+    listOnline: (): Promise<OnlineDistro[]> => ipcRenderer.invoke(CH.distrosListOnline),
     install: (name?: string): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.distrosInstall, name ? { name } : {}),
     setVersion: (name: string, version: 1 | 2): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.distrosSetVersion, { name, version }),
-    /** 注销（删除）发行版 — 与 `wsl --unregister` 及通道 distros:unregister 动词对齐 */
-    unregister: (name: string): Promise<void> => ipcRenderer.invoke(CH.distrosUnregister, name),
+    /**
+     * 注销（删除）发行版 — 与 `wsl --unregister` 及通道 distros:unregister 动词对齐。
+     * 0.1.3：任务化返回 TaskHandle（可选 backupFirst 注销前自动备份）。
+     */
+    unregister: (name: string, opts?: { backupFirst?: boolean }): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosUnregister, {
+        name,
+        backupFirst: opts?.backupFirst === true,
+      }),
+    /** 稀疏磁盘（0.1.3）：`wsl --manage <name> --set-sparse <true|false>`（WSL 2.0+） */
+    setSparse: (name: string, sparse: boolean): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosSetSparse, { name, sparse }),
   },
 
   meta: {
@@ -132,11 +147,27 @@ const api = {
     export: (req: IoExportRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioExport, req),
     import: (req: IoImportRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioImport, req),
     move: (req: IoMoveRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioMove, req),
+    /** 克隆发行版（0.1.3）：导出临时归档 → 以新名导入 → 自动清理临时文件 */
+    clone: (req: IoCloneRequest): Promise<TaskHandle> => ipcRenderer.invoke(CH.ioClone, req),
     listBackups: (dir?: string): Promise<BackupFileInfo[]> =>
       ipcRenderer.invoke(CH.ioListBackups, dir ? { dir } : {}),
     /** keep 可选：缺省由 ipc-schema 默认值（DEFAULT_BACKUP_KEEP）统一兜底 */
     cleanupBackups: (opts?: { dir?: string; keep?: number }): Promise<{ removed: number }> =>
       ipcRenderer.invoke(CH.ioCleanupBackups, opts ?? {}),
+  },
+
+  wslconfig: {
+    /** 读 `%UserProfile%\.wslconfig`（不存在返回 exists:false）— 0.1.3 */
+    read: (): Promise<WslConfigFileState> => ipcRenderer.invoke(CH.wslconfigRead),
+    /** 写 `.wslconfig`（备份 + 原子写；生效需 wsl --shutdown）— 0.1.3 */
+    write: (content: string): Promise<{ path: string }> =>
+      ipcRenderer.invoke(CH.wslconfigWrite, { content }),
+  },
+
+  clipboard: {
+    /** 主进程 Electron 剪贴板（终端复制/粘贴可靠通道 — 0.1.3） */
+    read: (): Promise<string> => ipcRenderer.invoke(CH.clipboardRead),
+    write: (text: string): Promise<void> => ipcRenderer.invoke(CH.clipboardWrite, text),
   },
 
   wslconf: {
@@ -278,6 +309,16 @@ const api = {
     }): Promise<string | null> => ipcRenderer.invoke(CH.appPickOpenFile, opts ?? {}),
     getWslVersion: (): Promise<{ wslVersion: string; kernelVersion: string; raw: string }> =>
       ipcRenderer.invoke(CH.appGetWslVersion),
+    /** WSL 环境体检（0.1.3）：非抛出 — 未安装时 installed:false + 原始输出 */
+    wslEnv: (): Promise<WslEnvInfo> => ipcRenderer.invoke(CH.appWslEnv),
+    /** 更新 WSL（0.1.3）：长任务（流式日志 + 可取消 + 提权降级） */
+    wslUpdate: (opts?: { preRelease?: boolean }): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.appWslUpdate, { preRelease: opts?.preRelease === true }),
+    /** 回滚最近一次 WSL 更新（0.1.3）：危险操作，调用方负责确认 */
+    wslUpdateRollback: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.appWslUpdateRollback),
+    /** 设置默认 WSL 版本（0.1.3）：仅影响新导入的发行版 */
+    wslSetDefaultVersion: (version: 1 | 2): Promise<void> =>
+      ipcRenderer.invoke(CH.appWslSetDefaultVersion, { version }),
     /** 代码签名状态（M7：未签名时附 SmartScreen 说明） */
     signatureStatus: (): Promise<SignatureStatus> => ipcRenderer.invoke(CH.appSignatureStatus),
     minimize: (): Promise<void> => ipcRenderer.invoke(CH.appWindowMinimize),
@@ -303,6 +344,7 @@ export type {
   DistroMeta,
   Metrics,
   NetworkStatus,
+  OnlineDistro,
   OverviewMetrics,
   PortForwardRule,
   ProxyConfig,
@@ -318,4 +360,6 @@ export type {
   WslAction,
   DirEntry,
   FsReadResult,
+  WslConfigFileState,
+  WslEnvInfo,
 }

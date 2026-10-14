@@ -27,6 +27,23 @@ extraResources:
     filter:
       - '**/*'
 
+linux:
+  # 显式钉 Linux 可执行名（不走包名推导）：包名 @wslpilot/desktop 会被清洗成
+  # @wslpilotdesktop 传给 app-builder snap --executable，而 Go pflag 把 @xxx 当
+  # 响应文件语法读取 → 「expected argument for flag '--executable'」打包失败（实锤）。
+  # 仅作用 Linux 目标；win 侧可执行名仍由 productName 推导（不受影响）。
+  executableName: wslpilot
+  category: Utility
+  # 分发目标仅 Windows；Linux 产物（AppImage/snap）用于本机与 CI 的开箱冒烟。
+  target:
+    - target: AppImage
+    - target: snap
+
+snap:
+  # 默认产物名取包名 @wslpilot/desktop_<ver>_<arch>.snap → 落在不存在的 release/@wslpilot/
+  # 子目录，mksquashfs 报「Could not create destination file」（实锤）。显式钉平铺名。
+  artifactName: WSLPilot-${version}-${arch}.${ext}
+
 win:
   # 架构由调用方指定（--x64 / --arm64）：x64 与 arm64 分别在对应 runner 原生构建
   # （review C8：交叉编译会产出错误 ABI 的 node-pty）

@@ -11,7 +11,12 @@ import {
   useMessage,
 } from 'naive-ui'
 import { CodeEditor, Kbd } from '@wslpilot/ui'
-import { WSL_CONF_FIELDS, type DiffLine, type WslConfFieldType } from '@wslpilot/shared'
+import {
+  WSL_CONF_FIELDS,
+  summarizeWslConfChanges,
+  type DiffLine,
+  type WslConfFieldType,
+} from '@wslpilot/shared'
 import { useWslConf } from '../../composables/useWslConf'
 import { useDistrosStore } from '../../stores/distros'
 import { errorLine } from '../../composables/useAppError'
@@ -201,6 +206,12 @@ function clearKey(section: string, key: string) {
 
 const diff = computed<DiffLine[]>(() => conf.diff())
 const hasChanges = computed(() => diff.value.some((d) => d.type !== 'same'))
+const changeSummary = computed(() => {
+  if (conf.mode.value === 'form') return summarizeWslConfChanges(conf.pendingChanges())
+  const adds = diff.value.filter((d) => d.type === 'add').length
+  const dels = diff.value.filter((d) => d.type === 'del').length
+  return `原始文本：+${adds} / -${dels} 行`
+})
 
 function openPreview() {
   preview.value = true
@@ -356,6 +367,7 @@ async function confirmSave() {
     >
       <div v-if="!hasChanges" class="diff-empty">没有需要写入的变更</div>
       <div v-else class="diff">
+        <div class="diff-summary">{{ changeSummary }}</div>
         <div v-for="(d, i) in diff" :key="i" class="diff-line" :class="d.type">
           <span class="sign">{{ d.type === 'add' ? '+' : d.type === 'del' ? '-' : ' ' }}</span>
           <span class="text">{{ d.text || ' ' }}</span>
@@ -546,6 +558,14 @@ async function confirmSave() {
   padding: 24px;
   text-align: center;
   color: var(--color-text-tertiary);
+}
+
+.diff-summary {
+  padding: 4px 10px 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .diff-footer {

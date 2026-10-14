@@ -36,9 +36,29 @@ function register(withWindow = true) {
       withWindow ? { webContents: { send: vi.fn() }, close: vi.fn() } : null,
     ),
   } as never
-  registerAppHandlers((channel, handler) => {
-    handlers.set(channel, handler as never)
-  }, ctx)
+  registerAppHandlers(
+    (channel, handler) => {
+      handlers.set(channel, handler as never)
+    },
+    ctx,
+    {
+      wsl: {
+        getVersion: vi.fn(async () => ({ raw: '', wslVersion: '', kernelVersion: '' })),
+        getEnv: vi.fn(async () => ({
+          installed: false,
+          wslVersion: '',
+          kernelVersion: '',
+          defaultDistro: '',
+          defaultVersion: null,
+          statusRaw: '',
+        })),
+        setDefaultVersion: vi.fn(),
+        update: vi.fn(),
+        updateRollback: vi.fn(),
+      },
+      tasks: { start: vi.fn(() => ({ taskId: 't' })) },
+    } as never,
+  )
   return { handlers, ctx }
 }
 

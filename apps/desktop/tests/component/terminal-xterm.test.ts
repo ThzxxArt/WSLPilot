@@ -18,7 +18,12 @@ interface FakeTerm {
   cols: number
   rows: number
   handlers: Record<string, (...a: unknown[]) => void>
-  buffer: { active: { cursorX: number; cursorY: number } }
+  buffer: {
+    active: { cursorX: number; cursorY: number; viewportY: number; baseY: number }
+  }
+  customKeyHandler?: (e: KeyboardEvent) => boolean
+  scrolledToBottom?: boolean
+  selectedAll?: boolean
 }
 const terms: FakeTerm[] = []
 
@@ -31,7 +36,10 @@ vi.mock('@xterm/xterm', () => ({
     cols = 80
     rows = 24
     handlers: Record<string, (...a: unknown[]) => void> = {}
-    buffer = { active: { cursorX: 3, cursorY: 5 } }
+    buffer = { active: { cursorX: 3, cursorY: 5, viewportY: 24, baseY: 24 } }
+    customKeyHandler?: (e: KeyboardEvent) => boolean
+    scrolledToBottom = false
+    selectedAll = false
     constructor(opts: Record<string, unknown>) {
       this.options = { ...opts }
       terms.push(this as unknown as FakeTerm)
@@ -53,8 +61,20 @@ vi.mock('@xterm/xterm', () => ({
     onSelectionChange(fn: (...a: unknown[]) => void) {
       this.handlers.selection = fn
     }
+    onScroll(fn: (...a: unknown[]) => void) {
+      this.handlers.scroll = fn
+    }
+    attachCustomKeyEventHandler(fn: (e: KeyboardEvent) => boolean) {
+      this.customKeyHandler = fn
+    }
     getSelection() {
       return (this as unknown as FakeTerm & { sel?: string }).sel ?? ''
+    }
+    selectAll() {
+      this.selectedAll = true
+    }
+    scrollToBottom() {
+      this.scrolledToBottom = true
     }
     clear() {
       ;(this as unknown as { cleared?: boolean }).cleared = true
@@ -70,18 +90,51 @@ vi.mock('@xterm/addon-fit', () => ({
     fit() {}
   },
 }))
+/** SearchAddon 实例（供 findNext/选项/计数回调断言） */
+const searchInstances: Array<{
+  findNext: ReturnType<typeof vi.fn>
+  findPrevious: ReturnType<typeof vi.fn>
+  clearDecorations: ReturnType<typeof vi.fn>
+  cb?: (r: { resultIndex: number; resultCount: number }) => void
+}> = []
 vi.mock('@xterm/addon-search', () => ({
   SearchAddon: class {
-    findNext() {
-      return true
+    findNext = vi.fn(() => true)
+    findPrevious = vi.fn(() => true)
+    clearDecorations = vi.fn()
+    cb?: (r: { resultIndex: number; resultCount: number }) => void
+    constructor() {
+      searchInstances.push(this as never)
     }
-    findPrevious() {
-      return true
+    onDidChangeResults(cb: (r: { resultIndex: number; resultCount: number }) => void) {
+      this.cb = cb
+      return { dispose: vi.fn() }
     }
   },
 }))
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }))
 vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }))
+
+/** WebglAddon mock（0.1.3）：可注入构造失败（回退路径）与上下文丢失回调 */
+const webglInstances: Array<{ lossCb?: () => void; disposed: boolean }> = []
+let webglThrow = false
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class {
+    lossCb?: () => void
+    disposed = false
+    constructor() {
+      if (webglThrow) throw new Error('no webgl context')
+      webglInstances.push(this as never)
+    }
+    onContextLoss(cb: () => void) {
+      this.lossCb = cb
+      return { dispose: vi.fn() }
+    }
+    dispose() {
+      this.disposed = true
+    }
+  },
+}))
 
 const message = {
   success: vi.fn(),
@@ -143,6 +196,9 @@ function lastTerm(): FakeTerm {
 beforeEach(() => {
   vi.clearAllMocks()
   terms.length = 0
+  searchInstances.length = 0
+  webglInstances.length = 0
+  webglThrow = false
   setActivePinia(createPinia())
   document.body.innerHTML = ''
 })
@@ -453,9 +509,16 @@ describe('终端主题对比度（4 个主题关键色对 — review 0.1.2 验�
 })
 
 describe('TerminalToolbar 搜索事件面', () => {
-  it('搜索框回车发出 search，上一个/下一个发出对应事件', async () => {
+  it('搜索框输入即搜索（携带选项），Enter/Shift+Enter 上一个/下一个', async () => {
     const w = mount(TerminalToolbar, {
-      props: { canZoom: true, hasSession: true, fontSize: 14 },
+      props: {
+        canZoom: true,
+        hasSession: true,
+        fontSize: 14,
+        atBottom: true,
+        searchCount: 0,
+        searchIndex: -1,
+      },
       attachTo: document.body,
     })
     w.findAll('button')
@@ -466,26 +529,44 @@ describe('TerminalToolbar 搜索事件面', () => {
     expect(input).toBeTruthy()
     input!.value = 'error'
     input!.dispatchEvent(new Event('input', { bubbles: true }))
-    input!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }))
     await flushPromises()
-    expect(w.emitted('search')![0]).toEqual(['error'])
+    // 0.1.3：输入即搜索，携带大小写/正则选项（默认关闭）
+    expect(w.emitted('search')![0]).toEqual([
+      { query: 'error', caseSensitive: false, regex: false },
+    ])
 
-    const prev = Array.from(document.body.querySelectorAll('button')).find((b) =>
-      (b.textContent ?? '').includes('上一个'),
-    )!
-    prev.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    input!.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }))
+    expect(w.emitted('searchNext')).toHaveLength(1)
+    input!.dispatchEvent(
+      new KeyboardEvent('keyup', { key: 'Enter', shiftKey: true, bubbles: true }),
+    )
     expect(w.emitted('searchPrev')).toHaveLength(1)
 
-    const next = Array.from(document.body.querySelectorAll('button')).find((b) =>
-      (b.textContent ?? '').includes('下一个'),
+    // 选项切换以当前查询重新搜索
+    const caseBox = Array.from(document.body.querySelectorAll<HTMLElement>('.n-checkbox')).find(
+      (el) => (el.textContent ?? '').includes('区分大小写'),
     )!
-    next.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(w.emitted('searchNext')).toHaveLength(1)
+    caseBox.click()
+    await flushPromises()
+    const last = w.emitted('search')!.at(-1)![0] as { caseSensitive: boolean }
+    expect(last.caseSensitive).toBe(true)
+
+    // 命中计数展示（0.1.3）
+    await w.setProps({ searchCount: 12, searchIndex: 2 })
+    await flushPromises()
+    expect(document.body.textContent).toContain('3/12')
   })
 
   it('字号到达边界时禁用 A+/A- 且按钮带 aria-label（review 0.1.2 根治）', () => {
     const min = mount(TerminalToolbar, {
-      props: { canZoom: true, hasSession: true, fontSize: 8 },
+      props: {
+        canZoom: true,
+        hasSession: true,
+        fontSize: 8,
+        atBottom: true,
+        searchCount: 0,
+        searchIndex: -1,
+      },
     })
     const shrink = min.findAll('button').find((b) => b.text().includes('A-'))!
     const grow = min.findAll('button').find((b) => b.text().includes('A+'))!
@@ -496,7 +577,14 @@ describe('TerminalToolbar 搜索事件面', () => {
     expect(grow.attributes('disabled')).toBeUndefined()
 
     const max = mount(TerminalToolbar, {
-      props: { canZoom: true, hasSession: true, fontSize: 32 },
+      props: {
+        canZoom: true,
+        hasSession: true,
+        fontSize: 32,
+        atBottom: true,
+        searchCount: 0,
+        searchIndex: -1,
+      },
     })
     const shrink2 = max.findAll('button').find((b) => b.text().includes('A-'))!
     const grow2 = max.findAll('button').find((b) => b.text().includes('A+'))!
@@ -506,10 +594,169 @@ describe('TerminalToolbar 搜索事件面', () => {
 
     // 无会话时 A+/A- 一律禁用（canZoom=false 优先）
     const none = mount(TerminalToolbar, {
-      props: { canZoom: false, hasSession: false, fontSize: 16 },
+      props: {
+        canZoom: false,
+        hasSession: false,
+        fontSize: 16,
+        atBottom: true,
+        searchCount: 0,
+        searchIndex: -1,
+      },
     })
     const zoomBtns = none.findAll('button').filter((b) => /A[+-]/.test(b.text()))
     expect(zoomBtns).toHaveLength(2)
     for (const b of zoomBtns) expect(b.attributes('disabled')).toBeDefined()
+  })
+
+  it('0.1.3 新按钮：分屏/关闭面板/粘贴/滚动到底部（贴底时隐藏）', async () => {
+    const w = mount(TerminalToolbar, {
+      props: {
+        canZoom: true,
+        hasSession: true,
+        fontSize: 14,
+        atBottom: false,
+        searchCount: 0,
+        searchIndex: -1,
+      },
+    })
+    const click = (label: string) => {
+      const btn = w.findAll('button').find((b) => b.text().includes(label))!
+      expect(btn, label).toBeTruthy()
+      btn.element.click()
+    }
+    click('粘贴')
+    expect(w.emitted('paste')).toHaveLength(1)
+    click('分屏 ⇢')
+    expect(w.emitted('splitRow')).toHaveLength(1)
+    click('分屏 ⇣')
+    expect(w.emitted('splitCol')).toHaveLength(1)
+    click('关闭面板')
+    expect(w.emitted('closePane')).toHaveLength(1)
+    click('↓ 到底部')
+    expect(w.emitted('scrollBottom')).toHaveLength(1)
+
+    // 贴底时「到底部」按钮隐藏
+    await w.setProps({ atBottom: true })
+    expect(w.findAll('button').find((b) => b.text().includes('到底部'))).toBeUndefined()
+
+    // 4 面板上限双保险（UI 层）：canSplit=false 时两个分屏按钮禁用；默认（省略）为可用
+    expect(w.find('button[aria-label="左右分屏"]').attributes('disabled')).toBeUndefined()
+    await w.setProps({ canSplit: false })
+    expect(w.find('button[aria-label="左右分屏"]').attributes('disabled')).toBeDefined()
+    expect(w.find('button[aria-label="上下分屏"]').attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('XtermPane 0.1.3 增强（快捷键 / 粘贴 / 搜索 / WebGL / 右键）', () => {
+  function keydownEvent(init: Partial<KeyboardEvent>): KeyboardEvent {
+    return {
+      type: 'keydown',
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      code: '',
+      preventDefault: vi.fn(),
+      ...init,
+    } as unknown as KeyboardEvent
+  }
+
+  it('Ctrl+Shift+C：有选区复制到主进程剪贴板；无选区提示（0.1.3）', async () => {
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    expect(t.customKeyHandler).toBeTruthy()
+
+    ;(t as unknown as { sel?: string }).sel = 'hello world'
+    const handled = t.customKeyHandler!(
+      keydownEvent({ ctrlKey: true, shiftKey: true, code: 'KeyC' }),
+    )
+    expect(handled).toBe(false)
+    await flushPromises()
+    expect(wslAPI.clipboard.write).toHaveBeenCalledWith('hello world')
+    expect(message.success).toHaveBeenCalledWith('已复制')
+
+    ;(t as unknown as { sel?: string }).sel = ''
+    message.info.mockClear()
+    t.customKeyHandler!(keydownEvent({ ctrlKey: true, shiftKey: true, code: 'KeyC' }))
+    await flushPromises()
+    expect(wslAPI.clipboard.write).toHaveBeenCalledTimes(1)
+    expect(message.info).toHaveBeenCalledWith('请先在终端中选中内容')
+  })
+
+  it('Ctrl+Shift+V：读剪贴板并按分片发送（大粘贴不丢字）', async () => {
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    wslAPI.clipboard.read.mockResolvedValueOnce('echo hi\n')
+    t.customKeyHandler!(keydownEvent({ ctrlKey: true, shiftKey: true, code: 'KeyV' }))
+    await flushPromises()
+    expect(wslAPI.terminal.input).toHaveBeenCalledWith('p1', 'echo hi\n')
+  })
+
+  it('Ctrl+Shift+F：请求父级打开搜索（emit requestSearch）', async () => {
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    t.customKeyHandler!(keydownEvent({ ctrlKey: true, shiftKey: true, code: 'KeyF' }))
+    expect(w.emitted('requestSearch')).toHaveLength(1)
+  })
+
+  it('搜索：选项透传 SearchAddon（大小写/正则/高亮）与命中计数回调转发', async () => {
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const s = searchInstances[0]!
+    const vm = w.vm as unknown as {
+      findNext(text: string, prefs?: { caseSensitive: boolean; regex: boolean }): boolean
+    }
+    vm.findNext('abc', { caseSensitive: true, regex: true })
+    expect(s.findNext).toHaveBeenCalledWith(
+      'abc',
+      expect.objectContaining({ caseSensitive: true, regex: true }),
+    )
+    // 高亮装饰必须总是存在（全部命中高亮 — 0.1.3）
+    const opts = s.findNext.mock.calls[0]![1] as { decorations?: Record<string, string> }
+    expect(opts.decorations?.matchBackground).toBeTruthy()
+    expect(opts.decorations?.activeMatchBackground).toBeTruthy()
+
+    s.cb?.({ resultIndex: 1, resultCount: 5 })
+    expect(w.emitted('searchResults')).toEqual([[{ index: 1, count: 5 }]])
+
+    // 清除高亮（关闭搜索）
+    ;(w.vm as unknown as { clearSearch(): void }).clearSearch()
+    expect(s.clearDecorations).toHaveBeenCalled()
+  })
+
+  it('WebGL：构造失败自动回退（不抛不崩）；上下文丢失后 dispose 回退 DOM', async () => {
+    webglThrow = true
+    mount(XtermPane, { props: { ptyId: 'p-fallback' }, attachTo: document.body })
+    await flushPromises()
+    expect(terms).toHaveLength(1)
+    expect(webglInstances).toHaveLength(0)
+
+    webglThrow = false
+    mount(XtermPane, { props: { ptyId: 'p-webgl' }, attachTo: document.body })
+    await flushPromises()
+    expect(webglInstances).toHaveLength(1)
+    webglInstances[0]!.lossCb?.()
+    expect(webglInstances[0]!.disposed).toBe(true)
+  })
+
+  it('右键：contextmenu 事件携带坐标与 ptyId；滚动/贴底状态上报', async () => {
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const host = document.querySelector<HTMLElement>('.xterm-host')!
+    const ev = new MouseEvent('contextmenu', { bubbles: true, clientX: 42, clientY: 24 })
+    host.dispatchEvent(ev)
+    expect(w.emitted('contextMenu')).toEqual([[{ x: 42, y: 24, ptyId: 'p1' }]])
+
+    const t = lastTerm()
+    // 视口贴底 → scroll 回调上报 true
+    t.handlers.scroll!()
+    expect(w.emitted('atBottom')!.at(-1)).toEqual([true])
+    // 视口上移 → false
+    t.buffer.active.viewportY = 0
+    t.handlers.scroll!()
+    expect(w.emitted('atBottom')!.at(-1)).toEqual([false])
   })
 })

@@ -43,6 +43,18 @@ export function createWslAPI() {
         kernelVersion: '5.15.153',
         raw: '',
       })),
+      // 0.1.3：WSL 本体生命周期
+      wslEnv: vi.fn(async () => ({
+        installed: true,
+        wslVersion: '2.3.4',
+        kernelVersion: '5.15.153',
+        defaultDistro: 'Ubuntu',
+        defaultVersion: 2 as 1 | 2 | null,
+        statusRaw: '',
+      })),
+      wslUpdate: vi.fn(async () => ({ taskId: 'upd' })),
+      wslUpdateRollback: vi.fn(async () => ({ taskId: 'upd-rb' })),
+      wslSetDefaultVersion: vi.fn(async () => {}),
       signatureStatus: vi.fn(async () => ({ checked: true, signed: true, detail: '' })),
       openPath: vi.fn(async () => {}),
       openConfigDir: vi.fn(async () => {}),
@@ -67,12 +79,14 @@ export function createWslAPI() {
     },
     distros: {
       list: vi.fn(async (): Promise<DistroView[]> => []),
-      listOnline: vi.fn(async (): Promise<string[]> => []),
+      listOnline: vi.fn(async (): Promise<Array<{ name: string; friendlyName: string }>> => []),
       start: vi.fn(async () => {}),
       terminate: vi.fn(async () => {}),
       shutdown: vi.fn(async () => {}),
       setDefault: vi.fn(async () => {}),
-      unregister: vi.fn(async () => {}),
+      // 0.1.3：注销任务化（返回 TaskHandle）
+      unregister: vi.fn(async () => ({ taskId: 'unreg' })),
+      setSparse: vi.fn(async () => ({ taskId: 'sparse' })),
       registryDetail: vi.fn(async (): Promise<Record<string, unknown>> => ({ values: {} })),
       install: vi.fn(async () => ({ taskId: 'ins' })),
       setVersion: vi.fn(async () => ({ taskId: 'cv' })),
@@ -95,6 +109,7 @@ export function createWslAPI() {
       export: vi.fn(async () => ({ taskId: 'e' })),
       import: vi.fn(async () => ({ taskId: 'i' })),
       move: vi.fn(async () => ({ taskId: 'm' })),
+      clone: vi.fn(async () => ({ taskId: 'cl' })),
       listBackups: vi.fn(async () => []),
       cleanupBackups: vi.fn(async () => ({ removed: 0 })),
     },
@@ -127,6 +142,20 @@ export function createWslAPI() {
       read: vi.fn(async () => '[automount]\nenabled = true\n'),
       // 真实契约：文件已写成功时 terminated:false + terminateError 可选（review 0.1.2）
       write: vi.fn(async (): Promise<WslConfWriteResult> => ({ terminated: false })),
+    },
+    /** .wslconfig 全局配置（0.1.3 契约） */
+    wslconfig: {
+      read: vi.fn(async () => ({
+        path: 'C:\\Users\\me\\.wslconfig',
+        exists: false,
+        content: '',
+      })),
+      write: vi.fn(async () => ({ path: 'C:\\Users\\me\\.wslconfig' })),
+    },
+    /** 剪贴板（0.1.3 契约：主进程 Electron clipboard） */
+    clipboard: {
+      read: vi.fn(async () => ''),
+      write: vi.fn(async () => {}),
     },
     /** 网络（真实 preload 契约有该命名空间；此前缺失导致 NetworkView 用例全在错误态下跑） */
     network: {

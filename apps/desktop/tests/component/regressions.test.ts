@@ -73,8 +73,9 @@ const RUNNING = {
   meta: null,
 } as never
 
-function session(ptyId: string, title: string) {
-  return { ptyId, title, distro: 'Ubuntu', shell: '/bin/bash', alive: true, createdAt: 0 }
+/** 0.1.3：TerminalTabs 消费标签项（标签 = 分屏面板树容器） */
+function tabItem(id: string, title: string) {
+  return { id, title, alive: true, tooltip: '' }
 }
 
 beforeEach(() => {
@@ -94,11 +95,12 @@ describe('终端标签重命名（自查回归）', () => {
   function mountTabs() {
     return mount(TerminalTabs, {
       props: {
-        sessions: [session('p1', '旧标题'), session('p2', '另一个')],
-        activeId: 'p1',
+        tabs: [tabItem('p1', '旧标题'), tabItem('p2', '另一个')],
+        activeTabId: 'p1',
         maxSessions: 10,
         distroOptions: [{ label: 'Ubuntu', value: 'Ubuntu' }],
         defaultDistro: 'Ubuntu',
+        defaultShell: '/bin/bash',
       },
       attachTo: document.body,
     })

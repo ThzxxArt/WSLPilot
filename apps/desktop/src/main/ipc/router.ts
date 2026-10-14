@@ -14,6 +14,7 @@ import type { PtyManager } from '../services/pty-manager'
 import type { IoService } from '../services/io-service'
 import type { TaskRunner } from '../services/task-runner'
 import type { WslConfService } from '../services/wslconf-service'
+import type { WslConfigService } from '../services/wslconfig-service'
 import type { ActionRunner } from '../services/action-runner'
 import type { FsBridge } from '../services/fs-bridge'
 import type { NetworkService } from '../services/network-service'
@@ -29,6 +30,7 @@ import { registerMetaHandlers } from './handlers/meta'
 import { registerPtyHandlers } from './handlers/pty'
 import { registerIoHandlers } from './handlers/io'
 import { registerWslConfHandlers } from './handlers/wslconf'
+import { registerWslConfigHandlers } from './handlers/wslconfig'
 import { registerActionHandlers } from './handlers/actions'
 import { registerFsHandlers } from './handlers/fs'
 import { registerNetworkHandlers } from './handlers/network'
@@ -63,6 +65,7 @@ export function registerIpcHandlers(
     io: IoService
     tasks: TaskRunner
     wslconf: WslConfService
+    wslconfig: WslConfigService
     runner: ActionRunner
     fsBridge: FsBridge
     network: NetworkService
@@ -74,13 +77,14 @@ export function registerIpcHandlers(
   const add = (channel: string, handler: Handler) => routes.set(channel, handler)
 
   registerConfigHandlers(add, ctx)
-  registerAppHandlers(add, ctx)
+  registerAppHandlers(add, ctx, { wsl: deps.wsl, tasks: deps.tasks })
   registerUpdateHandlers(add, ctx)
   registerDistroHandlers(add, ctx, deps)
   registerMetaHandlers(add)
   registerPtyHandlers(add, deps)
   registerIoHandlers(add, deps)
   registerWslConfHandlers(add, deps)
+  registerWslConfigHandlers(add, deps)
   registerActionHandlers(add, deps)
   registerFsHandlers(add, deps)
   registerNetworkHandlers(add, deps)

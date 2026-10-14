@@ -28,6 +28,11 @@ const VOID_INVOKE_CHANNELS = new Set<string>([
   CH.updateCheck,
   CH.updateDownload,
   CH.updateInstall,
+  // 0.1.3 WSL 本体 / 全局配置 / 剪贴板
+  CH.appWslEnv,
+  CH.appWslUpdateRollback,
+  CH.wslconfigRead,
+  CH.clipboardRead,
 ])
 
 describe('IPC 契约一致性（review M1）', () => {

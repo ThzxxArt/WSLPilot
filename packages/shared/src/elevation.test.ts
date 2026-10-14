@@ -173,4 +173,57 @@ describe('提权操作白名单（M7 §14.3）', () => {
       params: {},
     })
   })
+
+  // ── 0.1.3：WSL 本体生命周期 / 磁盘管理 op ──
+
+  it('wsl.update / wsl.updateRollback：argv 与 commands 同源，参数严格校验', () => {
+    const upd = buildElevatedInvocation({ op: 'wsl.update', params: {} })
+    expect(upd.program).toBe('wsl.exe')
+    expect(upd.args).toEqual(['--update'])
+
+    const pre = buildElevatedInvocation({ op: 'wsl.update', params: { preRelease: true } })
+    expect(pre.args).toEqual(['--update', '--pre-release'])
+
+    const rb = buildElevatedInvocation({ op: 'wsl.updateRollback', params: {} })
+    expect(rb.args).toEqual(['--update', '--rollback'])
+
+    // 多余键拒绝（.strict 白名单）
+    expect(() => validateElevationRequest({ op: 'wsl.update', params: { evil: 1 } })).toThrow()
+    expect(() =>
+      validateElevationRequest({ op: 'wsl.updateRollback', params: { evil: 1 } }),
+    ).toThrow()
+  })
+
+  it('wsl.setDefaultVersion：仅接受 1/2；wsl.setSparse：发行版名 + 布尔', () => {
+    expect(
+      buildElevatedInvocation({ op: 'wsl.setDefaultVersion', params: { version: 2 } }).args,
+    ).toEqual(['--set-default-version', '2'])
+    expect(() =>
+      validateElevationRequest({ op: 'wsl.setDefaultVersion', params: { version: 3 } }),
+    ).toThrow()
+
+    expect(
+      buildElevatedInvocation({ op: 'wsl.setSparse', params: { name: 'Ubuntu', sparse: true } })
+        .args,
+    ).toEqual(['--manage', 'Ubuntu', '--set-sparse', 'true'])
+    expect(() =>
+      validateElevationRequest({ op: 'wsl.setSparse', params: { name: 'a/b', sparse: true } }),
+    ).toThrow()
+    expect(() =>
+      validateElevationRequest({ op: 'wsl.setSparse', params: { name: 'Ubuntu', sparse: 'yes' } }),
+    ).toThrow()
+  })
+
+  it('0.1.3 新 op 的展示名与程序映射完备（提权日志/白名单）', () => {
+    const cases = [
+      { op: 'wsl.update', params: { preRelease: true } },
+      { op: 'wsl.updateRollback', params: {} },
+      { op: 'wsl.setDefaultVersion', params: { version: 2 } },
+      { op: 'wsl.setSparse', params: { name: 'U', sparse: true } },
+    ] as const
+    for (const c of cases) {
+      expect(ELEVATION_PROGRAMS[c.op]).toBe('wsl.exe')
+      expect(validateElevationRequest({ op: c.op, params: c.params }).op).toBe(c.op)
+    }
+  })
 })

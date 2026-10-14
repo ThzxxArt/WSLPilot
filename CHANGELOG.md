@@ -5,6 +5,119 @@
 
 > **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
 
+## [0.1.3] - 2026-10-14
+
+### Notes
+
+- **0.1.3 为 WSL 深耕版**（功能增强）：聚焦 **WSL 本体生命周期（安装 / 更新 / 回滚 / 默认版本）、
+  发行版管理增强（宿主磁盘 / 稀疏磁盘 / 克隆 / 注销前备份）、终端优化增强（分屏 / 启动目录与 Shell
+  接线 / 快捷键与右键菜单 / 搜索高亮 / WebGL 渲染）、`.wslconfig` 全局配置编辑**；并清除历史遗留
+  （`state.jsonc` 无消费方幽灵字段、`kit/env.ts` 死代码、文档失真）。
+- 通道/任务类型/提权 op 全量扩展并保持四方对账：新增 `app:wslEnv` / `app:wslUpdate` /
+  `app:wslUpdateRollback` / `app:wslSetDefaultVersion` / `distros:setSparse` / `io:clone` /
+  `wslconfig:read|write` / `clipboard:read|write`；提权白名单新增
+  `wsl.update` / `wsl.updateRollback` / `wsl.setDefaultVersion` / `wsl.setSparse`；
+  任务类型新增 `update` / `manage` / `clone` / `unregister`。
+- 安装 WSL 本体与 `wsl --update` / `--rollback` 共用 `wsl:global` 串行锁（本体级操作绝不并发）。
+- 遗留清理（审计二轮）：注销任务化后 `TaskRunner.runExclusive` 专用 API 已无生产消费 →
+  整体移除（互斥语义由任务 `lockKey` 单一承担）；`summarizeWslConfChanges` 由主进程服务
+  迁入 `@wslpilot/shared` 并接入 `/etc/wsl.conf` 与 `.wslconfig` 两处差异预览摘要（消除死导出）。
+- 正确性补齐（Git 审计三轮）：INI 行内注释在单事实源下同时支持 `#` 与 `;`（对齐旧镜像读取
+  语义，空白前缀；引号值内为字面量）；段落名/键名大小写不敏感（对齐旧镜像解析与 WSL 自身
+  语义；改写保留原键名大小写、不产生重复语义键）；终端布局恢复强制「叶子 id 唯一」不变量
+  （手改脏数据中重复 ptyId 只保留首个，杜绝同一会话绑两个面板）；`swap=0`（禁用交换）与
+  字段提示一致放行。
+- 实测：单测 1186 条（lines 95.07% / branches 88.08% / functions 94.84%）、组件 365 用例
+  （ui 桶 98.99/90.58/92.86、renderer 桶 89.72/84.30/63.53；两档地板按「实测 −2pp」重校准为
+  ui 96/96/88/90、renderer 87/87/82/61）。
+
+### Added
+
+- **WP1 WSL 本体生命周期**
+  - 环境体检（`app:wslEnv`）：`wsl --version` + `wsl --status` 全量解析 —— 版本 / 内核 /
+    默认发行版 / 默认版本；**非抛出语义**（未安装返回 `installed:false` + 原始输出），
+    供「一键安装」引导直接消费；设置 → WSL 新增环境卡（版本行、默认版本下拉、
+    更新 / 预发布 / 回滚入口），读取失败给重试而不断路；驾驶舱 hero 版本旁同步提供「更新 WSL」入口
+  - 一键安装 WSL（未安装场景）：设置环境卡与驾驶舱错误横幅（`WSL_NOT_INSTALLED` /
+    `WSL_NOT_FOUND`）均可直达安装任务；安装向导在「在线列表失败」时改给「一键安装 WSL」
+    兜底（不再弹错误 toast 后死路）；安装/更新输出识别「需要重启 Windows」并在完成面板如实提示
+  - `wsl --update` 更新（`app:wslUpdate`）：长任务（流式日志 + 可取消 + 权限不足自动转提权）；
+    按「前读版本 → 执行 → 后读版本」如实报告三种结果（版本已变 / 无变化 / 需要重启），
+    绝不伪造「检查到新版本」；预发布通道 `--pre-release`（高级入口）
+  - `wsl --update --rollback` 回滚（`app:wslUpdateRollback`）：危险操作显式确认后执行
+  - `wsl --set-default-version` 默认版本（`app:wslSetDefaultVersion`）：设置卡下拉（仅影响新导入），
+    直接失败且权限不足时自动转提权助手
+  - `wsl --list --online` 解析 FRIENDLY NAME（`OnlineDistro`），安装向导展示友好名
+- **WP2 发行版管理增强**
+  - 宿主磁盘可见：`distros:list` 经注册表 BasePath 补 `hostDiskBytes`（`ext4.vhdx` 实测大小），
+    详情概览新增「磁盘（宿主）」行
+  - 稀疏磁盘：`distros:setSparse` → `wsl --manage <name> --set-sparse <true|false>`（WSL 2.0+；
+    老版本映射为「设置 → WSL 更新」引导）；详情页一键启用（同发行版锁串行，可与导出/迁移互斥）
+  - 克隆发行版：`io:clone` 单任务组合「导出临时归档 → 以新名导入（版本随源）→ 清理临时目录」；
+    失败自动回滚不完整注册；新名称校验（大小写归一、重名/同名拒绝）
+  - 注销任务化（`distros:unregister` 契约改为 `{ name, backupFirst }` → `TaskHandle`）：
+    可勾选「注销前自动备份」（默认跟随 `backup.autoBackupBeforeDestructive`），
+    备份与注销在同一排他锁内执行；同发行版运行中任务仍硬拒绝
+- **WP3 终端优化增强**
+  - **分屏**：标签内左右 / 上下分裂（最多 4 面板），拖拽分隔条调整比例（夹取 15%–85%）、
+    活动面板描边与焦点切换、每标签记忆最近活动面板、右键/工具栏/快捷键/命令面板四入口
+    （上限双保险：store 拒绝 + 达到 4 面板后四处入口同步禁用）；
+    关闭面板自动折叠布局，最后一个面板关闭标签；**布局持久化到 `ui-state.terminalLayout`**，
+    窗口重载后按存活会话恢复分屏（死面板剪枝、单子 split 折叠、深度超限整树拒绝）
+  - **启动目录与 Shell 接线**（半幽灵字段根治）：`distros.jsonc` 的 `startupCwd` 与
+    `settings.wsl.defaultShell` 真正作用于新建面板（各入口统一 `openDefault`）；
+    新建弹层支持显式 Shell / 启动目录（留空用默认）
+  - 终端专属快捷键：`Ctrl+Shift+C` 复制选中（无选区提示）、`Ctrl+Shift+V` 粘贴（主进程剪贴板、
+    超限自动分片）、`Ctrl+Shift+F` 打开搜索；全局 `Ctrl+Shift+T` 新标签、`Ctrl+Tab`/`Ctrl+Shift+Tab`
+    循环标签、`Ctrl+Shift+5/6` 分屏（终端内同样可用，与集成终端同语义）
+  - 面板右键菜单：复制 / 粘贴 / 全选 / 查找 / 清屏 / 滚动到底部 / 左右上下分屏 / 关闭面板
+  - 剪贴板可靠通道：`clipboard:read|write`（主进程 Electron clipboard；选中即复制同步切换）
+  - 搜索增强：全部命中高亮 + 当前命中强调、区分大小写 / 正则、命中计数（N/M）、
+    Enter / Shift+Enter 下一个 / 上一个
+  - WebGL 渲染器（`@xterm/addon-webgl`）：加载失败或上下文丢失自动回退 DOM 渲染器，绝不半成品
+  - 工具栏新增：粘贴 / 滚动到底部（贴底自动隐藏）/ 分屏 ×2 / 关闭面板；标签悬浮提示
+    （发行版 · Shell · 目录 · 创建时间，恢复会话使用主进程真实创建时间）
+- **WP4 `.wslconfig` 全局配置编辑**
+  - 共享层新增 `wslconfig.ts`：`[wsl2]`（memory / processors / swap / swapFile / networkingMode /
+    dnsTunneling / firewall / autoProxy）与 `[experimental]`（autoMemoryReclaim / sparseVhd）
+    的行级最小编辑（保留注释与未知键）、带单位容量校验、表单模型与差异清单；
+    `network.ts` 的镜像模式读取改为复用同一解析器（单一事实源）
+  - 主进程新增 `wslconfig-service`：宿主文件读 / 写（写前语法守卫 → 备份轮转（3 份）→ 原子写），
+    纯 fs 操作无需 UAC；`wslconfig:read|write` 通道
+  - 网络页新增「WSL 全局配置（.wslconfig）」面板：可视化表单 + 原始文本 + Diff 预览、
+    内联字段校验（非法值阻止保存）、其他键原样保留展示、「打开所在目录」、
+    「立即重启 WSL（wsl --shutdown）」；保存后自动刷新镜像模式状态
+
+### Changed
+
+- 组件覆盖率地板按「实测 −2pp」重校准：renderer **88/88/83/59 → 87/87/82/61**
+  （实测 89.72/84.30/63.53，365 用例）；ui 桶维持 96/96/88/90（实测 98.99/90.58/92.86）
+- README / docs/testing.md 基线与快捷键同步；设置 → WSL 增补「去编辑 .wslconfig」入口
+- 命令面板新增「终端：左右/上下分屏、关闭当前面板」（存在活动面板时提供）
+
+### Fixed
+
+- **0.1.2 遗留收口：「取消中止仅 mock 验证」补齐真实进程验证** —— 新增
+  `run-tool.abort.run.test.ts`：用真实 `node` 挂起子进程验证 abort 会真正终止进程
+  （aborted 标记 / 快速返回 / 非零退出；不 mock child_process，Linux 与 Windows CI 同验）
+- **历史遗留清除**：`state.jsonc` 的 `lastScanAt` / `lastMetrics` 为无任何生产读写的幽灵字段
+  （仅测试夹具引用），schema 与类型一并移除（旧数据读取时被剥离，不告警）
+- **死代码清除**：`packages/kit/src/env.ts`（未被 index 导出、全仓零导入）与其测试删除
+- **文档失真**：`docs/design-system.md` 移除已不存在的 `--space-*` / `--shadow-glow` /
+  多档阴影描述（与 `tokens.ts` 唯一事实源对齐）；设计书的 `state.jsonc` 样例、
+  `wsl --update` 命令表与终端分屏章节同步实况
+- 解析器补齐行内注释语义：非引号值的「空白 + `#`」之后视为注释（引号值内 `#` 为字面量）——
+  修复 `.wslconfig` 编辑器与镜像模式读取对 `networkingMode = "NAT" # 注释` 形态的解析
+
+### Security
+
+- 提权白名单扩展遵循同一铁律：结构化 op + 参数数组（`wsl.update` / `wsl.updateRollback` /
+  `wsl.setDefaultVersion` / `wsl.setSparse` 全部 `.strict()` 参数校验，argv 经 commands.ts
+  唯一事实源构建；Helper 脚本 op↔program 二次校验自动覆盖新 op）
+- 克隆/稀疏流程全部复用既有执行边界：发行版名 `assertSafeDistroName`、安装路径
+  `ioPathSchema`（控制字符拒绝）、临时目录独立 `mkdtemp` 且无论成败清理
+- `.wslconfig` 写入走语法守卫 + 原子写 + 备份轮转，绝不把半损坏全局配置落盘
+
 ## [0.1.2] - 2026-10-12
 
 ### Notes

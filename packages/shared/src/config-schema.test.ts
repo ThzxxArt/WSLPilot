@@ -67,8 +67,10 @@ describe('uiState 幽灵字段根治', () => {
       tableSort: { key: 'name', dir: 'asc' },
     })
     expect(Object.keys(parsed).sort()).toEqual(
-      ['$schemaVersion', 'recentCommands', 'sidebarCollapsed', 'window'].sort(),
+      ['$schemaVersion', 'recentCommands', 'sidebarCollapsed', 'terminalLayout', 'window'].sort(),
     )
+    // 0.1.3：终端分屏布局默认空数组（窗口重载恢复的持久化位）
+    expect(parsed.terminalLayout).toEqual([])
   })
 })
 

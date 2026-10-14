@@ -67,6 +67,31 @@ describe('getIniValue / setIniValue / removeIniKey', () => {
     expect(getIniValue(SAMPLE, 'nope', 'nope')).toBeUndefined()
   })
 
+  it('行内注释语义：# 与 ;（空白前缀）剥离；引号值内为字面量；无空白不算注释（0.1.3）', () => {
+    expect(getIniValue('[wsl2]\nnetworkingMode=mirrored # 备注', 'wsl2', 'networkingMode')).toBe(
+      'mirrored',
+    )
+    expect(getIniValue('[wsl2]\nnetworkingMode=mirrored ; 备注', 'wsl2', 'networkingMode')).toBe(
+      'mirrored',
+    )
+    // 引号值：内部 # / ; 是字面量，不截断（写侧遇这些字符也会加引号，读写闭环）
+    expect(getIniValue('[network]\nhostname="a # b ; c"', 'network', 'hostname')).toBe('a # b ; c')
+    // 无空白前缀不作注释（字面量，避免误伤含 # 的非引号值）
+    expect(getIniValue('[wsl2]\nnetworkingMode=mirrored#x', 'wsl2', 'networkingMode')).toBe(
+      'mirrored#x',
+    )
+  })
+
+  it('段落名/键名大小写不敏感；改写保留原键名大小写且不产生重复键（0.1.3）', () => {
+    const t = '[WSL2]\nMemory=4GB\n'
+    expect(getIniValue(t, 'wsl2', 'memory')).toBe('4GB')
+    const out = setIniValue(t, 'wsl2', 'memory', '8GB')
+    expect(out).toContain('Memory = 8GB')
+    expect(out.match(/memory/gi)).toHaveLength(1)
+    expect(out.match(/\[/g)).toHaveLength(1)
+    expect(removeIniKey(t, 'wsl2', 'memory')).not.toContain('Memory')
+  })
+
   it('setIniValue 修改已有键只动一行并保留注释', () => {
     const out = setIniValue(SAMPLE, 'automount', 'root', '/data/')
     expect(out).toContain('root = /data/')

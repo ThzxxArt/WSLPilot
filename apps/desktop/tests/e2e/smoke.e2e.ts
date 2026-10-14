@@ -67,13 +67,26 @@ test.describe('WSLPilot 启动冒烟', () => {
       await expect(window.getByText('wsl.conf 变更后自动终止发行版', { exact: true })).toBeVisible({
         timeout: 15_000,
       })
+      // 0.1.3：WSL 环境卡（版本/更新/默认版本；未安装时给一键安装）——环境无关的结构断言
+      await expect(window.locator('.wsl-env')).toBeVisible({ timeout: 15_000 })
+      await expect(window.getByText('去编辑 .wslconfig', { exact: true })).toBeVisible({
+        timeout: 15_000,
+      })
 
       // 网络页（M6）：镜像模式卡 / 端口转发表 / 代理配置三个面板可见
       await nav.getByRole('button', { name: '网络', exact: true }).click()
-      await expect(window.getByText('网络模式', { exact: true })).toBeVisible({ timeout: 15_000 })
+      // '网络模式' 在 .wslconfig 面板的表单字段中也有同名文案：按 heading 角色定位镜像卡标题
+      await expect(window.getByRole('heading', { name: '网络模式', exact: true })).toBeVisible({
+        timeout: 15_000,
+      })
       await expect(window.getByText('端口转发', { exact: true })).toBeVisible({ timeout: 15_000 })
       await expect(window.getByText('代理配置', { exact: true })).toBeVisible({ timeout: 15_000 })
       await expect(window.getByText('新建规则', { exact: true })).toBeVisible({ timeout: 15_000 })
+      // 0.1.3：.wslconfig 全局配置编辑面板真实渲染（路径/表单/保存链路入口）
+      await expect(window.locator('.wslconfig-card')).toBeVisible({ timeout: 15_000 })
+      await expect(window.getByText('WSL 全局配置（.wslconfig）', { exact: true })).toBeVisible({
+        timeout: 15_000,
+      })
       // 视觉掩码收窄的补偿断言（review 0.1.2）：被收窄区域的容器结构必须真实可见，
       // 样式崩坏（而截图恰好被掩码）时在此处红
       await expect(window.locator('.mirror-card')).toBeVisible({ timeout: 15_000 })

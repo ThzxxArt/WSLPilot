@@ -119,7 +119,7 @@ function buildItems(): PaletteItem[] {
     id: 'new-terminal',
     group: '动作',
     label: '新建终端标签',
-    hint: '为默认发行版开会话',
+    hint: '为默认发行版开会话（含默认 Shell / 启动目录）',
     icon: '⌨️',
     keys: ['Ctrl', 'N'],
     run: async () => {
@@ -128,7 +128,7 @@ function buildItems(): PaletteItem[] {
         message.warning('没有可用的发行版')
         return
       }
-      const id = await terminal.open(name)
+      const id = await terminal.openDefault(name)
       if (!id) {
         message.error(errorLine(terminal.lastError, '新建终端失败'))
         return
@@ -136,6 +136,63 @@ function buildItems(): PaletteItem[] {
       await router.push('/terminal')
     },
   })
+  // 终端分屏命令（0.1.3）：仅在存在活动面板且未达 4 面板上限时提供（UI 双保险）
+  if (terminal.activeId && terminal.canSplit) {
+    items.push({
+      id: 'terminal-split-row',
+      group: '动作',
+      label: '终端：左右分屏',
+      hint: '在当前面板右侧分裂（Ctrl+Shift+5）',
+      icon: '⬓',
+      keys: ['Ctrl', 'Shift', '5'],
+      run: async () => {
+        const id = await terminal.splitActive('row')
+        if (!id) {
+          message.error(errorLine(terminal.lastError, '分屏失败'))
+          return false
+        }
+        await router.push('/terminal')
+        return true
+      },
+    })
+    items.push({
+      id: 'terminal-split-col',
+      group: '动作',
+      label: '终端：上下分屏',
+      hint: '在当前面板下方分裂（Ctrl+Shift+6）',
+      icon: '⬒',
+      keys: ['Ctrl', 'Shift', '6'],
+      run: async () => {
+        const id = await terminal.splitActive('col')
+        if (!id) {
+          message.error(errorLine(terminal.lastError, '分屏失败'))
+          return false
+        }
+        await router.push('/terminal')
+        return true
+      },
+    })
+  }
+  // 关闭面板与上限无关：只要有活动面板就提供
+  if (terminal.activeId) {
+    items.push({
+      id: 'terminal-close-pane',
+      group: '动作',
+      label: '终端：关闭当前面板',
+      hint: '最后一个面板将关闭整个标签',
+      icon: '✖️',
+      run: async () => {
+        try {
+          await terminal.closePane(terminal.activeId)
+          await router.push('/terminal')
+          return true
+        } catch (e) {
+          message.error(errorLine(e, '关闭面板失败'))
+          return false
+        }
+      },
+    })
+  }
   items.push(
     settingsItem('open-config-dir', '打开配置目录', () => window.wslAPI.app.openConfigDir()),
   )

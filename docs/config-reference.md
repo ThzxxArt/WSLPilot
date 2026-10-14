@@ -119,6 +119,20 @@
 - **代理落点**：`/etc/profile.d/wslpilot-proxy.sh`（写入走 `wsl -d <name> -u root -e tee` + stdin，
   内容不经 shell）。脚本仅导出 `http_proxy/https_proxy/no_proxy` 等环境变量，可随时「清除」或手工编辑。
 
+## `.wslconfig`（全局配置 — 0.1.3）
+
+路径 `%UserProfile%\.wslconfig`（**Windows 宿主文件**，非发行版内；影响所有发行版与 WSL 虚拟机）。
+「网络」页的「WSL 全局配置（.wslconfig）」面板提供**可视化表单 + 原始文本 + Diff 预览**：
+
+- 表单覆盖：`[wsl2]` 的 `memory` / `processors` / `swap` / `swapFile` / `networkingMode` /
+  `dnsTunneling` / `firewall` / `autoProxy`；`[experimental]` 的 `autoMemoryReclaim` / `sparseVhd`
+- 逐键最小编辑（保留注释与未知键）；容量字段校验 `数字 + MB/GB`
+- 保存：语法守卫 → 备份轮转（保留 3 份）→ 原子写；**无需 UAC**（纯宿主文件）
+- 生效：执行面板内「立即重启 WSL（`wsl --shutdown`）」，或完全停止所有发行版后约 8 秒
+- 镜像模式（`[wsl2] networkingMode`）的读取与面板编辑共用同一解析器
+
 ## ui-state.jsonc / state.jsonc
 
-界面状态与运行态缓存，一般不手工编辑。`state.jsonc` 的 `lastTaskResult` 记录最近一次长任务（导出/导入/迁移等）的结果。
+界面状态与运行态缓存，一般不手工编辑。`state.jsonc` 的 `lastTaskResult` 记录最近一次长任务
+（导出/导入/迁移/安装/更新/磁盘管理/克隆/注销等）的结果；`ui-state.jsonc` 的
+`terminalLayout` 保存终端分屏布局（窗口重载后恢复标签与分屏结构）。

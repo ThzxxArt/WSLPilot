@@ -2,9 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NPopconfirm, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
+import type { WslEnvInfo } from '@wslpilot/shared'
 import { useDistrosStore } from '../stores/distros'
 import { useMetricsStore } from '../stores/metrics'
 import { useSettingsStore } from '../stores/settings'
+import { useTasksStore } from '../stores/tasks'
 import { usePolling } from '../composables/usePolling'
 import { errorLine } from '../composables/useAppError'
 import { MetricCard, DistroCard, EmptyState, StatusDot, Skeleton } from '@wslpilot/ui'
@@ -17,6 +19,7 @@ const router = useRouter()
 const distros = useDistrosStore()
 const metrics = useMetricsStore()
 const settings = useSettingsStore()
+const tasks = useTasksStore()
 const message = useMessage()
 
 const installOpen = ref(false)
@@ -38,6 +41,18 @@ const wslLabel = computed(() => {
   return 'WSL'
 })
 
+/** WSL 环境（0.1.3）：hero 内提供「更新 WSL」入口（已安装时显示） */
+const wslEnv = ref<WslEnvInfo | null>(null)
+
+async function onUpdateWsl() {
+  const entry = await tasks.startUpdate()
+  if (!entry) {
+    message.error(errorLine(tasks.lastError, '启动更新失败'))
+    return
+  }
+  message.info('已开始更新 WSL，进度见状态栏与任务抽屉')
+}
+
 /**
  * 首页展示排序（review 0.1.2 根治）：running → default → pinned → 名称。
  * 此前直接 slice(0, 6) 截断原始列表，最关心的运行中发行版可能被截掉。
@@ -55,6 +70,12 @@ const topDistros = computed(() => {
 
 /** 错误横幅：发行版列表与指标采样的错误合并展示，两个来源都有出口 */
 const errorBanner = computed(() => distros.lastError ?? metrics.lastError ?? null)
+
+/** WSL 缺失（未安装 / 找不到 wsl.exe）：横幅内给「一键安装 WSL」入口（0.1.3） */
+const wslMissing = computed(() => {
+  const code = errorBanner.value?.code
+  return code === 'WSL_NOT_INSTALLED' || code === 'WSL_NOT_FOUND'
+})
 
 const pollInterval = computed(() => {
   const ms = settings.pollIntervalMs
@@ -78,6 +99,12 @@ onMounted(() => {
       if (info) wslInfo.value = { wslVersion: info.wslVersion, kernelVersion: info.kernelVersion }
     } catch {
       /* 版本未知：保持 wslLabel 降级文案 */
+    }
+    // 0.1.3：环境体检（只用于 hero 的「更新 WSL」入口显隐；失败静默）
+    try {
+      wslEnv.value = await window.wslAPI.app.wslEnv()
+    } catch {
+      wslEnv.value = null
     }
   })()
 })
@@ -169,6 +196,16 @@ function onDetailTerminal(name: string) {
           <template v-if="wslInfo.kernelVersion">
             · 内核 {{ wslInfo.kernelVersion.split(/\s+/)[0] }}
           </template>
+          <n-button
+            v-if="wslEnv?.installed"
+            size="tiny"
+            quaternary
+            class="update-wsl"
+            aria-label="更新 WSL"
+            @click="onUpdateWsl"
+          >
+            更新 WSL
+          </n-button>
         </p>
       </div>
       <div class="hero-actions">
@@ -186,6 +223,15 @@ function onDetailTerminal(name: string) {
     <p v-if="errorBanner" class="error-banner">
       {{ errorBanner.message }}
       <span v-if="errorBanner.suggestion"> — {{ errorBanner.suggestion }}</span>
+      <n-button
+        v-if="wslMissing"
+        size="tiny"
+        type="primary"
+        class="banner-action"
+        @click="installOpen = true"
+      >
+        一键安装 WSL
+      </n-button>
     </p>
 
     <section class="metrics">
@@ -309,6 +355,12 @@ function onDetailTerminal(name: string) {
   vertical-align: middle;
 }
 
+.update-wsl {
+  --n-height: 20px !important;
+  --n-font-size: 11px !important;
+  --n-padding: 0 6px !important;
+}
+
 .hero-actions {
   display: flex;
   gap: 10px;
@@ -321,6 +373,14 @@ function onDetailTerminal(name: string) {
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
   color: var(--color-danger);
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.banner-action {
+  flex-shrink: 0;
 }
 
 .metrics {

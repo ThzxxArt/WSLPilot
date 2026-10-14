@@ -301,6 +301,8 @@ describe('WslConfPanel 保存与错误面', () => {
     await mountDirty()
     findBodyButton('预览并保存')!.click()
     await flushPromises()
+    // 表单模式摘要在预览弹窗内可见（1 项修改）
+    expect(bodyText()).toContain('1 项修改')
     const modal = Array.from(document.body.querySelectorAll('.diff-line'))
     expect(modal.length).toBeGreaterThan(0)
     // 至少存在一条新增或删除行（首字段开关被翻转）

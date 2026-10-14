@@ -66,6 +66,41 @@ Renderer ── wslconf:read/write ──▶ WslConfService（cat / root tee + s
 - **命令面板**：`shared/fuzzy.ts` 模糊打分 + `renderer/features/command/palette.ts` 前缀/分组/最近使用；
   最近使用持久化到 `ui-state.recentCommands`。
 
+## WSL 本体生命周期与全局配置（0.1.3）
+
+```
+Renderer ── app:wslEnv ────────────────▶ WslService.getEnv（--version + --status 全量解析，非抛出）
+         ── app:wslUpdate / rollback ───▶ TaskRunner(wsl:global 锁) ▶ wsl --update [--pre-release|--rollback]
+         ── app:wslSetDefaultVersion ───▶ wsl --set-default-version（权限不足自动转提权助手）
+         ── distros:setSparse ──────────▶ wsl --manage <name> --set-sparse <true|false>（同发行版锁）
+         ── io:clone ───────────────────▶ IoService.runClone（导出临时归档 → 导入新名 → 清理；失败回滚）
+         ── distros:unregister ─────────▶ 任务化（可选注销前备份与注销同锁执行）
+         ── wslconfig:read/write ───────▶ WslConfigService（宿主 %UserProfile%\.wslconfig：守卫→备份→原子写）
+         ── clipboard:read/write ───────▶ Electron clipboard（终端复制/粘贴可靠通道）
+```
+
+- **`wsl:global` 串行锁**：安装 WSL 本体 / `wsl --update` / `--rollback` 共用，本体级操作绝不并发。
+- **环境体检**：`wsl --status` 的默认发行版 / 默认版本 / 内核与 `--version` 合并为 `WslEnvInfo`；
+  未安装时 **不抛错**（`installed:false` + 原始输出），由环境卡/横幅渲染「一键安装 WSL」。
+- **`.wslconfig` 编辑器**：`shared/wslconfig.ts` 行级最小编辑（与 `wsl.conf` 共用 INI 机制），
+  镜像模式读取（`parseWslConfigMode`）与表单/差异预览同源；写盘为宿主文件操作，生效需 `wsl --shutdown`。
+
+## 终端分屏（0.1.3）
+
+```
+TerminalStore（Pinia）
+  ├─ panes: Record<ptyId, PaneMeta>      每个面板 = 一个 pty 会话（缓冲/存活/退出码与旧模型一致）
+  ├─ tabs: TerminalTab[]                 标签 = 分屏树容器
+  │    └─ layout: PaneNode = leaf(ptyId) | split{dir, ratio, a, b}   （纯逻辑见 features/terminal/panes.ts）
+  └─ paneMemory / activeId / activeTabId 活动指针与「每标签最近活动面板」
+```
+
+- 渲染：`SplitPane.vue` 递归渲染面板树 + 拖拽分隔条（比例夹取 15%–85%）；`XtermPane`
+  继续承担 fit/尺寸必达同步/ConPTY 对策；`v-show` 保活，切标签/分屏不丢现场。
+- 布局持久化到 `ui-state.terminalLayout`（防抖 500ms）；窗口重载后 `recover()` 按存活会话
+  恢复分屏（死面板剪枝、单子 split 折叠、深度超限整树拒绝退化为独立标签）。
+- 上限双保险：单标签 ≤4 面板 + 全局 `MAX_PTY_SESSIONS`；拆分继承源面板的发行版/Shell/启动目录。
+
 ## 网络与设备（M6）
 
 ```

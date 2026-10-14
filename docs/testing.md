@@ -137,7 +137,7 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（0.1.2）**：单测 1109 条，Lines 95.97% / Branches 88.39% / Functions 95.54%。
+**当前基线（0.1.3）**：单测 1186 条，Lines 95.07% / Branches 88.08% / Functions 94.84%。
 
 ### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
 
@@ -148,15 +148,14 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 | -------------------------------------- | ------ | ---------- | -------- | --------- |
 | `packages/ui/src/**`（实测）           | 98.99% | 98.99%     | 90.58%   | 92.86%    |
 | ↑ 门禁地板                             | **96** | **96**     | **88**   | **90**    |
-| `apps/desktop/src/renderer/**`（实测） | 90.22% | 90.22%     | 85.23%   | 61.12%    |
-| ↑ 门禁地板                             | **88** | **88**     | **83**   | **59**    |
+| `apps/desktop/src/renderer/**`（实测） | 89.72% | 89.72%     | 84.30%   | 63.53%    |
+| ↑ 门禁地板                             | **87** | **87**     | **82**   | **61**    |
 
-（实测取自 `npm run test:component` 全量 333 用例（0.1.2 独立审计修复后复测）；0.1.2 分母纳入 ui 桶
-`composables` / `directives` / `naive` / `index.ts` 后重测 —— ui branches 地板随测试补齐
-87→88；renderer 地板由 0.1.1 的 85/80/52 抬升至 88/83/59。）
+（实测取自 `npm run test:component` 全量 365 用例（0.1.3 新增分屏/环境卡/.wslconfig/克隆等用例后重测）；
+renderer 地板随 0.1.3 新代码与用例补齐重新校准；0.1.2 的 88/83/59 地板对应旧实测。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
-更新为「新实测 −2pp」；renderer functions 59% 是过渡期防线，不是终点。
+更新为「新实测 −2pp」；renderer functions 61% 是过渡期防线，不是终点。
 
 **覆盖范围**：
 
@@ -194,7 +193,7 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 
 - `lint-typecheck-test`：Node 20/22 矩阵，lint + format:check + typecheck +
   **Tokens drift check（`tokens:check`：`tokens.ts` 与生成产物逐字节对账）** + **test:coverage（85% 门禁）**
-  - **test:component（per-glob 两档门禁：ui 96/96/88/90、renderer 88/88/83/59）** + build +
+  - **test:component（per-glob 两档门禁：ui 96/96/88/90、renderer 87/87/82/61）** + build +
     **smoke:product（main 模块图 + preload 模块图硬校验）**
 - 覆盖率报告以 artifact 形式保留 14 天
 - `e2e`：Windows runner，`npm run test:e2e` 实跑 smoke + 视觉回归（`smoke.e2e.ts` 与 `visual.e2e.ts`）
@@ -205,3 +204,20 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 2. 修改解析/schema/IPC → 同步更新用例
 3. UI 改动 → typecheck + 组件测试通过（新 `.vue` 进组件分母，须补挂载/交互/错误态三件套）
 4. 破坏性行为 → E2E 或手动测试清单
+
+## 0.1.3 手动验证清单（E2E 无法自动化的真机项）
+
+以下依赖真实 WSL / Windows 环境，无法在 CI 自动覆盖；发布前在本机逐项人工验证（勾选）：
+
+- [ ] 未安装 WSL 环境：设置 → WSL 环境卡「一键安装 WSL」→ UAC → 完成（或提示重启）
+- [ ] `wsl --update` 更新：设置 → WSL「更新 WSL」→ 版本行刷新 / 无更新时版本不变（如实展示）
+- [ ] 预发布通道更新与「回滚最近一次更新」（确认框 → 执行 → 环境卡刷新）
+- [ ] 默认版本下拉切换 WSL1/WSL2（仅影响新导入；`wsl --status` 默认版本行随之变化）
+- [ ] 稀疏磁盘：详情页「启用稀疏磁盘」→ 宿主 vhdx 体积变化（WSL 2.0+）
+- [ ] 克隆发行版：新名称校验 / 克隆成功后新发行版可启动 / 临时目录无残留
+- [ ] 注销前自动备份勾选：注销后备份目录出现新备份
+- [ ] 终端分屏（真机 WSL）：左右/上下分屏、拖拽比例、Ctrl+Shift+5/6、右键菜单分屏/关闭面板；
+      窗口重载后分屏布局恢复
+- [ ] 终端快捷键：Ctrl+Shift+C/V/F（含大段粘贴不丢字）、Ctrl+Tab 循环标签
+- [ ] WebGL 渲染下 xterm 正常输出与滚动；无 GPU 环境自动回退不崩
+- [ ] `.wslconfig`：表单保存 → 「立即重启 WSL」→ 内存/处理器限额生效；镜像模式状态卡随保存刷新

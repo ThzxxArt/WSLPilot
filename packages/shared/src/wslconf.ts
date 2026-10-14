@@ -47,10 +47,13 @@ export function parseIniLines(text: string): IniLine[] {
     const entry = ENTRY_RE.exec(raw)
     if (entry) {
       const key = entry[1]!.trim()
-      const rawValue = entry[2] ?? ''
+      const rawValueRaw = entry[2] ?? ''
       const quoted =
-        (rawValue.startsWith('"') && rawValue.endsWith('"') && rawValue.length >= 2) ||
-        (rawValue.startsWith("'") && rawValue.endsWith("'") && rawValue.length >= 2)
+        (rawValueRaw.startsWith('"') && rawValueRaw.endsWith('"') && rawValueRaw.length >= 2) ||
+        (rawValueRaw.startsWith("'") && rawValueRaw.endsWith("'") && rawValueRaw.length >= 2)
+      // 行内注释：非引号值的「空白 + # 或 ;」之后视为注释（0.1.3 补齐 —— 旧镜像读取
+      // parseWslConfigMode 依赖 # 与 ; 两种行内注释；引号值内的 # / ; 是字面量，不截断）
+      const rawValue = quoted ? rawValueRaw : rawValueRaw.replace(/\s+[#;].*$/, '').trimEnd()
       out.push({
         type: 'entry',
         raw,
@@ -67,9 +70,14 @@ export function parseIniLines(text: string): IniLine[] {
 }
 
 /** 取指定键的值（去引号）；不存在返回 undefined */
+/** INI 语义：段落名 / 键名大小写不敏感（WSL 自身与旧镜像解析同此 — 0.1.3 审计对齐） */
+function sameIniToken(a: string | undefined, b: string): boolean {
+  return (a ?? '').toLowerCase() === b.toLowerCase()
+}
+
 export function getIniValue(text: string, section: string, key: string): string | undefined {
   const line = parseIniLines(text).find(
-    (l) => l.type === 'entry' && l.section === section && l.key === key,
+    (l) => l.type === 'entry' && sameIniToken(l.section, section) && sameIniToken(l.key, key),
   )
   return line?.value
 }
@@ -86,7 +94,7 @@ function sectionRange(
   lines: IniLine[],
   section: string,
 ): { headerIdx: number; bodyStart: number; bodyEnd: number } | null {
-  const headerIdx = lines.findIndex((l) => l.type === 'section' && l.section === section)
+  const headerIdx = lines.findIndex((l) => l.type === 'section' && sameIniToken(l.section, section))
   if (headerIdx < 0) return null
   let bodyEnd = lines.length
   for (let i = headerIdx + 1; i < lines.length; i++) {
@@ -118,8 +126,9 @@ export function setIniValue(
   if (range) {
     for (let i = range.bodyStart; i < range.bodyEnd; i++) {
       const l = lines[i]!
-      if (l.type === 'entry' && l.key === key) {
-        lines[i] = { ...l, raw: `${key} = ${rendered}`, value: String(value), quoted: false }
+      if (l.type === 'entry' && sameIniToken(l.key, key)) {
+        // 保留原键名写法（大小写不敏感匹配，最小编辑不重写用户的大小写）
+        lines[i] = { ...l, raw: `${l.key} = ${rendered}`, value: String(value), quoted: false }
         return lines.map((x) => x.raw).join('\n')
       }
     }
@@ -147,7 +156,9 @@ export function setIniValue(
 /** 最小编辑删除键（含其整行）；键不存在则原样返回 */
 export function removeIniKey(text: string, section: string, key: string): string {
   const lines = parseIniLines(text)
-  const idx = lines.findIndex((l) => l.type === 'entry' && l.section === section && l.key === key)
+  const idx = lines.findIndex(
+    (l) => l.type === 'entry' && sameIniToken(l.section, section) && sameIniToken(l.key, key),
+  )
   if (idx < 0) return text
   lines.splice(idx, 1)
   return lines.map((x) => x.raw).join('\n')
@@ -464,4 +475,15 @@ export function isSameText(a: string, b: string): boolean {
     if (la[i] !== lb[i]) return false
   }
   return true
+}
+
+/** 变更清单 → 展示文案（差异预览标题栏摘要；0.1.3 从主进程服务迁入共享层供渲染进程消费） */
+export function summarizeWslConfChanges(changes: WslConfChange[]): string {
+  if (changes.length === 0) return '无变更'
+  const sets = changes.filter((c) => c.kind === 'set').length
+  const removes = changes.filter((c) => c.kind === 'remove').length
+  const parts: string[] = []
+  if (sets > 0) parts.push(`${sets} 项修改`)
+  if (removes > 0) parts.push(`${removes} 项删除`)
+  return parts.join(' · ')
 }

@@ -1,8 +1,18 @@
-import { CH, createAppError, type DistroView, type TaskHandle } from '@wslpilot/shared'
+import { join } from 'node:path'
+import {
+  CH,
+  WSL_GLOBAL_LOCK,
+  createAppError,
+  exportFileName,
+  type DistroView,
+  type TaskHandle,
+} from '@wslpilot/shared'
 import type { WslService } from '../../services/wsl-service'
 import type { RegistryService } from '../../services/registry-service'
+import type { IoService } from '../../services/io-service'
 import type { TaskRunner } from '../../services/task-runner'
 import { sampleOverview } from '../../services/metrics-service'
+import { createHostDiskReader } from '../../services/host-disk'
 import type { IpcContext } from '../router'
 
 type AddFn = (
@@ -21,9 +31,11 @@ function assertName(name: unknown): string {
 export function registerDistroHandlers(
   add: AddFn,
   _ctx: IpcContext,
-  deps: { wsl: WslService; registry: RegistryService; tasks: TaskRunner },
+  deps: { wsl: WslService; registry: RegistryService; tasks: TaskRunner; io: IoService },
 ): void {
-  const { wsl, registry, tasks } = deps
+  const { wsl, registry, tasks, io } = deps
+  /** 宿主磁盘读取器（30s TTL；注册期单例，跨轮询复用缓存） */
+  const hostDisk = createHostDiskReader()
 
   add(CH.distrosList, async (c): Promise<DistroView[]> => {
     const metaFile = await c.configService.load('distros')
@@ -37,7 +49,7 @@ export function registerDistroHandlers(
     try {
       const deep = await registry.listAll()
       const byName = new Map(deep.map((d) => [d.name.toLowerCase(), d]))
-      return views.map((v) => {
+      const enriched = views.map((v) => {
         // 发行版名不区分大小写（review M11）
         const extra = byName.get(v.name.toLowerCase())
         if (!extra) return v
@@ -48,6 +60,13 @@ export function registerDistroHandlers(
           defaultUid: extra.defaultUid ?? v.defaultUid,
         }
       })
+      // 0.1.3：宿主磁盘占用（ext4.vhdx 文件大小；WSL1/文件缺失/权限不足降级 undefined）
+      return await Promise.all(
+        enriched.map(async (v) => {
+          const size = await hostDisk.read(v.basePath)
+          return size === undefined ? v : { ...v, hostDiskBytes: size }
+        }),
+      )
     } catch (e) {
       c.logger.warn('registry enrich failed, deep info unavailable', { error: String(e) })
       return views
@@ -107,7 +126,8 @@ export function registerDistroHandlers(
       type: 'install',
       distro: name,
       message: name ? `安装 ${name}` : '安装 WSL',
-      lockKey: name ? `install:${name.toLowerCase()}` : 'install:*',
+      // 发行版安装按名串行；「安装 WSL 本体」（无 name）与 WSL 更新/回滚共用全局锁 — 0.1.3
+      lockKey: name ? `install:${name.toLowerCase()}` : WSL_GLOBAL_LOCK,
       run: (ctl) => wsl.install(name, ctl),
     })
   })
@@ -123,13 +143,32 @@ export function registerDistroHandlers(
     })
   })
 
-  // 危险操作：仅执行，二次确认由渲染层按 confirmDestructive 负责
-  add(CH.distrosUnregister, async (_c, name: string) => {
-    const target = assertName(name)
+  /**
+   * 稀疏磁盘（0.1.3）：`wsl --manage <name> --set-sparse <true|false>`。
+   * 与同发行版 io 任务共用锁键（改动 vhdx/注册表，绝不与导出/迁移并发）。
+   */
+  add(CH.distrosSetSparse, (_c, arg: never): TaskHandle => {
+    const o = arg as { name: string; sparse: boolean }
+    return tasks.start({
+      type: 'manage',
+      distro: o.name,
+      message: o.sparse ? `启用 ${o.name} 的稀疏磁盘` : `关闭 ${o.name} 的稀疏磁盘`,
+      lockKey: o.name.toLowerCase(),
+      run: (ctl) => wsl.setSparse(o.name, o.sparse, ctl),
+    })
+  })
+
+  /**
+   * 注销（0.1.3 任务化）：可选「注销前自动备份」（同一任务、同一排他锁内先导出再注销）；
+   * 返回 TaskHandle，由渲染层跟踪终态（成功刷新 / 失败提示）。
+   * 危险操作的二次确认仍由渲染层按 confirmDestructive 负责。
+   */
+  add(CH.distrosUnregister, (c, arg: never): TaskHandle => {
+    const o = arg as { name: string; backupFirst: boolean }
+    const target = assertName(o.name)
     const lower = target.toLowerCase()
     // 运行中任务（含无锁的终端动作）不得被注销强杀：先拒绝并给出可行动建议 —
-    // review 0.1.2 第二轮审计（runExclusive 只覆盖同锁队列，无锁动作需在此拦截；
-    // 旧实现在改用 runExclusive 时曾丢失这一检查）
+    // 任务未启动前的检查（本 handler 自身开跑后不再匹配自己）
     const busy = tasks
       .list()
       .some((t) => t.status === 'running' && (t.distro ?? '').toLowerCase() === lower)
@@ -139,7 +178,25 @@ export function registerDistroHandlers(
         suggestion: '请等待任务完成，或先在任务抽屉中取消相关任务后重试',
       })
     }
-    // 排他段（TOCTOU 双保险）：与同发行版 io 任务严格互斥，绝不在任务执行中并发注销
-    await tasks.runExclusive(lower, () => wsl.unregister(target))
+    return tasks.start({
+      type: 'unregister',
+      distro: target,
+      message: `注销 ${target}`,
+      // 排他段（TOCTOU 双保险）：与同发行版 io 任务严格互斥
+      lockKey: lower,
+      run: async (ctl) => {
+        ctl.throwIfCanceled()
+        if (o.backupFirst) {
+          const backup = c.configService.loadSync('settings').backup
+          ctl.log(`注销前自动备份（可在设置中关闭）：${target}`)
+          const path = join(io.resolveBackupDir(), exportFileName(target, backup.format))
+          await io.runExport({ name: target, path, format: backup.format }, ctl)
+          ctl.log('备份完成，开始注销')
+          ctl.throwIfCanceled()
+        }
+        await wsl.unregister(target)
+        ctl.report(100, `已注销 ${target}`)
+      },
+    })
   })
 }

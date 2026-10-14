@@ -97,6 +97,10 @@ const TASK_TYPE_LABELS = {
   action: '自定义动作',
   network: '网络转发',
   device: 'USB 设备',
+  update: '更新 WSL',
+  manage: '磁盘管理',
+  clone: '克隆发行版',
+  unregister: '注销发行版',
 } satisfies Record<TaskType, string>
 
 export function taskTypeLabel(type: string): string {

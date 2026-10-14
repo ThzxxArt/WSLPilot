@@ -415,9 +415,15 @@ describe('DefaultLayout', () => {
     useDistrosStore().items = [distro({ state: 'Running' })]
     const terminal = useTerminalStore()
     terminal.maxSessions = 1
-    terminal.sessions = [
-      { ptyId: 'p1', title: 't', distro: 'Ubuntu', createdAt: Date.now(), alive: true },
+    // 0.1.3：会话/面板模型（标签 = 分屏树容器）
+    terminal.panes = {
+      p1: { ptyId: 'p1', distro: 'Ubuntu', shell: '/bin/bash', createdAt: Date.now(), alive: true },
+    }
+    terminal.tabs = [
+      { id: 'p1', title: 't', layout: { kind: 'leaf', ptyId: 'p1' }, createdAt: Date.now() },
     ]
+    terminal.activeId = 'p1'
+    terminal.activeTabId = 'p1'
     expect(terminal.canCreate).toBe(false)
     mount(DefaultLayout, {
       attachTo: document.body,

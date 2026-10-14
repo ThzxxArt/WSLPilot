@@ -352,7 +352,7 @@ describe('palette 展平序纯逻辑', () => {
 
 describe('InstallDistroModal 安装面', () => {
   async function mountInstall() {
-    wslAPI.distros.listOnline.mockResolvedValue(['Ubuntu'])
+    wslAPI.distros.listOnline.mockResolvedValue([{ name: 'Ubuntu', friendlyName: 'Ubuntu' }])
     const w = mount(InstallDistroModal, { props: { show: true }, attachTo: document.body })
     await flushPromises()
     return w

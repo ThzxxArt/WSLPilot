@@ -14,6 +14,7 @@ import { createPtyManager } from './services/pty-manager'
 import { createTaskRunner, type TaskRecord } from './services/task-runner'
 import { createIoService } from './services/io-service'
 import { createWslConfService } from './services/wslconf-service'
+import { createWslConfigService } from './services/wslconfig-service'
 import { createActionRunner } from './services/action-runner'
 import { createFsBridge } from './services/fs-bridge'
 import { createNetworkService } from './services/network-service'
@@ -198,6 +199,8 @@ async function bootstrap() {
   // review 0.1.2 审计修复：terminate 注入 wslconf 服务，使「写→terminate」在同一
   // per-distro 队列内执行（并发保存不会落在另一次写的 terminate 窗口内）
   const wslconf = createWslConfService({ logger, terminate: (n) => wsl.terminate(n) })
+  // 0.1.3：全局 .wslconfig 编辑（宿主文件，纯 fs 操作）
+  const wslconfig = createWslConfigService({ logger, userDataDir })
   const runner = createActionRunner({
     logger,
     configService,
@@ -248,7 +251,7 @@ async function bootstrap() {
       signature,
       updater,
     },
-    { wsl, registry, pty, io, tasks, wslconf, runner, fsBridge, network, devices },
+    { wsl, registry, pty, io, tasks, wslconf, wslconfig, runner, fsBridge, network, devices },
   )
 
   /**

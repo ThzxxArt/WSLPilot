@@ -164,6 +164,23 @@ export const networkFileSchema = z.object({
     .default({}),
 })
 
+/**
+ * 终端分屏布局树（0.1.3）：递归结构，叶子持有 pty 会话 id。
+ * 与 `types.ts` 的 TerminalLayoutNode 对齐；解析失败由 sanitize 路径逐字段清理。
+ */
+const paneLayoutSchema: z.ZodTypeAny = z.lazy(() =>
+  z.union([
+    z.object({ kind: z.literal('leaf'), ptyId: z.string().min(1).max(200) }),
+    z.object({
+      kind: z.literal('split'),
+      dir: z.enum(['row', 'col']),
+      ratio: z.number().min(0).max(1),
+      a: paneLayoutSchema,
+      b: paneLayoutSchema,
+    }),
+  ]),
+)
+
 /** ui-state.jsonc（lastSelectedDistro/activeView/tableSort 为幽灵字段已根治：全仓无读写，旧文件中出现会被剥离） */
 export const uiStateFileSchema = z.object({
   $schemaVersion: z.number().int().default(1),
@@ -178,24 +195,20 @@ export const uiStateFileSchema = z.object({
     .default({}),
   sidebarCollapsed: z.boolean().default(false),
   recentCommands: z.array(z.string()).default([]),
-})
-
-/** state.jsonc */
-export const stateFileSchema = z.object({
-  $schemaVersion: z.number().int().default(1),
-  lastScanAt: z.string().default(''),
-  lastMetrics: z
-    .record(
+  terminalLayout: z
+    .array(
       z.object({
-        memUsedKB: z.number(),
-        memTotalKB: z.number(),
-        diskUsedKB: z.number().default(0),
-        diskTotalKB: z.number().default(0),
-        cpuPercent: z.number(),
-        sampledAt: z.string(),
+        id: z.string().max(200).default(''),
+        title: z.string().max(200).default(''),
+        layout: paneLayoutSchema,
       }),
     )
-    .default({}),
+    .default([]),
+})
+
+/** state.jsonc（机器缓存：仅最近任务结果；lastScanAt/lastMetrics 无消费方幽灵字段已移除 — 0.1.3 根治） */
+export const stateFileSchema = z.object({
+  $schemaVersion: z.number().int().default(1),
   lastTaskResult: z
     .object({
       // 与 types.ts 联合类型对齐（review M8）：zod 是唯一运行时校验器
@@ -208,6 +221,10 @@ export const stateFileSchema = z.object({
         'action',
         'network',
         'device',
+        'update',
+        'manage',
+        'clone',
+        'unregister',
       ]),
       distro: z.string(),
       status: z.enum(['running', 'success', 'failed', 'canceled']),

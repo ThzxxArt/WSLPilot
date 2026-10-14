@@ -7,6 +7,7 @@ import MirrorModeCard from '../features/network/MirrorModeCard.vue'
 import PortForwardTable from '../features/network/PortForwardTable.vue'
 import PortForwardForm from '../features/network/PortForwardForm.vue'
 import ProxyPanel from '../features/network/ProxyPanel.vue'
+import WslConfigPanel from '../features/config/WslConfigPanel.vue'
 import { ruleApplyCommand } from '../features/network/forms'
 import { useNetworkStore } from '../stores/network'
 import { useDistrosStore } from '../stores/distros'
@@ -303,6 +304,9 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
       :loading="network.statusLoading"
       @open-dir="openConfigDir"
     />
+
+    <!-- WSL 全局配置（.wslconfig）编辑面板（0.1.3）；保存后刷新镜像模式状态 -->
+    <WslConfigPanel @saved="() => void network.loadStatus()" />
 
     <PortForwardTable
       :rules="network.rules"

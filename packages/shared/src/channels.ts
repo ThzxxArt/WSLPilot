@@ -10,11 +10,15 @@ export const CH = {
   distrosUnregister: 'distros:unregister',
   distrosInstall: 'distros:install',
   distrosListOnline: 'distros:listOnline',
+  // 磁盘管理（0.1.3）：稀疏磁盘等 wsl --manage 子操作
+  distrosSetSparse: 'distros:setSparse',
 
   // io
   ioExport: 'io:export',
   ioImport: 'io:import',
   ioMove: 'io:move',
+  // 克隆发行版（0.1.3）：导出→导入组合流程
+  ioClone: 'io:clone',
   ioListBackups: 'io:listBackups',
   ioCleanupBackups: 'io:cleanupBackups',
 
@@ -33,9 +37,17 @@ export const CH = {
   configConflict: 'config:conflict',
   configResolveConflict: 'config:resolveConflict',
 
-  // wsl.conf
+  // wsl.conf（发行版内 /etc/wsl.conf）
   wslconfRead: 'wslconf:read',
   wslconfWrite: 'wslconf:write',
+
+  // .wslconfig（全局 %UserProfile%\.wslconfig — 0.1.3）
+  wslconfigRead: 'wslconfig:read',
+  wslconfigWrite: 'wslconfig:write',
+
+  // clipboard（主进程 Electron clipboard — 0.1.3：终端复制/粘贴可靠通道）
+  clipboardRead: 'clipboard:read',
+  clipboardWrite: 'clipboard:write',
 
   // pty
   ptyCreate: 'pty:create',
@@ -88,6 +100,11 @@ export const CH = {
   appWindowClose: 'app:windowClose',
   appNavigate: 'app:navigate',
   appGetWslVersion: 'app:getWslVersion',
+  // WSL 本体生命周期（0.1.3）：环境体检 / 更新 / 回滚 / 默认版本
+  appWslEnv: 'app:wslEnv',
+  appWslUpdate: 'app:wslUpdate',
+  appWslUpdateRollback: 'app:wslUpdateRollback',
+  appWslSetDefaultVersion: 'app:wslSetDefaultVersion',
   appPickDirectory: 'app:pickDirectory',
   appPickSaveFile: 'app:pickSaveFile',
   appPickOpenFile: 'app:pickOpenFile',
@@ -121,9 +138,11 @@ export const INVOKE_CHANNELS = [
   CH.distrosUnregister,
   CH.distrosInstall,
   CH.distrosListOnline,
+  CH.distrosSetSparse,
   CH.ioExport,
   CH.ioImport,
   CH.ioMove,
+  CH.ioClone,
   CH.ioListBackups,
   CH.ioCleanupBackups,
   CH.metaGet,
@@ -135,6 +154,10 @@ export const INVOKE_CHANNELS = [
   CH.configResolveConflict,
   CH.wslconfRead,
   CH.wslconfWrite,
+  CH.wslconfigRead,
+  CH.wslconfigWrite,
+  CH.clipboardRead,
+  CH.clipboardWrite,
   CH.ptyCreate,
   CH.ptyInput,
   CH.ptyResize,
@@ -166,6 +189,10 @@ export const INVOKE_CHANNELS = [
   CH.appGetVersion,
   CH.appOpenConfigDir,
   CH.appGetWslVersion,
+  CH.appWslEnv,
+  CH.appWslUpdate,
+  CH.appWslUpdateRollback,
+  CH.appWslSetDefaultVersion,
   CH.appPickDirectory,
   CH.appPickSaveFile,
   CH.appPickOpenFile,

@@ -9,7 +9,6 @@ import {
   assertSafeDistroName,
   parseIniLines,
   WSL_CONF_MAX_BYTES,
-  type WslConfChange,
   type WslConfWriteResult,
 } from '@wslpilot/shared'
 import { runWsl, runWslWithStdin, type Logger } from '@wslpilot/kit'
@@ -199,15 +198,4 @@ export function createWslConfService(deps: WslConfServiceDeps): WslConfService {
       })
     },
   }
-}
-
-/** 变更清单 → 展示文案（差异预览标题栏摘要） */
-export function summarizeWslConfChanges(changes: WslConfChange[]): string {
-  if (changes.length === 0) return '无变更'
-  const sets = changes.filter((c) => c.kind === 'set').length
-  const removes = changes.filter((c) => c.kind === 'remove').length
-  const parts: string[] = []
-  if (sets > 0) parts.push(`${sets} 项修改`)
-  if (removes > 0) parts.push(`${removes} 项删除`)
-  return parts.join(' · ')
 }

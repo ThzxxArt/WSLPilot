@@ -150,9 +150,11 @@ describe('App 壳装配', () => {
     mount(App, { attachTo: document.body, global: { stubs } })
     await flushPromises()
     expect(wslAPI.terminal.list).toHaveBeenCalled()
-    expect(useTerminalStore().sessions.map((s) => s.ptyId)).toContain('alive1')
+    // 0.1.3：恢复的会话落在 panes（标签 = 分屏树容器）
+    expect(useTerminalStore().panes['alive1']).toBeTruthy()
+    expect(useTerminalStore().tabs.map((t) => t.id)).toContain('alive1')
     // 恢复的会话在 store 中可被后续 TerminalView 消费
-    expect(useTerminalStore().sessions[0]!.distro).toBe('Ubuntu')
+    expect(useTerminalStore().panes['alive1']!.distro).toBe('Ubuntu')
   })
 })
 

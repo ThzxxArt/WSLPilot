@@ -36,6 +36,13 @@ export const DEFAULT_BACKUP_KEEP = 5
 /** PTY 会话上限 */
 export const MAX_PTY_SESSIONS = 10
 
+/**
+ * WSL 本体全局操作串行锁键（0.1.3）：
+ * 安装 WSL 本体 / `wsl --update` / `wsl --update --rollback` 共用 ——
+ * 三者都改动 WSL 本体，绝不允许并发执行。
+ */
+export const WSL_GLOBAL_LOCK = 'wsl:global'
+
 /** 默认轮询间隔（config-schema 的 pollIntervalMs 默认引用此处，禁止再抄 5000） */
 export const DEFAULT_POLL_INTERVAL_MS = 5000
 
@@ -44,6 +51,12 @@ export const DEFAULT_POLL_INTERVAL_MS = 5000
  * 唯一事实源：ipc-schema（字符+字节双重校验）与 wslconf-service 共用，杜绝两套上限。
  */
 export const WSL_CONF_MAX_BYTES = 64 * 1024
+
+/**
+ * %UserProfile%\.wslconfig 写入上限（字节）。
+ * 唯一事实源：ipc-schema 与 wslconfig-service 共用（0.1.3）。
+ */
+export const WSL_CONFIG_MAX_BYTES = 64 * 1024
 
 /**
  * 发行版内文件写入上限（字节）。

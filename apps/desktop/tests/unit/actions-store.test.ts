@@ -158,8 +158,10 @@ describe('useActionsStore', () => {
     const terminal = useTerminalStore()
     const handle = await s.run('a2', 'Ubuntu')
     expect(handle.ptyId).toBe('p1')
-    expect(terminal.sessions).toHaveLength(1)
-    expect(terminal.sessions[0]).toMatchObject({ ptyId: 'p1', title: '动作二', distro: 'Ubuntu' })
+    // 0.1.3：收编落 panes + 独立标签（动作临时 PTY 不参与分屏）
+    expect(terminal.tabs).toHaveLength(1)
+    expect(terminal.tabs[0]).toMatchObject({ id: 'p1', title: '动作二' })
+    expect(terminal.panes['p1']).toMatchObject({ distro: 'Ubuntu' })
   })
 
   it('run 非 terminal 动作不收编；失败抛 AppError', async () => {
@@ -168,7 +170,7 @@ describe('useActionsStore', () => {
     s.items = [A1]
     const terminal = useTerminalStore()
     await s.run('a1', 'Ubuntu')
-    expect(terminal.sessions).toHaveLength(0)
+    expect(terminal.tabs).toHaveLength(0)
 
     wslAPI.actions.run.mockRejectedValue({ code: 'TASK_FAILED', message: 'x', recoverable: true })
     await expect(s.run('a1')).rejects.toMatchObject({ code: 'TASK_FAILED' })

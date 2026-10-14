@@ -61,6 +61,18 @@ const wslAPI = {
   app: {
     getVersion: vi.fn(async () => '0.1.0'),
     getWslVersion: vi.fn(async () => ({ wslVersion: '2.3.4', kernelVersion: '5.15.153', raw: '' })),
+    // 0.1.3：WSL 本体生命周期（SettingsView 内的环境卡）
+    wslEnv: vi.fn(async () => ({
+      installed: true,
+      wslVersion: '2.3.4',
+      kernelVersion: '5.15.153',
+      defaultDistro: 'Ubuntu',
+      defaultVersion: 2 as 1 | 2 | null,
+      statusRaw: '',
+    })),
+    wslUpdate: vi.fn(async () => ({ taskId: 'upd' })),
+    wslUpdateRollback: vi.fn(async () => ({ taskId: 'upd-rb' })),
+    wslSetDefaultVersion: vi.fn(async () => {}),
     signatureStatus: vi.fn(async () => ({ checked: true, signed: true, detail: '' })),
     openPath: vi.fn(async () => {}),
     openConfigDir: vi.fn(async () => {}),
@@ -83,7 +95,9 @@ const wslAPI = {
     terminate: vi.fn(async () => {}),
     shutdown: vi.fn(async () => {}),
     setDefault: vi.fn(async () => {}),
-    unregister: vi.fn(async () => {}),
+    // 0.1.3：注销任务化（返回 TaskHandle）；稀疏磁盘同
+    unregister: vi.fn(async () => ({ taskId: 'unreg' })),
+    setSparse: vi.fn(async () => ({ taskId: 'sparse' })),
     registryDetail: vi.fn(async (): Promise<Record<string, unknown>> => ({ values: {} })),
     install: vi.fn(async () => ({ taskId: 'ins' })),
     setVersion: vi.fn(async () => ({ taskId: 'cv' })),
@@ -106,6 +120,7 @@ const wslAPI = {
     export: vi.fn(async () => ({ taskId: 'e' })),
     import: vi.fn(async () => ({ taskId: 'i' })),
     move: vi.fn(async () => ({ taskId: 'm' })),
+    clone: vi.fn(async () => ({ taskId: 'cl' })),
     listBackups: vi.fn(async () => []),
     cleanupBackups: vi.fn(async () => ({ removed: 0 })),
   },
@@ -126,6 +141,15 @@ const wslAPI = {
   wslconf: {
     read: vi.fn(async () => '[automount]\nenabled = true\n'),
     write: vi.fn(async () => ({ terminated: false })),
+  },
+  // 0.1.3：剪贴板（终端复制/粘贴通道）与 .wslconfig（全局配置）
+  clipboard: {
+    read: vi.fn(async () => ''),
+    write: vi.fn(async () => {}),
+  },
+  wslconfig: {
+    read: vi.fn(async () => ({ path: 'C:\\Users\\me\\.wslconfig', exists: false, content: '' })),
+    write: vi.fn(async () => ({ path: 'C:\\Users\\me\\.wslconfig' })),
   },
   fs: {
     readDir: vi.fn(async (): Promise<Array<Record<string, unknown>>> => []),
@@ -273,7 +297,14 @@ beforeEach(() => {
 describe('A6 终端工具栏 / 导出', () => {
   it('无会话时清屏/复制/导出禁用；有会话可点', async () => {
     const none = mount(TerminalToolbar, {
-      props: { canZoom: false, hasSession: false, fontSize: 14 },
+      props: {
+        canZoom: false,
+        hasSession: false,
+        fontSize: 14,
+        atBottom: true,
+        searchCount: 0,
+        searchIndex: -1,
+      },
     })
     for (const label of ['清屏', '复制', '导出']) {
       const btn = findButton(none, label)
@@ -283,7 +314,14 @@ describe('A6 终端工具栏 / 导出', () => {
     expect(findButton(none, 'A-')!.element.hasAttribute('disabled')).toBe(true)
 
     const some = mount(TerminalToolbar, {
-      props: { canZoom: true, hasSession: true, fontSize: 14 },
+      props: {
+        canZoom: true,
+        hasSession: true,
+        fontSize: 14,
+        atBottom: true,
+        searchCount: 0,
+        searchIndex: -1,
+      },
     })
     for (const label of ['清屏', '复制', '导出']) {
       expect(findButton(some, label)!.element.hasAttribute('disabled'), label).toBe(false)
@@ -312,11 +350,12 @@ describe('A8 TerminalTabs 新建下拉同步', () => {
   it('distros 异步到达后下拉不再为空', async () => {
     const w = mount(TerminalTabs, {
       props: {
-        sessions: [],
-        activeId: '',
+        tabs: [],
+        activeTabId: '',
         maxSessions: 10,
         distroOptions: [],
         defaultDistro: '',
+        defaultShell: '/bin/bash',
       },
       attachTo: document.body,
     })
@@ -334,14 +373,15 @@ describe('A8 TerminalTabs 新建下拉同步', () => {
   it('用户已选的发行版不被后续同步覆盖', async () => {
     const w = mount(TerminalTabs, {
       props: {
-        sessions: [],
-        activeId: '',
+        tabs: [],
+        activeTabId: '',
         maxSessions: 10,
         distroOptions: [
           { label: 'Ubuntu', value: 'Ubuntu' },
           { label: 'Debian', value: 'Debian' },
         ],
         defaultDistro: 'Ubuntu',
+        defaultShell: '/bin/bash',
       },
       attachTo: document.body,
     })
@@ -359,12 +399,19 @@ describe('A8 TerminalTabs 新建下拉同步', () => {
   })
 
   it('拖拽排序只认左键：右键横移不重排（review 根治）', async () => {
-    const sessions = [
-      { ptyId: 'p1', title: 'A', distro: 'A', createdAt: 0, alive: true },
-      { ptyId: 'p2', title: 'B', distro: 'B', createdAt: 0, alive: true },
+    const tabsFixture = [
+      { id: 'p1', title: 'A', alive: true, tooltip: '' },
+      { id: 'p2', title: 'B', alive: true, tooltip: '' },
     ]
     const w = mount(TerminalTabs, {
-      props: { sessions, activeId: 'p1', maxSessions: 10, distroOptions: [], defaultDistro: '' },
+      props: {
+        tabs: tabsFixture,
+        activeTabId: 'p1',
+        maxSessions: 10,
+        distroOptions: [],
+        defaultDistro: '',
+        defaultShell: '/bin/bash',
+      },
       attachTo: document.body,
     })
     await flushPromises()
@@ -850,8 +897,9 @@ describe('A9 DistroDetailModal', () => {
     expect(edit!.querySelector('.n-switch[aria-label="置顶"]')).toBeTruthy()
   })
 
-  it('注销发行版调用 distros.unregister（与 wsl --unregister / 通道动词一致）', async () => {
+  it('注销发行版调用 distros.unregister（0.1.3 任务化：携带 backupFirst）', async () => {
     useSettingsStore().confirmDestructive = false
+    useSettingsStore().backupAutoBeforeDestructive = false
     useDistrosStore().items = [distro()]
     mount(DistroDetailModal, {
       props: { show: true, distroName: 'Ubuntu' },
@@ -861,11 +909,12 @@ describe('A9 DistroDetailModal', () => {
     await flushPromises()
     findBodyButton('注销发行版')!.click()
     await flushPromises()
-    expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu')
+    expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu', { backupFirst: false })
   })
 
   it('注销先过脏守卫：留在此页不注销不关窗，确认放弃后才注销并关窗（review 0.1.2 根治）', async () => {
     useSettingsStore().confirmDestructive = false
+    useSettingsStore().backupAutoBeforeDestructive = false
     useDistrosStore().items = [distro({ name: 'Ubuntu', state: 'Running' })]
     const w = mount(DistroDetailModal, {
       props: { show: true, distroName: 'Ubuntu' },
@@ -888,7 +937,18 @@ describe('A9 DistroDetailModal', () => {
     dialogResult = true
     findBodyButton('注销发行版')!.click()
     await flushPromises()
-    expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu')
+    expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu', { backupFirst: false })
+    // 0.1.3：任务化后关窗发生在任务成功终态（模拟任务完成回执）
+    const { useTasksStore } = await import('../../src/renderer/stores/tasks')
+    useTasksStore().applyProgress({
+      taskId: 'unreg',
+      type: 'unregister',
+      distro: 'Ubuntu',
+      percent: 100,
+      message: '已注销 Ubuntu',
+      status: 'success',
+    })
+    await flushPromises()
     expect(w.emitted('update:show')!.at(-1)).toEqual([false])
   })
 
@@ -1000,8 +1060,10 @@ describe('A9 DistroDetailModal', () => {
   it('注销双击只发起一次（本地 in-flight 锁）', async () => {
     useSettingsStore().confirmDestructive = false
     useDistrosStore().items = [distro()]
-    let release!: () => void
-    wslAPI.distros.unregister.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+    let release!: (v: { taskId: string }) => void
+    wslAPI.distros.unregister.mockImplementationOnce(
+      () => new Promise<{ taskId: string }>((r) => (release = r)),
+    )
     mount(DistroDetailModal, {
       props: { show: true, distroName: 'Ubuntu' },
       attachTo: document.body,
@@ -1013,7 +1075,7 @@ describe('A9 DistroDetailModal', () => {
     btn.click()
     await flushPromises()
     expect(wslAPI.distros.unregister).toHaveBeenCalledTimes(1)
-    release()
+    release({ taskId: 'unreg' })
     await flushPromises()
   })
 

@@ -138,6 +138,7 @@ describe('preload 契约', () => {
       [
         'actions',
         'app',
+        'clipboard',
         'config',
         'devices',
         'diagnostics',
@@ -151,6 +152,7 @@ describe('preload 契约', () => {
         'terminal',
         'update',
         'wslconf',
+        'wslconfig',
       ].sort(),
     )
     expect(Object.keys(exposed.config).sort()).toEqual(
@@ -193,6 +195,10 @@ describe('preload 契约', () => {
         'pickOpenFile',
         'pickSaveFile',
         'signatureStatus',
+        'wslEnv',
+        'wslSetDefaultVersion',
+        'wslUpdate',
+        'wslUpdateRollback',
       ].sort(),
     )
     // 其余域的方法面同样全枚举（此前只锁 6 个域 — 新增方法不会红，假信心）
@@ -203,6 +209,7 @@ describe('preload 契约', () => {
         'listOnline',
         'registryDetail',
         'setDefault',
+        'setSparse',
         'setVersion',
         'shutdown',
         'start',
@@ -226,9 +233,11 @@ describe('preload 契约', () => {
       ].sort(),
     )
     expect(Object.keys(exposed.io).sort()).toEqual(
-      ['cleanupBackups', 'export', 'import', 'listBackups', 'move'].sort(),
+      ['cleanupBackups', 'clone', 'export', 'import', 'listBackups', 'move'].sort(),
     )
     expect(Object.keys(exposed.wslconf).sort()).toEqual(['read', 'write'])
+    expect(Object.keys(exposed.wslconfig).sort()).toEqual(['read', 'write'])
+    expect(Object.keys(exposed.clipboard).sort()).toEqual(['read', 'write'])
     expect(Object.keys(exposed.actions).sort()).toEqual(['list', 'run', 'save'])
     expect(Object.keys(exposed.fs).sort()).toEqual(['read', 'readDir', 'revealInExplorer', 'write'])
     expect(Object.keys(exposed.task).sort()).toEqual(['cancel', 'onProgress'])
@@ -291,9 +300,21 @@ describe('preload 契约', () => {
     )
     callAndCheck(
       'distros.unregister',
+      () => exposed.distros.unregister('U', { backupFirst: true }),
+      CH.distrosUnregister,
+      { name: 'U', backupFirst: true },
+    )
+    callAndCheck(
+      'distros.unregister 无备份',
       () => exposed.distros.unregister('U'),
       CH.distrosUnregister,
-      'U',
+      { name: 'U', backupFirst: false },
+    )
+    callAndCheck(
+      'distros.setSparse',
+      () => exposed.distros.setSparse('U', true),
+      CH.distrosSetSparse,
+      { name: 'U', sparse: true },
     )
   })
 
@@ -352,6 +373,8 @@ describe('preload 契约', () => {
     callAndCheck('io.import', () => exposed.io.import(imp), CH.ioImport, imp)
     const mv = { name: 'U', path: 'C:\\m', terminateFirst: true }
     callAndCheck('io.move', () => exposed.io.move(mv), CH.ioMove, mv)
+    const clone = { name: 'U', newName: 'U2', installPath: 'C:\\i' }
+    callAndCheck('io.clone', () => exposed.io.clone(clone), CH.ioClone, clone)
     callAndCheck('io.listBackups', () => exposed.io.listBackups(), CH.ioListBackups, {})
     callAndCheck('io.listBackups(dir)', () => exposed.io.listBackups('C:\\b'), CH.ioListBackups, {
       dir: 'C:\\b',
@@ -372,12 +395,27 @@ describe('preload 契约', () => {
     expect(parseIpcArgs(CH.ioCleanupBackups, [{}])).toEqual({ keep: 5 })
   })
 
-  it('wslconf / actions / fs 域（M5）', () => {
+  it('wslconf / wslconfig / clipboard / actions / fs 域（M5 + 0.1.3）', () => {
     callAndCheck('wslconf.read', () => exposed.wslconf.read('U'), CH.wslconfRead, 'U')
     callAndCheck('wslconf.write', () => exposed.wslconf.write('U', '[boot]\n'), CH.wslconfWrite, {
       name: 'U',
       content: '[boot]\n',
     })
+    // 0.1.3：全局 .wslconfig（读无参 / 写内容）与剪贴板通道
+    callAndCheck('wslconfig.read', () => exposed.wslconfig.read(), CH.wslconfigRead)
+    callAndCheck(
+      'wslconfig.write',
+      () => exposed.wslconfig.write('[wsl2]\nmemory=8GB\n'),
+      CH.wslconfigWrite,
+      { content: '[wsl2]\nmemory=8GB\n' },
+    )
+    callAndCheck('clipboard.read', () => exposed.clipboard.read(), CH.clipboardRead)
+    callAndCheck(
+      'clipboard.write',
+      () => exposed.clipboard.write('hello'),
+      CH.clipboardWrite,
+      'hello',
+    )
     callAndCheck('actions.run', () => exposed.actions.run('a1', 'U'), CH.actionRun, {
       actionId: 'a1',
       distro: 'U',
@@ -510,6 +548,30 @@ describe('preload 契约', () => {
     callAndCheck('app.pickSaveFile', () => exposed.app.pickSaveFile({}), CH.appPickSaveFile, {})
     callAndCheck('app.pickOpenFile', () => exposed.app.pickOpenFile({}), CH.appPickOpenFile, {})
     callAndCheck('app.getWslVersion', () => exposed.app.getWslVersion(), CH.appGetWslVersion)
+    // 0.1.3：WSL 本体生命周期（环境体检 / 更新 / 回滚 / 默认版本）
+    callAndCheck('app.wslEnv', () => exposed.app.wslEnv(), CH.appWslEnv)
+    callAndCheck('app.wslUpdate', () => exposed.app.wslUpdate(), CH.appWslUpdate, {
+      preRelease: false,
+    })
+    callAndCheck(
+      'app.wslUpdate 预发布',
+      () => exposed.app.wslUpdate({ preRelease: true }),
+      CH.appWslUpdate,
+      {
+        preRelease: true,
+      },
+    )
+    callAndCheck(
+      'app.wslUpdateRollback',
+      () => exposed.app.wslUpdateRollback(),
+      CH.appWslUpdateRollback,
+    )
+    callAndCheck(
+      'app.wslSetDefaultVersion',
+      () => exposed.app.wslSetDefaultVersion(2),
+      CH.appWslSetDefaultVersion,
+      { version: 2 },
+    )
     callAndCheck('app.minimize', () => exposed.app.minimize(), CH.appWindowMinimize)
     callAndCheck('app.maximize', () => exposed.app.maximize(), CH.appWindowMaximize)
     callAndCheck('app.close', () => exposed.app.close(), CH.appWindowClose)

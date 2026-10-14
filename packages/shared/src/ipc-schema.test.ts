@@ -467,4 +467,65 @@ describe('ipc-schema · 补漏通道（review 假信心根治 M2）', () => {
     cyclic.self = cyclic
     expect(() => parseIpcArgs(CH.configSet, [{ fileKey: 'settings', patch: cyclic }])).toThrow()
   })
+
+  // ── 0.1.3：WSL 本体 / 磁盘 / 克隆 / 全局配置 / 剪贴板 ──
+
+  it('distros:unregister 对象形态（backupFirst 默认 false）；字符串入参拒绝', () => {
+    expect(parseIpcArgs(CH.distrosUnregister, [{ name: 'Ubuntu' }])).toEqual({
+      name: 'Ubuntu',
+      backupFirst: false,
+    })
+    expect(parseIpcArgs(CH.distrosUnregister, [{ name: 'Ubuntu', backupFirst: true }])).toEqual({
+      name: 'Ubuntu',
+      backupFirst: true,
+    })
+    expect(() => parseIpcArgs(CH.distrosUnregister, ['Ubuntu'])).toThrow()
+    expect(() => parseIpcArgs(CH.distrosUnregister, [{ name: 'a/b' }])).toThrow()
+  })
+
+  it('distros:setSparse：发行版名 + 布尔；拒绝非法名与非布尔', () => {
+    expect(parseIpcArgs(CH.distrosSetSparse, [{ name: 'Ubuntu', sparse: true }])).toEqual({
+      name: 'Ubuntu',
+      sparse: true,
+    })
+    expect(() => parseIpcArgs(CH.distrosSetSparse, [{ name: 'Ubuntu', sparse: 'yes' }])).toThrow()
+    expect(() => parseIpcArgs(CH.distrosSetSparse, [{ name: '', sparse: true }])).toThrow()
+  })
+
+  it('io:clone：源/新名强校验 + 安装位置路径校验', () => {
+    expect(
+      parseIpcArgs(CH.ioClone, [
+        { name: 'Ubuntu', newName: 'Ubuntu-Dev', installPath: 'D:\\WSL\\Ubuntu-Dev' },
+      ]),
+    ).toEqual({ name: 'Ubuntu', newName: 'Ubuntu-Dev', installPath: 'D:\\WSL\\Ubuntu-Dev' })
+    expect(() =>
+      parseIpcArgs(CH.ioClone, [{ name: 'Ubuntu', newName: 'a/b', installPath: 'D:\\x' }]),
+    ).toThrow()
+    expect(() =>
+      parseIpcArgs(CH.ioClone, [{ name: 'Ubuntu', newName: 'U2', installPath: 'bad\u0000path' }]),
+    ).toThrow()
+  })
+
+  it('wslconfig:write：字符 + 字节双上限；控制字符（除 \\t\\n\\r）拒绝', () => {
+    expect(parseIpcArgs(CH.wslconfigWrite, [{ content: '[wsl2]\nmemory=8GB\n' }])).toEqual({
+      content: '[wsl2]\nmemory=8GB\n',
+    })
+    expect(() => parseIpcArgs(CH.wslconfigWrite, [{ content: 'a\u0000b' }])).toThrow()
+    expect(
+      () => parseIpcArgs(CH.wslconfigWrite, [{ content: '中'.repeat(30000) }]), // 90KB UTF-8 > 64KB
+    ).toThrow()
+  })
+
+  it('clipboard:write：允许换行文本，拒绝 NUL', () => {
+    expect(parseIpcArgs(CH.clipboardWrite, ['ls -la\necho done\n'])).toBe('ls -la\necho done\n')
+    expect(() => parseIpcArgs(CH.clipboardWrite, ['a\u0000b'])).toThrow()
+  })
+
+  it('app:wslUpdate 默认 preRelease=false；app:wslSetDefaultVersion 仅 1/2', () => {
+    expect(parseIpcArgs(CH.appWslUpdate, [undefined])).toEqual({ preRelease: false })
+    expect(parseIpcArgs(CH.appWslUpdate, [{ preRelease: true }])).toEqual({ preRelease: true })
+    expect(() => parseIpcArgs(CH.appWslUpdate, [{ preRelease: 'x' }])).toThrow()
+    expect(parseIpcArgs(CH.appWslSetDefaultVersion, [{ version: 2 }])).toEqual({ version: 2 })
+    expect(() => parseIpcArgs(CH.appWslSetDefaultVersion, [{ version: 3 }])).toThrow()
+  })
 })

@@ -9,6 +9,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebglAddon } from '@xterm/addon-webgl'
 import {
   DEFAULT_TERMINAL_PREFS,
   normalizeFontFamily,
@@ -18,6 +19,12 @@ import {
 import { chunkTerminalInput } from './input-chunk'
 import { errorLine } from '../../composables/useAppError'
 import { useSettingsStore } from '../../stores/settings'
+
+/** 搜索偏好（0.1.3：大小写 / 正则 / 全部命中高亮） */
+export interface SearchPrefs {
+  caseSensitive: boolean
+  regex: boolean
+}
 
 const props = defineProps({
   ptyId: { type: String, required: true },
@@ -34,6 +41,14 @@ const props = defineProps({
 
 const emit = defineEmits<{
   cursorMove: [pos: { col: number; row: number; ptyId: string }]
+  /** 终端右键：由父级弹上下文菜单 */
+  contextMenu: [payload: { x: number; y: number; ptyId: string }]
+  /** Ctrl+Shift+F：请求父级打开搜索框 */
+  requestSearch: []
+  /** 搜索结果计数变化（null = 无查询） */
+  searchResults: [payload: { index: number; count: number }]
+  /** 视口是否贴底（「滚动到底部」按钮按需显示） */
+  atBottom: [value: boolean]
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -42,6 +57,7 @@ const message = useMessage()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
+let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
 let unsubs: Array<() => void> = []
 /**
@@ -172,6 +188,122 @@ function invalidateFit() {
   lastFitH = 0
 }
 
+/** 距离上限（字节）与 pty:data 一致由分片处理；剪贴板可能含大段文本 */
+async function copySelection(): Promise<void> {
+  const sel = term?.getSelection() ?? ''
+  if (!sel) {
+    message.info('请先在终端中选中内容')
+    return
+  }
+  try {
+    await window.wslAPI.clipboard.write(sel)
+    message.success('已复制')
+  } catch (e) {
+    message.error(errorLine(e, '复制失败'))
+  }
+}
+
+/** 粘贴：主进程剪贴板 → 按 IPC 上限分片发送（大段粘贴不丢字 — 0.1.3） */
+async function pasteFromClipboard(): Promise<void> {
+  let text = ''
+  try {
+    text = await window.wslAPI.clipboard.read()
+  } catch (e) {
+    message.error(errorLine(e, '读取剪贴板失败'))
+    return
+  }
+  if (!text) return
+  for (const chunk of chunkTerminalInput(text)) {
+    try {
+      await window.wslAPI.terminal.input(props.ptyId, chunk)
+    } catch (e) {
+      message.error(errorLine(e, '终端输入发送失败'))
+      return
+    }
+  }
+}
+
+function selectAll(): void {
+  term?.selectAll()
+}
+
+function scrollToBottom(): void {
+  term?.scrollToBottom()
+}
+
+function isAtBottom(): boolean {
+  if (!term) return true
+  const buf = term.buffer.active
+  return buf.viewportY >= buf.baseY
+}
+
+/**
+ * WebGL 渲染器（0.1.3）：加载失败或上下文丢失自动回退 DOM 渲染器。
+ * 这是纯性能增强——任何失败都不得影响终端可用性（绝不半成品：回退静默且真实生效）。
+ */
+function tryLoadWebgl(t: Terminal): void {
+  try {
+    const addon = new WebglAddon()
+    addon.onContextLoss(() => {
+      try {
+        addon.dispose()
+      } catch {
+        /* ignore */
+      }
+      if (webgl === addon) webgl = null
+    })
+    t.loadAddon(addon)
+    webgl = addon
+  } catch {
+    // 无 GPU / 环境不支持：保持默认 DOM 渲染器
+    webgl = null
+  }
+}
+
+/**
+ * 终端专属快捷键（xterm attachCustomKeyEventHandler — 0.1.3）：
+ * Ctrl+Shift+C 复制 / Ctrl+Shift+V 粘贴 / Ctrl+Shift+F 打开搜索。
+ * 必须在 xterm 内部拦截（不能走 window 级快捷键）——终端聚焦时这些组合不发给 shell。
+ */
+function attachShortcutHandler(t: Terminal): void {
+  t.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+    if (e.type !== 'keydown') return true
+    if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true
+    switch (e.code) {
+      case 'KeyC':
+        e.preventDefault()
+        void copySelection()
+        return false
+      case 'KeyV':
+        e.preventDefault()
+        void pasteFromClipboard()
+        return false
+      case 'KeyF':
+        e.preventDefault()
+        emit('requestSearch')
+        return false
+      default:
+        return true
+    }
+  })
+}
+
+/** 搜索高亮装饰（浅色主题；命中全部高亮 + 当前命中强调） */
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(99, 102, 241, 0.18)',
+  matchOverviewRuler: 'rgba(99, 102, 241, 0.45)',
+  activeMatchBackground: 'rgba(99, 102, 241, 0.45)',
+  activeMatchColorOverviewRuler: 'rgba(79, 70, 229, 0.9)',
+} as const
+
+function toSearchOptions(prefs?: SearchPrefs) {
+  return {
+    caseSensitive: prefs?.caseSensitive === true,
+    regex: prefs?.regex === true,
+    decorations: SEARCH_DECORATIONS,
+  }
+}
+
 onMounted(async () => {
   if (!host.value) return
 
@@ -253,6 +385,22 @@ onMounted(async () => {
   }
   t.open(host.value)
   host.value.style.background = t.options.theme?.background ?? '#FBFCFE'
+  // 0.1.3：WebGL 渲染器（失败自动回退 DOM）+ 终端专属快捷键 + 搜索计数 + 贴底追踪 + 右键菜单
+  tryLoadWebgl(t)
+  attachShortcutHandler(t)
+  if (search.onDidChangeResults) {
+    const off = search.onDidChangeResults((r) =>
+      emit('searchResults', { index: r.resultIndex, count: r.resultCount }),
+    )
+    unsubs.push(() => off.dispose())
+  }
+  t.onScroll(() => emit('atBottom', isAtBottom()))
+  const onContextMenu = (e: MouseEvent) => {
+    e.preventDefault()
+    emit('contextMenu', { x: e.clientX, y: e.clientY, ptyId: props.ptyId })
+  }
+  host.value.addEventListener('contextmenu', onContextMenu)
+  unsubs.push(() => host.value?.removeEventListener('contextmenu', onContextMenu))
 
   // 恢复历史缓冲后放行实时流（保序：初始缓冲 → 队列 → 直写）
   if (props.initialBuffer) {
@@ -263,6 +411,7 @@ onMounted(async () => {
   pending.length = 0
 
   doFit()
+  emit('atBottom', isAtBottom())
 
   t.onData((data) => {
     // 超过 IPC 上限的粘贴必须分片（否则 zod 拒绝后输入静默丢失 — review 根治）
@@ -283,11 +432,11 @@ onMounted(async () => {
       ptyId: props.ptyId,
     })
   })
-  // 选中即复制（settings.terminal.copyOnSelect）
+  // 选中即复制（settings.terminal.copyOnSelect）：走主进程剪贴板（0.1.3 与复制/粘贴同通道）
   t.onSelectionChange(() => {
     if (!settings.terminalCopyOnSelect) return
     const sel = t.getSelection()
-    if (sel) void navigator.clipboard.writeText(sel).catch(() => {})
+    if (sel) void window.wslAPI.clipboard.write(sel).catch(() => {})
   })
 
   // 布局稳定：rAF 合并 resize 连发 + 字体加载完成后复位再 fit（度量一致）
@@ -314,6 +463,12 @@ onBeforeUnmount(() => {
   search = null
   // 卸载路径统一 dispose（含 async 续体可能已创建的实例）
   try {
+    webgl?.dispose()
+  } catch {
+    /* ignore */
+  }
+  webgl = null
+  try {
     term?.dispose()
   } catch {
     /* ignore */
@@ -329,6 +484,7 @@ watch(
       // 字体/字号变化 → 度量改变，强制重新 fit（尺寸守卫会误跳过）
       invalidateFit()
       doFit()
+      emit('atBottom', isAtBottom())
     }
   },
   { deep: true },
@@ -362,20 +518,32 @@ function getSelection(): string {
 
 let lastSearch = ''
 
-function findNext(text: string) {
+/** 查找下一个（0.1.3：支持大小写 / 正则，全部命中高亮） */
+function findNext(text: string, prefs?: SearchPrefs): boolean {
   if (!search) return false
   const q = text || lastSearch
   if (!q) return false
   lastSearch = q
-  return search.findNext(q)
+  return search.findNext(q, toSearchOptions(prefs))
 }
 
-function findPrevious(text: string) {
+function findPrevious(text: string, prefs?: SearchPrefs): boolean {
   if (!search) return false
   const q = text || lastSearch
   if (!q) return false
   lastSearch = q
-  return search.findPrevious(q)
+  return search.findPrevious(q, toSearchOptions(prefs))
+}
+
+/** 清除搜索高亮 */
+function clearSearch(): void {
+  lastSearch = ''
+  try {
+    search?.clearDecorations()
+  } catch {
+    /* ignore */
+  }
+  emit('searchResults', { index: -1, count: 0 })
 }
 
 function zoom(delta: number) {
@@ -392,7 +560,13 @@ defineExpose({
   getSelection,
   findNext,
   findPrevious,
+  clearSearch,
   zoom,
+  copy: copySelection,
+  paste: pasteFromClipboard,
+  selectAll,
+  scrollToBottom,
+  isAtBottom,
 })
 </script>
 

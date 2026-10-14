@@ -64,6 +64,12 @@ function dynamicMasks(window: import('@playwright/test').Page) {
     window.locator('.proxy-card .hint'),
     // 设置页：版本号（随版本变化）
     window.getByText(/^WSLPilot v/),
+    // 0.1.3：WSL 环境卡（版本/内核/默认项随机器与 WSL 安装状态变化——整卡掩码，
+    // 容器无定高需求：卡片高度在「未安装 / 已安装」两态间差异由下方 mask 位置容忍，
+    // 极端差异时以截图重生成维护基线）
+    window.locator('.wsl-env'),
+    // 0.1.3：.wslconfig 全局配置面板（路径/内容/表单值随机器与用户配置变化——整卡掩码）
+    window.locator('.wslconfig-card'),
   ]
 }
 
@@ -130,9 +136,12 @@ test.describe('视觉回归 @visual', () => {
         maxDiffPixelRatio: 0.02,
       })
 
-      // 网络页（镜像引导卡 + 转发规则空态/表格布局）
+      // 网络页（镜像引导卡 + 转发规则空态/表格布局 + 0.1.3 .wslconfig 面板）
       await window.getByRole('button', { name: '网络', exact: true }).click()
-      await expect(window.getByText('网络模式', { exact: true })).toBeVisible({ timeout: 15_000 })
+      // '网络模式' 在 .wslconfig 面板字段中同名：按 heading 角色定位镜像卡标题
+      await expect(window.getByRole('heading', { name: '网络模式', exact: true })).toBeVisible({
+        timeout: 15_000,
+      })
       await expect(window).toHaveScreenshot('m7-network.png', {
         mask: dynamicMasks(window),
         stylePath: STABILITY_STYLE,

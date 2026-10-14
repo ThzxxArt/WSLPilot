@@ -4,6 +4,7 @@
  */
 import { formatCommand } from './commands'
 import { assertSafeSlugId } from './slug'
+import { getIniValue } from './wslconf'
 import type { NetworkMode, PortForwardRule, PortProxyEntry, ProxyConfig } from './types'
 
 /** netsh portproxy 隧道类型：TCP v4→v4 与 v6→v6（udp 规则只在配置里记录意图）；数据行 kind 随区段判定 */
@@ -144,26 +145,13 @@ export function normalizeNetworkMode(value: string): NetworkMode {
 
 /**
  * 解析 `%UserProfile%\.wslconfig` 的 `[wsl2] networkingMode`。
- * 注释（# / ;）与非 `[wsl2]` 段落忽略；未配置返回 `unknown`（WSL 默认 NAT）。
+ * 未配置返回 `unknown`（WSL 默认 NAT）。
+ * 解析委托 `wslconf` 的行级 INI 解析器（与 `.wslconfig` 编辑器同一实现 — 0.1.3 单一事实源）。
  */
 export function parseWslConfigMode(content: string): { mode: NetworkMode; raw: string } {
-  let inWsl2 = false
-  for (const rawLine of String(content ?? '').split(/\r?\n/)) {
-    const line = rawLine.replace(/[#;].*$/, '').trim()
-    if (!line) continue
-    const sec = /^\[([^\]]+)\]$/.exec(line)
-    if (sec) {
-      inWsl2 = sec[1]!.trim().toLowerCase() === 'wsl2'
-      continue
-    }
-    if (!inWsl2) continue
-    const kv = /^([A-Za-z0-9_]+)\s*=\s*(.+)$/.exec(line)
-    if (kv && kv[1]!.toLowerCase() === 'networkingmode') {
-      const raw = kv[2]!.trim().replace(/^["']|["']$/g, '')
-      return { mode: normalizeNetworkMode(raw), raw }
-    }
-  }
-  return { mode: 'unknown', raw: '' }
+  const raw = getIniValue(String(content ?? ''), 'wsl2', 'networkingMode')?.trim() ?? ''
+  if (!raw) return { mode: 'unknown', raw: '' }
+  return { mode: normalizeNetworkMode(raw.replace(/^["']|["']$/g, '')), raw }
 }
 
 /** 镜像模式配置片段（引导卡展示 + 一键复制） */

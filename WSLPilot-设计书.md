@@ -398,6 +398,7 @@ WSLPilot/
 │     │  │  │  ├─ registry-service.ts
 │     │  │  │  ├─ config-service.ts
 │     │  │  │  ├─ wslconf-service.ts
+│     │  │  │  ├─ wslconfig-service.ts   # 全局 %UserProfile%\.wslconfig 读写（0.1.3）
 │     │  │  │  ├─ pty-manager.ts
 │     │  │  │  ├─ task-runner.ts
 │     │  │  │  ├─ spawn-task.ts
@@ -445,6 +446,8 @@ WSLPilot/
 │     │     │  ├─ terminal/
 │     │     │  │  ├─ TerminalTabs.vue
 │     │     │  │  ├─ XtermPane.vue
+│     │     │  │  ├─ SplitPane.vue        # 分屏容器（0.1.3）
+│     │     │  │  ├─ panes.ts             # 分屏树纯逻辑（0.1.3）
 │     │     │  │  ├─ TerminalToolbar.vue
 │     │     │  │  ├─ input-chunk.ts
 │     │     │  │  └─ theme.ts
@@ -748,30 +751,32 @@ WSLPilot/
 {
   "$schemaVersion": 1,
   "window": { "width": 1180, "height": 760, "x": 200, "y": 120, "maximized": false },
-  "lastSelectedDistro": "Ubuntu-22.04",
   "sidebarCollapsed": false,
-  "activeView": "dashboard",
-  "tableSort": { "key": "name", "dir": "asc" },
   "recentCommands": ["install", "export Ubuntu-22.04", "open terminal"],
+  // 终端分屏布局（0.1.3）：窗口重载后恢复标签与分屏结构；叶子为 pty 会话 id
+  "terminalLayout": [
+    {
+      "id": "t1",
+      "title": "Ubuntu",
+      "layout": {
+        "kind": "split",
+        "dir": "row",
+        "ratio": 0.5,
+        "a": { "kind": "leaf", "ptyId": "…" },
+        "b": { "kind": "leaf", "ptyId": "…" },
+      },
+    },
+  ],
 }
 ```
+
+> 旧版幽灵字段（`lastSelectedDistro` / `activeView` / `tableSort`）已移除，旧文件中出现会被剥离。
 
 ### 6.8 state.jsonc（轻量缓存）
 
 ```jsonc
 {
   "$schemaVersion": 1,
-  "lastScanAt": "2026-10-08T09:31:00Z",
-  "lastMetrics": {
-    "Ubuntu-22.04": {
-      "memUsedKB": 812345,
-      "memTotalKB": 4194304,
-      "diskUsed": "12.3G",
-      "diskTotal": "251G",
-      "cpuPercent": 6.4,
-      "sampledAt": "2026-10-08T09:30:55Z",
-    },
-  },
   "lastTaskResult": {
     "type": "export",
     "distro": "Debian",
@@ -780,6 +785,8 @@ WSLPilot/
   },
 }
 ```
+
+> `lastScanAt` / `lastMetrics` 为无消费方幽灵字段，0.1.3 已移除（旧文件中出现会被剥离）。
 
 ### 6.9 配置加载与写回流程
 
@@ -1525,9 +1532,10 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 
 ### 12.2 首次启动 · 引导（Onboarding）（规划中）
 
-> **现状**：沉浸式引导页尚未实现。WSL 未安装 / 找不到 `wsl.exe` 时走错误提示 + 建议操作
-> （管理员终端 `wsl --install`，见 `shared/errors` 的 `ERROR_CATALOG`）；无发行版时驾驶舱展示
-> 空态 CTA「安装发行版」进入安装向导（`InstallDistroModal`）。以下为规划形态：
+> **现状**：沉浸式引导页尚未实现。0.1.3 起「设置 → WSL」环境卡与驾驶舱错误横幅提供
+> 环境体检与**一键安装 WSL**（`wsl --install`，提权助手执行，识别重启提示）；WSL 未安装 /
+> 找不到 `wsl.exe` 时错误提示保留建议操作（见 `shared/errors` 的 `ERROR_CATALOG`）；
+> 无发行版时驾驶舱展示空态 CTA「安装发行版」进入安装向导（`InstallDistroModal`）。以下为其余形态规划：
 
 冷启动若检测到 WSL 未安装或无发行版，展示**沉浸式引导页**：
 
@@ -1587,8 +1595,13 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ### 12.5 终端工作区（Terminal）
 
 - 顶部标签栏：`+ 新建`，每标签显示发行版图标与名称，可拖拽排序、双击重命名、中键关闭。
-- 右侧工具栏：分屏、清屏、搜索、字号、复制、导出会话。
-- 终端区域使用与浅色应用协调的**明亮终端配色**，也允许单独选择终端专属配色。
+- **分屏（0.1.3 已实现）**：标签内左右（`Ctrl+Shift+5`）/上下（`Ctrl+Shift+6`）分裂，最多 4 面板；
+  拖拽分隔条调整比例；关闭面板自动折叠；布局持久化到 `ui-state.jsonc`，窗口重载后恢复。
+- 新建面板可指定发行版 / Shell / 启动目录（默认取设置默认 Shell 与发行版 `startupCwd`）。
+- 右侧工具栏：分屏、关闭面板、清屏、搜索（全部命中高亮 + 大小写/正则 + 计数）、字号、复制、粘贴、导出会话。
+- 终端区域使用与浅色应用协调的**明亮终端配色**，也允许单独选择终端专属配色；WebGL 渲染器不可用时自动回退。
+- 终端内快捷键：`Ctrl+Shift+C` 复制选中、`Ctrl+Shift+V` 粘贴（主进程剪贴板）、`Ctrl+Shift+F` 搜索；
+  面板右键菜单提供复制/粘贴/全选/查找/清屏/滚动到底部/分屏/关闭面板。
 - 底部状态条：光标位置、编码、会话时长。
 - 标签切换使用横向滑动过渡，关闭标签有缩放淡出。
 
@@ -1605,7 +1618,8 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ```
 设置
 ├─ 外观      强调色、语言、关闭行为、启动行为、减弱动效
-├─ WSL       默认 Shell、wsl.conf 变更后自动终止发行版（安装源：规划中）
+├─ WSL       环境体检与本体生命周期（版本/更新/回滚/默认版本，0.1.3）、默认 Shell、
+│            wsl.conf 变更后自动终止发行版、.wslconfig 编辑入口
 ├─ 终端      字体、字号、光标、回滚缓冲、行高、选中即复制、配色
 ├─ 备份      默认目录、格式、保留数量、破坏性操作前自动备份
 ├─ 高级      命令可见、破坏性确认、日志级别、硬件加速、自动更新
@@ -1867,7 +1881,10 @@ export const migrations: Record<ConfigKey, Array<(old: any) => any>> = {
 | 列出（详细） | `wsl --list --verbose`                                       |
 | 列出可安装   | `wsl --list --online`                                        |
 | 安装         | `wsl --install [-d <name>]`                                  |
+| **更新 WSL** | `wsl --update [--pre-release]`                               |
+| **回滚更新** | `wsl --update --rollback`                                    |
 | 设为默认     | `wsl --set-default <name>`                                   |
+| **默认版本** | `wsl --set-default-version <1\|2>`                           |
 | 设置版本     | `wsl --set-version <name> <1\|2>`                            |
 | 终止         | `wsl --terminate <name>`                                     |
 | 全局关机     | `wsl --shutdown`                                             |
@@ -1876,6 +1893,7 @@ export const migrations: Record<ConfigKey, Array<(old: any) => any>> = {
 | 导入         | `wsl --import <name> <installPath> <tar> [--version <1\|2>]` |
 | 就地导入     | `wsl --import-in-place <name> <vhdx>`                        |
 | 迁移磁盘     | `wsl --manage <name> --move <path>`                          |
+| **稀疏磁盘** | `wsl --manage <name> --set-sparse <true\|false>`             |
 | 状态         | `wsl --status` / `wsl --version`                             |
 | 执行命令     | `wsl -d <name> -u <user> --cd <dir> -e <program> <args...>`  |
 

@@ -2,6 +2,7 @@ import {
   CH,
   DEFAULT_BACKUP_KEEP,
   type BackupFileInfo,
+  type IoCloneRequest,
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
@@ -61,6 +62,21 @@ export function registerIoHandlers(add: AddFn, deps: { io: IoService; tasks: Tas
       message: `迁移 ${o.name}`,
       lockKey: o.name.toLowerCase(),
       run: (ctl) => io.runMove(o, ctl),
+    })
+  })
+
+  /**
+   * 克隆发行版（0.1.3）：导出临时归档 → 以新名导入 → 无论成败清理临时文件。
+   * 单任务内完成（同一排他锁），失败时导入侧自动回滚不完整注册。
+   */
+  add(CH.ioClone, (_c, arg: never): TaskHandle => {
+    const o = arg as IoCloneRequest
+    return tasks.start({
+      type: 'clone',
+      distro: o.name,
+      message: `克隆 ${o.name} → ${o.newName}`,
+      lockKey: o.name.toLowerCase(),
+      run: (ctl) => io.runClone(o, ctl),
     })
   })
 

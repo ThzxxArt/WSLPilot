@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, h, onUnmounted, ref, watch } from 'vue'
 import {
   NButton,
+  NCheckbox,
   NInput,
   NModal,
   NSelect,
@@ -12,7 +13,13 @@ import {
   useDialog,
   useMessage,
 } from 'naive-ui'
-import { formatKbPair, type DistroMeta, type Metrics, type RegistryDetail } from '@wslpilot/shared'
+import {
+  formatBytes,
+  formatKbPair,
+  type DistroMeta,
+  type Metrics,
+  type RegistryDetail,
+} from '@wslpilot/shared'
 import { useDistrosStore } from '../../stores/distros'
 import { useSettingsStore } from '../../stores/settings'
 import { useTasksStore } from '../../stores/tasks'
@@ -24,6 +31,7 @@ import { taskStatusLabel, taskTypeLabel } from '../../composables/useTaskProgres
 import WslConfPanel from '../config/WslConfPanel.vue'
 import ActionsPanel from '../actions/ActionsPanel.vue'
 import FileBrowserPanel from '../fs/FileBrowserPanel.vue'
+import CloneDistroModal from './CloneDistroModal.vue'
 
 const props = defineProps<{ show: boolean; distroName: string }>()
 const emit = defineEmits<{
@@ -54,6 +62,10 @@ const filePanel = ref<InstanceType<typeof FileBrowserPanel> | null>(null)
 /** 详情操作在途标记（review 0.1.2 根治：转换/注销双击重复发起） */
 const converting = ref(false)
 const unregistering = ref(false)
+/** 稀疏磁盘操作在途（0.1.3） */
+const sparseBusy = ref(false)
+/** 克隆弹窗（0.1.3） */
+const cloneOpen = ref(false)
 
 const distro = computed(() => distros.byName(props.distroName))
 /** 运行状态单一事实源：按钮组严格状态驱动（review 停/启按钮错位根治） */
@@ -222,6 +234,14 @@ const rows = computed(() => {
       copy: false,
     },
     {
+      // 宿主侧虚拟磁盘文件大小（0.1.3）：与运行中 df 的「已用」对照可见膨胀程度
+      label: '磁盘（宿主）',
+      value: distro.value?.hostDiskBytes
+        ? `${formatBytes(distro.value.hostDiskBytes)}（ext4.vhdx）`
+        : '—',
+      copy: false,
+    },
+    {
       label: 'Flags',
       value: detail.value?.flags != null ? `0x${detail.value.flags.toString(16)}` : '—',
       copy: false,
@@ -312,24 +332,112 @@ async function onConvert() {
   }
 }
 
+/** 任务终态观察（0.1.3 任务化操作共用）：返回停止函数 */
+let stopTaskWatch: (() => void) | null = null
+function watchTask(
+  taskId: string,
+  handlers: {
+    onSuccess: (message: string) => void
+    onFailed: (error: string) => void
+    onCanceled?: () => void
+  },
+) {
+  stopTaskWatch?.()
+  stopTaskWatch = watch(
+    () => tasks.byId(taskId)?.status,
+    (status, prev) => {
+      if (!status || status === 'running' || status === prev) return
+      const entry = tasks.byId(taskId)
+      if (status === 'success') handlers.onSuccess(entry?.message ?? '任务完成')
+      else if (status === 'failed') handlers.onFailed(entry?.error ?? '任务失败')
+      else handlers.onCanceled?.()
+      stopTaskWatch?.()
+      stopTaskWatch = null
+    },
+  )
+}
+onUnmounted(() => stopTaskWatch?.())
+
+/** 启用稀疏磁盘（0.1.3）：wsl --manage <name> --set-sparse true */
+async function onSparse() {
+  if (sparseBusy.value) return
+  sparseBusy.value = true
+  try {
+    const entry = await tasks.startSparse(props.distroName, true)
+    if (!entry) {
+      message.error(errorLine(tasks.lastError, '启动稀疏磁盘操作失败'))
+      return
+    }
+    watchTask(entry.taskId, {
+      onSuccess: (text) => {
+        message.success(text)
+        sparseBusy.value = false
+      },
+      onFailed: (err) => {
+        message.error(err)
+        sparseBusy.value = false
+      },
+      onCanceled: () => {
+        sparseBusy.value = false
+      },
+    })
+  } catch (e) {
+    sparseBusy.value = false
+    message.error(errorLine(e, '稀疏磁盘操作失败'))
+  }
+}
+
 async function onUnregister() {
   if (!distro.value || unregistering.value) return
   unregistering.value = true
   try {
     // 先过脏守卫，再走破坏性确认；两步都通过才执行并关窗（review 0.1.2 根治）
     if (!(await requestClose())) return
-    // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）
+    // 破坏性操作：confirmDestructive 开启时必须显式确认（§13.4）；
+    // 0.1.3：确认框内可选「注销前自动备份」（默认跟随 settings.backup.autoBackupBeforeDestructive）
+    const backupFirst = ref(settings.backupAutoBeforeDestructive)
     if (settings.confirmDestructive) {
-      const ok = await confirmDangerous({
-        title: '注销发行版',
-        content: `注销（删除）发行版 ${props.distroName}？\n\n该发行版内的全部数据将被永久删除且不可恢复。`,
+      const ok = await new Promise<boolean>((resolve) => {
+        dialog.warning({
+          title: '注销发行版',
+          content: () =>
+            h('div', [
+              h('p', { style: 'margin: 0 0 10px' }, `注销（删除）发行版 ${props.distroName}？`),
+              h('p', { style: 'margin: 0 0 10px' }, '该发行版内的全部数据将被永久删除且不可恢复。'),
+              h('label', { style: 'display:flex;align-items:center;gap:8px;cursor:pointer' }, [
+                h(NCheckbox, {
+                  checked: backupFirst.value,
+                  'onUpdate:checked': (v: boolean) => (backupFirst.value = v),
+                }),
+                h('span', '注销前先自动备份（导出到备份目录，可在设置中关闭默认值）'),
+              ]),
+            ]),
+          positiveText: '注销',
+          negativeText: '取消',
+          onPositiveClick: () => resolve(true),
+          onNegativeClick: () => resolve(false),
+          onClose: () => resolve(false),
+        })
       })
       if (!ok) return
     }
-    await window.wslAPI.distros.unregister(props.distroName)
-    message.success(`已注销 ${props.distroName}`)
-    await distros.refresh()
-    emit('update:show', false)
+    const entry = await tasks.startUnregister(props.distroName, {
+      backupFirst: backupFirst.value,
+    })
+    if (!entry) {
+      message.error(errorLine(tasks.lastError, '启动注销失败'))
+      return
+    }
+    message.info(`已开始注销 ${props.distroName}，进度见状态栏与任务抽屉`)
+    watchTask(entry.taskId, {
+      onSuccess: (text) => {
+        message.success(text)
+        void distros.refresh()
+        emit('update:show', false)
+      },
+      onFailed: (err) => message.error(err),
+      onCanceled: () => message.info('注销已取消'),
+    })
   } catch (e) {
     message.error(errorLine(e, '注销失败'))
   } finally {
@@ -435,6 +543,28 @@ async function saveMeta() {
             <span class="mini-label">CPU</span>
             <span class="mini-value">{{ metrics.cpuPercent }}%</span>
           </div>
+        </div>
+
+        <!-- 磁盘管理（0.1.3）：宿主文件 vs 发行版内已用，稀疏磁盘一键启用 -->
+        <div v-if="distro" class="disk-line">
+          <span class="disk-text">
+            宿主磁盘文件：{{
+              distro.hostDiskBytes ? formatBytes(distro.hostDiskBytes) : '（不可用）'
+            }}
+          </span>
+          <n-button
+            size="tiny"
+            secondary
+            :loading="sparseBusy"
+            :disabled="sparseBusy"
+            @click="onSparse"
+          >
+            启用稀疏磁盘
+          </n-button>
+          <span class="hint"
+            >WSL 2.0+ · 将未使用空间归还 Windows（不删数据）·
+            与运行中「磁盘」采样对照可见膨胀程度</span
+          >
         </div>
 
         <!-- 最近任务（§12.4） -->
@@ -577,6 +707,10 @@ async function saveMeta() {
             设为默认
           </n-button>
           <n-button secondary :disabled="!distro" @click="startEdit"> 编辑元数据 </n-button>
+          <!-- 克隆发行版（0.1.3）：导出→导入组合流程，失败自动回滚 -->
+          <n-button secondary :disabled="!distro || cloneOpen" @click="cloneOpen = true">
+            克隆发行版
+          </n-button>
           <!-- wsl --set-version 要求已停止：运行中禁用并在点击路径拦截；converting 防双击 -->
           <n-button
             secondary
@@ -627,6 +761,15 @@ async function saveMeta() {
         />
       </n-tab-pane>
     </n-tabs>
+
+    <!-- 克隆向导（0.1.3）：独立弹层，克隆启动后关闭详情弹窗交由任务体系跟踪 -->
+    <CloneDistroModal
+      v-model:show="cloneOpen"
+      :source="distroName"
+      :distros="distros.items"
+      :default-dir="settings.backupDefaultDir"
+      @started="emit('update:show', false)"
+    />
   </n-modal>
 </template>
 
@@ -743,6 +886,23 @@ async function saveMeta() {
 .mini-label {
   font-size: 11px;
   color: var(--color-text-tertiary);
+}
+
+.disk-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+.disk-text {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .mini-value {

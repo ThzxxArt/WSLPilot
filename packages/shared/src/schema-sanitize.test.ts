@@ -1,12 +1,25 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
 import { sanitizeWithSchema } from '../src/schema-sanitize'
-import {
-  appSettingsSchema,
-  defaultConfig,
-  networkFileSchema,
-  stateFileSchema,
-} from '../src/config-schema'
+import { appSettingsSchema, defaultConfig, networkFileSchema } from '../src/config-schema'
+
+/** record 清洗用例的独立 schema（state.jsonc 的 lastMetrics 幽灵字段已移除 — 0.1.3 根治） */
+const recordHolderSchema = z.object({
+  $schemaVersion: z.number().int().default(1),
+  metrics: z
+    .record(
+      z.object({
+        memUsedKB: z.number(),
+        memTotalKB: z.number(),
+        diskUsedKB: z.number().default(0),
+        diskTotalKB: z.number().default(0),
+        cpuPercent: z.number(),
+        sampledAt: z.string(),
+      }),
+    )
+    .default({}),
+})
+const recordHolderDefaults = { $schemaVersion: 1, metrics: {} }
 
 describe('sanitizeWithSchema', () => {
   it('returns valid data unchanged', () => {
@@ -58,8 +71,7 @@ describe('sanitizeWithSchema', () => {
   it('record 字段逐键清洗：合法键保留、非法键丢弃（review C2 回归）', () => {
     const data = {
       $schemaVersion: 1,
-      lastScanAt: 'T',
-      lastMetrics: {
+      metrics: {
         good: {
           memUsedKB: 1,
           memTotalKB: 2,
@@ -71,25 +83,24 @@ describe('sanitizeWithSchema', () => {
         bad: { memUsedKB: 'x' },
       },
     }
-    const out = sanitizeWithSchema(stateFileSchema, data, defaultConfig('state')) as any
-    expect(Object.keys(out.lastMetrics)).toEqual(['good'])
-    expect(out.lastMetrics.good.memUsedKB).toBe(1)
-    expect(out.lastScanAt).toBe('T')
+    const out = sanitizeWithSchema(recordHolderSchema, data, recordHolderDefaults as any) as any
+    expect(Object.keys(out.metrics)).toEqual(['good'])
+    expect(out.metrics.good.memUsedKB).toBe(1)
   })
 
   it('record 中 null/坏值只丢该键，不清空整表（review C2 回归）', () => {
     const out = sanitizeWithSchema(
-      stateFileSchema,
+      recordHolderSchema,
       {
-        lastMetrics: {
+        metrics: {
           a: { memUsedKB: 1, memTotalKB: 2, cpuPercent: 1, sampledAt: 'x' },
           b: null,
           c: { memUsedKB: 3, memTotalKB: 4, cpuPercent: 2, sampledAt: 'y' },
         },
       },
-      defaultConfig('state'),
+      recordHolderDefaults as any,
     ) as any
-    expect(Object.keys(out.lastMetrics).sort()).toEqual(['a', 'c'])
+    expect(Object.keys(out.metrics).sort()).toEqual(['a', 'c'])
   })
 
   it('network 重复 id（语义级 refine 失败）不得整对象回退清空用户配置 — review 0.1.2 审计修复', () => {

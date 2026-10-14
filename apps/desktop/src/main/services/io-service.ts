@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import {
   assertSafeDistroName,
@@ -20,6 +21,7 @@ import {
   type BackupFormat,
   type ElevationOpResult,
   type ElevationRequest,
+  type IoCloneRequest,
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
@@ -64,6 +66,11 @@ export interface IoService {
   runExport(req: IoExportRequest, ctl: TaskControl): Promise<BackupFileInfo>
   runImport(req: IoImportRequest, ctl: TaskControl): Promise<void>
   runMove(req: IoMoveRequest, ctl: TaskControl): Promise<void>
+  /**
+   * 克隆发行版（0.1.3）：导出临时归档 → 以新名导入 → 无论成败清理临时文件。
+   * 单任务内完成；导入侧失败自动回滚不完整注册（归归档导入回滚逻辑）。
+   */
+  runClone(req: IoCloneRequest, ctl: TaskControl): Promise<void>
   listBackups(dir?: string): Promise<BackupFileInfo[]>
   /** 按保留份数清理全部旧备份（清理按钮 — 零半成品）；removed = 实际删除成功数 */
   cleanupBackups(dir: string | undefined, keep: number): Promise<{ removed: number }>
@@ -639,6 +646,64 @@ export function createIoService(deps: IoServiceDeps): IoService {
     ctl.log('提示：如需回退，可再次使用「迁移磁盘」把发行版移回原位置')
   }
 
+  /**
+   * 克隆发行版（0.1.3）：导出为临时 tar 归档 → 以新名导入到目标位置。
+   * - 临时归档放系统临时目录（独立 mkdtemp，绝不进备份目录、不参与轮转）；
+   * - 无论成败，finally 清理临时目录（不把残档留给用户）；
+   * - 导入失败由 runImport 的回滚逻辑注销不完整注册并清理自建目录。
+   */
+  async function runClone(req: IoCloneRequest, ctl: TaskControl): Promise<void> {
+    const name = assertSafeDistroName(req.name)
+    const newName = assertSafeDistroName(req.newName)
+    ctl.throwIfCanceled()
+    if (newName.toLowerCase() === name.toLowerCase()) {
+      throw createAppError('TASK_FAILED', {
+        message: '克隆的新名称不能与源发行版相同',
+        suggestion: '请换一个名称（名称不区分大小写）',
+      })
+    }
+
+    const source = await findDistro(name)
+    if (!source) {
+      throw createAppError('DISTRO_NOT_FOUND', { message: `找不到发行版 ${name}，无法克隆` })
+    }
+    const existing = await findDistro(newName)
+    if (existing) {
+      throw createAppError('TASK_FAILED', {
+        message: `已存在同名发行版 ${newName}`,
+        suggestion: '请换一个名称，或先注销同名发行版',
+      })
+    }
+
+    const installPath = assertSafeIoPath(req.installPath, '安装位置')
+    const tempDir = await fs.mkdtemp(join(tmpdir(), 'wslpilot-clone-'))
+    const tempArchive = join(tempDir, 'clone.tar')
+    try {
+      ctl.log(`克隆 ${name} → ${newName}：先导出临时归档…`)
+      await runExport({ name, path: tempArchive, format: 'tar' }, ctl)
+      ctl.throwIfCanceled()
+      ctl.log('导出完成，开始导入为新发行版…')
+      await runImport(
+        {
+          name: newName,
+          installPath,
+          archivePath: tempArchive,
+          format: 'tar',
+          version: source.version === 1 ? 1 : 2,
+          inPlace: false,
+        },
+        ctl,
+      )
+      ctl.report(100, `克隆完成：${name} → ${newName}`)
+      ctl.log(`克隆完成：${newName}（WSL${source.version}）`)
+    } finally {
+      // 临时归档不保留：成功与否都清理（失败时用户已有明确错误出口）
+      await fs.rm(tempDir, { recursive: true, force: true }).catch((e: unknown) => {
+        logger.warn('clone temp cleanup failed', { dir: tempDir, error: String(e) })
+      })
+    }
+  }
+
   function resolveBackupDir(): string {
     return resolve(expandEnv(backupSettings().defaultDir))
   }
@@ -740,11 +805,13 @@ export function createIoService(deps: IoServiceDeps): IoService {
     return { removed }
   }
 
-  // 自调用（runExport → rotateBackups）经 api 转发：测试可 spy 拦截轮转行为
+  // 自调用（runExport → rotateBackups）经 api 转发：测试可 spy 拦截轮转行为；
+  // runClone 在同一任务内直接复用 runExport/runImport（组合流程，见 runClone 注释）
   const api: IoService = {
     runExport,
     runImport,
     runMove,
+    runClone,
     listBackups,
     cleanupBackups,
     resolveBackupDir,

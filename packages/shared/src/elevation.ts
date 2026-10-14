@@ -6,7 +6,14 @@
  * - `buildElevatedInvocation` 是 op → program/argv 的**唯一事实源**（参数数组，无 shell 拼接）
  * - 提权脚本二次校验 op 与 program 的对应关系（纵深防御）
  */
-import { buildMoveArgs, formatCommand } from './commands'
+import {
+  buildMoveArgs,
+  buildSetDefaultVersionArgs,
+  buildSetSparseArgs,
+  buildUpdateArgs,
+  buildUpdateRollbackArgs,
+  formatCommand,
+} from './commands'
 import { assertSafeDistroName, createAppError } from './errors'
 import { assertSafeBusId } from './usbipd'
 import { isValidAddress, buildPortProxyAddArgs, buildPortProxyDeleteArgs } from './network'
@@ -23,6 +30,11 @@ export const ELEVATION_OPS = [
   'wsl.move',
   'wsl.install',
   'wsl.setVersion',
+  // 0.1.3 WSL 本体生命周期
+  'wsl.update',
+  'wsl.updateRollback',
+  'wsl.setDefaultVersion',
+  'wsl.setSparse',
 ] as const
 
 export type ElevationOp = (typeof ELEVATION_OPS)[number]
@@ -36,6 +48,10 @@ export const ELEVATION_PROGRAMS: Record<ElevationOp, string> = {
   'wsl.move': 'wsl.exe',
   'wsl.install': 'wsl.exe',
   'wsl.setVersion': 'wsl.exe',
+  'wsl.update': 'wsl.exe',
+  'wsl.updateRollback': 'wsl.exe',
+  'wsl.setDefaultVersion': 'wsl.exe',
+  'wsl.setSparse': 'wsl.exe',
 }
 
 /** 提权操作的展示名（任务日志 / 确认框） */
@@ -47,6 +63,10 @@ export const ELEVATION_OP_LABEL: Record<ElevationOp, string> = {
   'wsl.move': '迁移发行版磁盘',
   'wsl.install': '安装 WSL 发行版',
   'wsl.setVersion': '转换 WSL 版本',
+  'wsl.update': '更新 WSL',
+  'wsl.updateRollback': '回滚 WSL 更新',
+  'wsl.setDefaultVersion': '设置默认 WSL 版本',
+  'wsl.setSparse': '设置稀疏磁盘',
 }
 
 /** 结构化参数（各 op 的形状由 schema 校验） */
@@ -135,6 +155,23 @@ const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
       version: z.union([z.literal(1), z.literal(2)]),
     })
     .strict(),
+  'wsl.update': z
+    .object({
+      preRelease: z.boolean().optional(),
+    })
+    .strict(),
+  'wsl.updateRollback': z.object({}).strict(),
+  'wsl.setDefaultVersion': z
+    .object({
+      version: z.union([z.literal(1), z.literal(2)]),
+    })
+    .strict(),
+  'wsl.setSparse': z
+    .object({
+      name: distroField,
+      sparse: z.boolean(),
+    })
+    .strict(),
 }
 
 export function isElevationOp(value: unknown): value is ElevationOp {
@@ -212,6 +249,19 @@ export function buildElevatedInvocation(req: ElevationRequest): ElevatedInvocati
       break
     case 'wsl.setVersion':
       args = ['--set-version', validated.params.name as string, String(validated.params.version)]
+      break
+    case 'wsl.update':
+      // 与 WslService 实跑同一 build*Args（唯一 argv 事实源）
+      args = buildUpdateArgs(validated.params.preRelease === true)
+      break
+    case 'wsl.updateRollback':
+      args = buildUpdateRollbackArgs()
+      break
+    case 'wsl.setDefaultVersion':
+      args = buildSetDefaultVersionArgs(validated.params.version === 1 ? 1 : 2)
+      break
+    case 'wsl.setSparse':
+      args = buildSetSparseArgs(validated.params.name as string, validated.params.sparse === true)
       break
     default: {
       const never: never = validated.op

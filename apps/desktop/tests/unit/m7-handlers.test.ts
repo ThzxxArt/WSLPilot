@@ -16,6 +16,10 @@ vi.mock('electron', () => ({
   },
   shell: { openPath: vi.fn(async () => ''), openExternal: vi.fn() },
   dialog: dialogMocks,
+  clipboard: {
+    readText: vi.fn(() => 'clipboard-content'),
+    writeText: vi.fn(),
+  },
   ipcMain: { handle: vi.fn() },
   BrowserWindow: vi.fn(),
 }))
@@ -24,6 +28,7 @@ import { registerAppHandlers } from '../../src/main/ipc/handlers/app'
 import { registerUpdateHandlers } from '../../src/main/ipc/handlers/update'
 import { CH, type SignatureStatus } from '@wslpilot/shared'
 import { SMARTSCREEN_NOTE } from '../../src/main/services/signature-service'
+import { clipboard } from 'electron'
 
 function logger() {
   return {
@@ -51,6 +56,29 @@ function collect(
 ): Map<string, (ctx: unknown, arg: unknown) => unknown> {
   const handlers = new Map<string, (ctx: unknown, arg: unknown) => unknown>()
   register((channel: string, handler: any) => handlers.set(channel, handler), ctx)
+  return handlers
+}
+
+/** app 域注册（0.1.3：registerAppHandlers 需要 wsl/tasks 依赖） */
+function collectApp(ctx: any): Map<string, (ctx: unknown, arg: unknown) => unknown> {
+  const handlers = new Map<string, (ctx: unknown, arg: unknown) => unknown>()
+  registerAppHandlers((channel: string, handler: any) => handlers.set(channel, handler), ctx, {
+    wsl: {
+      getVersion: vi.fn(async () => ({ raw: '', wslVersion: '', kernelVersion: '' })),
+      getEnv: vi.fn(async () => ({
+        installed: true,
+        wslVersion: '2.6.1',
+        kernelVersion: '6.6.1',
+        defaultDistro: 'Ubuntu',
+        defaultVersion: 2,
+        statusRaw: '',
+      })),
+      setDefaultVersion: vi.fn(async () => {}),
+      update: vi.fn(async () => {}),
+      updateRollback: vi.fn(async () => {}),
+    },
+    tasks: { start: vi.fn(() => ({ taskId: 't1' })) },
+  } as any)
   return handlers
 }
 
@@ -101,7 +129,7 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('诊断通道名与 API 动词一致（防 app:exportDiagnostics 式命名漂移回归）', () => {
-    const handlers = collect(registerAppHandlers, makeCtx())
+    const handlers = collectApp(makeCtx())
     // 通道尾段动词必须与 preload diagnostics.* API 方法名一致
     for (const [channel, apiVerb] of [
       [CH.diagnosticsExportPackage, 'exportPackage'],
@@ -117,7 +145,7 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
 
   it('diagnostics:openLogsDir 委托诊断服务；缺失时抛 IO_ERROR', async () => {
     const openLogsDir = vi.fn(async () => undefined)
-    const handlers = collect(registerAppHandlers, makeCtx())
+    const handlers = collectApp(makeCtx())
     await handlers.get(CH.diagnosticsOpenLogsDir)!(
       makeCtx({ diagnostics: { openLogsDir } }),
       undefined,
@@ -142,7 +170,7 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
       exportTo,
       defaultFileName: () => 'WSLPilot-diagnostics-test.zip',
     }
-    const handlers = collect(registerAppHandlers, makeCtx())
+    const handlers = collectApp(makeCtx())
 
     // 取消
     dialogMocks.showSaveDialog.mockResolvedValueOnce({ canceled: true, filePath: '' })
@@ -168,7 +196,7 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
 
   it('app:signatureStatus 委托签名服务；缺失时兜底 SmartScreen 说明', async () => {
     const status = vi.fn(async () => ({ checked: true, signed: true, subject: 'CN=X' }))
-    const handlers = collect(registerAppHandlers, makeCtx())
+    const handlers = collectApp(makeCtx())
     expect(
       await handlers.get(CH.appSignatureStatus)!(makeCtx({ signature: { status } }), undefined),
     ).toMatchObject({ signed: true })
@@ -186,10 +214,83 @@ describe('app 域 M7 通道（诊断 / 签名）', () => {
       throw new Error('powershell 崩了')
     })
     const ctx = makeCtx({ signature: { status } })
-    const handlers = collect(registerAppHandlers, ctx)
+    const handlers = collectApp(ctx)
     const out = (await handlers.get(CH.appSignatureStatus)!(ctx, undefined)) as SignatureStatus
     expect(out).toMatchObject({ checked: false, signed: false })
     expect(out.detail).toContain('powershell 崩了')
     expect(out.smartscreenNote).toBe(SMARTSCREEN_NOTE)
+  })
+})
+
+describe('app 域 0.1.3（WSL 本体生命周期 / 剪贴板）', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function collectWith(wsl: Record<string, unknown>, tasks: Record<string, unknown>) {
+    const handlers = new Map<string, (ctx: unknown, arg: unknown) => unknown>()
+    registerAppHandlers(
+      (channel: string, handler: any) => handlers.set(channel, handler),
+      makeCtx(),
+      { wsl, tasks } as never,
+    )
+    return handlers
+  }
+
+  it('app:wslEnv 透传环境体检（非抛出语义）', async () => {
+    const getEnv = vi.fn(async () => ({
+      installed: false,
+      wslVersion: '',
+      kernelVersion: '',
+      defaultDistro: '',
+      defaultVersion: null,
+      statusRaw: 'wsl.exe 缺失',
+    }))
+    const handlers = collectWith({ getEnv }, { start: vi.fn() })
+    const env = await handlers.get(CH.appWslEnv)!(makeCtx(), undefined)
+    expect(env).toMatchObject({ installed: false, statusRaw: 'wsl.exe 缺失' })
+    expect(getEnv).toHaveBeenCalled()
+  })
+
+  it('app:wslUpdate / rollback：任务派发（全局锁串行 + preRelease 透传）', async () => {
+    const update = vi.fn(async () => {})
+    const updateRollback = vi.fn(async () => {})
+    const starts: Array<Record<string, unknown>> = []
+    const tasks = {
+      start: vi.fn((opts: Record<string, unknown>) => {
+        starts.push(opts)
+        return { taskId: `t${starts.length}` }
+      }),
+    }
+    const handlers = collectWith({ update, updateRollback }, tasks)
+
+    const handle = handlers.get(CH.appWslUpdate)!(makeCtx(), { preRelease: true }) as {
+      taskId: string
+    }
+    expect(handle.taskId).toBe('t1')
+    expect(starts[0]).toMatchObject({ type: 'update', lockKey: 'wsl:global' })
+    const ctl = { taskId: 't1', report: vi.fn(), log: vi.fn() }
+    await (starts[0]!.run as (c: unknown) => Promise<void>)(ctl)
+    expect(update).toHaveBeenCalledWith(ctl, { preRelease: true })
+
+    handlers.get(CH.appWslUpdateRollback)!(makeCtx(), undefined)
+    expect(starts[1]).toMatchObject({ type: 'update', lockKey: 'wsl:global' })
+    await (starts[1]!.run as (c: unknown) => Promise<void>)(ctl)
+    expect(updateRollback).toHaveBeenCalledWith(ctl)
+  })
+
+  it('app:wslSetDefaultVersion 委托服务（仅 1/2 由 schema 保证）', async () => {
+    const setDefaultVersion = vi.fn(async () => {})
+    const handlers = collectWith({ setDefaultVersion }, { start: vi.fn() })
+    await handlers.get(CH.appWslSetDefaultVersion)!(makeCtx(), { version: 1 })
+    expect(setDefaultVersion).toHaveBeenCalledWith(1)
+  })
+
+  it('clipboard:read / write 走主进程 Electron 剪贴板', () => {
+    const handlers = collectWith(
+      { getEnv: vi.fn(), update: vi.fn(), updateRollback: vi.fn(), setDefaultVersion: vi.fn() },
+      { start: vi.fn() },
+    )
+    expect(handlers.get(CH.clipboardRead)!(makeCtx(), undefined)).toBe('clipboard-content')
+    handlers.get(CH.clipboardWrite)!(makeCtx(), 'hello')
+    expect(clipboard.writeText).toHaveBeenCalledWith('hello')
   })
 })

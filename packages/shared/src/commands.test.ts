@@ -13,8 +13,40 @@ import {
   buildExportArgs,
   buildImportArgs,
   buildMoveArgs,
+  buildSetSparseArgs,
+  buildSetDefaultVersionArgs,
+  buildUpdateArgs,
+  buildUpdateRollbackArgs,
 } from './commands'
 import { formatBytes } from './format'
+
+describe('0.1.3 WSL 本体/磁盘 argv 构建（唯一事实源）', () => {
+  it('buildSetSparseArgs：true/false 均为字面量参数（不进 shell 拼接）', () => {
+    expect(buildSetSparseArgs('Ubuntu', true)).toEqual([
+      '--manage',
+      'Ubuntu',
+      '--set-sparse',
+      'true',
+    ])
+    expect(buildSetSparseArgs('Ubuntu', false)).toEqual([
+      '--manage',
+      'Ubuntu',
+      '--set-sparse',
+      'false',
+    ])
+  })
+
+  it('buildUpdateArgs / buildUpdateRollbackArgs', () => {
+    expect(buildUpdateArgs()).toEqual(['--update'])
+    expect(buildUpdateArgs(true)).toEqual(['--update', '--pre-release'])
+    expect(buildUpdateRollbackArgs()).toEqual(['--update', '--rollback'])
+  })
+
+  it('buildSetDefaultVersionArgs：仅 1/2', () => {
+    expect(buildSetDefaultVersionArgs(1)).toEqual(['--set-default-version', '1'])
+    expect(buildSetDefaultVersionArgs(2)).toEqual(['--set-default-version', '2'])
+  })
+})
 
 describe('formatCommand', () => {
   it('quotes args containing spaces and leaves simple args bare', () => {

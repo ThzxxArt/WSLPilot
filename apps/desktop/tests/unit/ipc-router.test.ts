@@ -171,6 +171,12 @@ function makeDeps() {
       attach: vi.fn(async () => {}),
       detach: vi.fn(async () => {}),
     } as any,
+    // 0.1.3：.wslconfig 服务（router deps 必填）
+    wslconfig: {
+      path: vi.fn(() => '/tmp/.wslconfig'),
+      read: vi.fn(async () => ({ path: '/tmp/.wslconfig', exists: false, content: '' })),
+      write: vi.fn(async () => ({ path: '/tmp/.wslconfig' })),
+    } as any,
   }
 }
 
