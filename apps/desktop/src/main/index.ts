@@ -121,6 +121,8 @@ if (!gotLock) {
 }
 
 let mainWindow: BrowserWindow | null = null
+/** 退出清理只执行一次（flush 后再次 app.quit() 会重入 will-quit） */
+let quitFlushDone = false
 /** 窗口重建入口（bootstrap 装配；activate 事件在 bootstrap 之前注册 — review M-12） */
 let ensureWindowRef: (() => Promise<BrowserWindow | null>) | null = null
 
@@ -260,18 +262,23 @@ async function bootstrap() {
    * 杀终端、落盘配置（review M-11）。
    */
   app.on('will-quit', (e) => {
-    if (!isQuitting()) return
-    // 先同步取消任务与终端，再等待写队列落盘（review M25）
+    if (!isQuitting() || quitFlushDone) return
+    // 先同步取消任务与终端，再等待写队列/日志落盘（review M25）
     e.preventDefault()
+    logger.info('will-quit: flush start')
     tasks.dispose()
     pty.killAll()
-    void configService
-      .flush()
-      .catch(() => {})
-      .finally(() => {
+    void Promise.allSettled([configService.flush(), logger.flush?.() ?? Promise.resolve()]).finally(
+      () => {
+        logger.info('will-quit: flush done')
         configService.dispose()
-        app.exit(0)
-      })
+        quitFlushDone = true
+        // 必须走 app.quit() 而不是 app.exit(0)：electron-updater 的 autoInstallOnAppQuit
+        // 挂在 quit 事件上，app.exit 会直接跳过，已下载的更新永远不会安装（0.1.4 修复）。
+        // quitFlushDone 保证第二次 will-quit 不再 preventDefault，正常走完退出链。
+        app.quit()
+      },
+    )
   })
 
   /** 主窗口生命周期（close 决策 / closed 置空）——重建后也要重挂 */

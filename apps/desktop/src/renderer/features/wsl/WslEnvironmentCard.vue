@@ -1,19 +1,22 @@
 <script setup lang="ts">
 /**
- * WSL 环境卡（0.1.3）：
+ * WSL 环境卡（0.1.4）：
  * - 环境体检：版本 / 内核 / 默认发行版 / 默认版本（非抛出语义，未安装时给一键安装）
- * - 更新 WSL（wsl --update，含预发布通道与回滚入口）
+ * - 更新 WSL（wsl --update，含预发布通道；3.0 已无 --rollback，改为版本历史外链）
  * - 设置默认 WSL 版本（wsl --set-default-version；仅影响新导入的发行版）
+ * - 能力矩阵：compact/resize/default-user/安装落点/tar.gz 等是否可用
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NPopover, NSelect, useDialog, useMessage } from 'naive-ui'
+import { NButton, NPopover, NSelect, useMessage } from 'naive-ui'
 import type { WslEnvInfo } from '@wslpilot/shared'
+import { WSL_FEATURE_META } from '@wslpilot/shared'
 import { useTasksStore } from '../../stores/tasks'
+import { useWslEnvStore } from '../../stores/wsl-env'
 import { errorLine } from '../../composables/useAppError'
 
 const message = useMessage()
-const dialog = useDialog()
 const tasks = useTasksStore()
+const wslEnv = useWslEnvStore()
 
 const env = ref<WslEnvInfo | null>(null)
 const loading = ref(false)
@@ -32,12 +35,21 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  // 卡片与安装向导/详情页共用能力 store：只刷新本地 env 会让向导一直“能力未加载”
+  void wslEnv.load()
+})
 
-/** WSL 本体级任务进行中（更新 / 回滚 / 安装本体）：动作按钮统一禁用 */
+/** 手动刷新：本地环境 + 共享能力缓存一起重拉 */
+async function refreshAll() {
+  await Promise.all([load(), wslEnv.refresh()])
+}
+
+/** WSL 本体级任务进行中（更新 / 安装本体）：动作按钮统一禁用 */
 const globalBusy = computed(() =>
   tasks.entries.some(
-    (t) => t.status === 'running' && (t.type === 'update' || (t.type === 'install' && !t.distro)),
+    (t) => t.status === 'running' && (t.type === 'update' || t.type === 'install'),
   ),
 )
 
@@ -46,16 +58,26 @@ const updateBusy = computed(
 )
 
 function watchTask(idRef: typeof installTaskId, onDone: (ok: boolean, text: string) => void) {
-  const stop = watch(
+  let settled = false
+  let stop: (() => void) | null = null
+  const finish = () => {
+    if (settled) return
+    settled = true
+    stop?.()
+  }
+  stop = watch(
     () => tasks.byId(idRef.value)?.status,
     (status, prev) => {
       if (!status || status === 'running' || status === prev) return
       const entry = tasks.byId(idRef.value)
       const ok = status === 'success'
       onDone(ok, ok ? (entry?.message ?? '任务完成') : (entry?.error ?? '任务失败'))
-      stop()
+      finish()
     },
+    // 任务可能在 watch 注册前就已终态（快速失败/成功）：必须立即补一次判断
+    { immediate: true },
   )
+  if (settled) stop?.()
 }
 
 /** 一键安装 WSL 本体（未安装场景的引导入口） */
@@ -71,6 +93,7 @@ async function installWsl() {
     if (ok) {
       message.success(`WSL 安装任务完成：${text}`)
       void load()
+      void wslEnv.refresh()
     } else {
       message.error(`WSL 安装失败：${text}`)
     }
@@ -90,42 +113,46 @@ async function updateWsl(preRelease = false) {
     if (ok) {
       message.success(text)
       void load()
+      void wslEnv.refresh()
     } else {
       message.error(`WSL 更新失败：${text}`)
     }
   })
 }
 
-/** 回滚最近一次 WSL 更新（危险操作：显式确认） */
-function rollback() {
-  dialog.warning({
-    title: '回滚 WSL 更新',
-    content:
-      '将执行 wsl --update --rollback，把 WSL 回退到上一次更新前的版本。\n\n' +
-      '回滚期间 WSL 会短暂不可用；如回滚后仍异常，可再次执行更新。确定继续吗？',
-    positiveText: '回滚',
-    negativeText: '取消',
-    onPositiveClick: () => {
-      void (async () => {
-        const entry = await tasks.startUpdateRollback()
-        if (!entry) {
-          message.error(errorLine(tasks.lastError, '启动回滚失败'))
-          return
-        }
-        updateTaskId.value = entry.taskId
-        message.info('已开始回滚 WSL 更新')
-        watchTask(updateTaskId, (ok, text) => {
-          if (ok) {
-            message.success(text)
-            void load()
-          } else {
-            message.error(`WSL 回滚失败：${text}`)
-          }
-        })
-      })()
-    },
-  })
+/** 打开 WSL 版本历史（0.1.4：回滚开关已不存在，降级只能手动安装旧版 MSI） */
+async function openHistory() {
+  try {
+    await window.wslAPI.app.openExternal('https://github.com/microsoft/WSL/releases')
+  } catch (e) {
+    message.error(errorLine(e, '无法打开版本历史'))
+  }
 }
+
+/** 能力矩阵展示（help 探测结果；null 时如实显示“未检测”） */
+const capabilityRows = computed(() => {
+  const f = env.value?.capabilities?.flags
+  if (!f) return []
+  // 最低版本只从 WSL_FEATURE_META 读，避免 UI 与能力探测的版本表各写一份
+  const row = (flag: keyof typeof f) => ({
+    label: WSL_FEATURE_META[flag].label,
+    ok: f[flag],
+    min: WSL_FEATURE_META[flag].minVersion,
+  })
+  return [
+    row('compact'),
+    row('resize'),
+    row('setDefaultUser'),
+    row('installLocation'),
+    row('vhdSize'),
+    row('fixedVhd'),
+    row('webDownload'),
+    row('importFromFile'),
+    row('exportFormats'),
+    row('updatePreRelease'),
+    row('manageSparse'),
+  ]
+})
 
 /** 设置默认 WSL 版本（仅影响新导入的发行版） */
 const defaultVersionBusy = ref(false)
@@ -221,7 +248,7 @@ const installDetail = computed(() => {
           :disabled="updateBusy"
           @click="updateWsl(false)"
         >
-          更新 WSL
+          更新 / 修复 WSL
         </n-button>
         <n-popover trigger="click" placement="bottom-start">
           <template #trigger>
@@ -229,21 +256,51 @@ const installDetail = computed(() => {
           </template>
           <div class="advanced">
             <p class="hint">更新命令在线检查可用版本；无更新时版本保持不变（本卡如实展示）。</p>
-            <n-button size="small" secondary :disabled="updateBusy" @click="updateWsl(true)">
-              通过预发布通道更新（wsl --update --pre-release）
-            </n-button>
             <n-button
               size="small"
               secondary
-              type="warning"
-              :disabled="updateBusy"
-              @click="rollback"
+              :disabled="updateBusy || !wslEnv.can('updatePreRelease')"
+              :title="wslEnv.can('updatePreRelease') ? '' : wslEnv.requirement('updatePreRelease')"
+              @click="updateWsl(true)"
             >
-              回滚最近一次更新（wsl --update --rollback）
+              通过预发布通道更新（wsl --update --pre-release）
             </n-button>
+            <n-button size="small" quaternary @click="openHistory">
+              查看 WSL 版本历史 / 手动安装旧版
+            </n-button>
+            <p class="hint">
+              0.1.4 起不再提供「回滚最近一次更新」：WSL 3.0 已移除
+              <code>--rollback</code>，旧参数在 2.7.3+ 也会失败。需要降级时请从上面的版本历史
+              下载对应 MSI 覆盖安装。
+            </p>
           </div>
         </n-popover>
-        <n-button size="small" quaternary :loading="loading" @click="load">刷新</n-button>
+        <n-button size="small" quaternary :loading="loading" @click="refreshAll">刷新</n-button>
+      </div>
+
+      <!-- 能力矩阵（0.1.4）：help 主探测；不支持的项明确标注，不在别处“点了没反应” -->
+      <div v-if="env.capabilities" class="caps">
+        <div class="caps-head">
+          <span>发行版能力</span>
+          <span class="caps-meta">
+            WSL {{ env.capabilities.wslVersion || 'inbox' }}
+            <template v-if="env.capabilities.wslcVersion">
+              · wslc {{ env.capabilities.wslcVersion }}
+            </template>
+            · Build {{ env.capabilities.windowsBuild || '—' }}
+          </span>
+        </div>
+        <div class="caps-grid">
+          <span
+            v-for="cap in capabilityRows"
+            :key="cap.label"
+            class="cap"
+            :class="{ off: !cap.ok }"
+            :title="cap.ok ? '当前 WSL 支持' : `需要 WSL ${cap.min}+`"
+          >
+            {{ cap.ok ? '✓' : '×' }} {{ cap.label }}
+          </span>
+        </div>
       </div>
     </template>
 
@@ -251,7 +308,7 @@ const installDetail = computed(() => {
     <div v-else class="missing">
       <div class="missing-title">无法读取 WSL 环境信息</div>
       <div class="actions">
-        <n-button size="small" :loading="loading" @click="load">重试</n-button>
+        <n-button size="small" :loading="loading" @click="refreshAll">重试</n-button>
       </div>
     </div>
   </div>
@@ -359,5 +416,47 @@ const installDetail = computed(() => {
   flex-direction: column;
   gap: 8px;
   width: 340px;
+}
+
+.caps {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.caps-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.caps-meta {
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.caps-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.cap {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+.cap.off {
+  color: var(--color-text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-text-tertiary) 50%, transparent);
 }
 </style>

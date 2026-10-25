@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -36,7 +37,7 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
     vi.clearAllMocks()
   })
 
-  it('结构化请求 → 临时请求文件 → 读取结果（成功路径）', async () => {
+  it('结构化请求 → 命令行 base64 载荷 → 读取结果（成功路径）', async () => {
     const fsLike = makeFs()
     fsLike.readFile.mockResolvedValue(
       JSON.stringify({
@@ -55,18 +56,18 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
     expect(res.results[0]!.ok).toBe(true)
     expect(res.results[0]!.stdout).toBe('bound')
 
-    // 请求文件必须是结构化载荷（op + program + args），不是任意命令行
-    const requestWrite = fsLike.writeFile.mock.calls.find((c) =>
-      String(c[0]).endsWith('request.json'),
-    )
-    expect(requestWrite).toBeTruthy()
-    const payload = JSON.parse(String(requestWrite![1]))
-    expect(payload.v).toBe(1)
-    expect(payload.ops).toEqual([
-      { op: 'usbipd.bind', program: 'usbipd.exe', args: ['bind', '--busid', '1-2'] },
-    ])
-    // 启动器是 powershell Start-Process -Verb RunAs（UAC）
+    // 载荷经命令行 base64 传入（UAC 期间临时文件不可信），绝不携带 program/args
     const [program, args] = runTool.mock.calls[0]!
+    const command = String(args.at(-1))
+    expect(command).toContain('-PayloadBase64')
+    expect(command).not.toContain('request.json')
+    const encoded = /-PayloadBase64 ''([A-Za-z0-9+/=]+)''/.exec(command)?.[1]
+    expect(encoded).toBeTruthy()
+    const payload = JSON.parse(Buffer.from(encoded!, 'base64').toString('utf8'))
+    expect(payload.v).toBe(2)
+    expect(payload.ops).toEqual([{ op: 'usbipd.bind', params: { busId: '1-2' } }])
+    expect(JSON.stringify(payload)).not.toContain('"args"')
+    // 启动器是 powershell Start-Process -Verb RunAs（UAC）
     expect(program).toBe('powershell.exe')
     expect(String(args.join(' '))).toContain('-Verb RunAs')
     expect(String(args.join(' '))).toContain('-Wait')
@@ -186,18 +187,20 @@ describe('提权客户端（ElevationHelper §14.3）', () => {
 })
 
 describe('提权 Helper 脚本（纵深防御）', () => {
-  it('脚本内嵌 op→program 白名单且拒绝未知 op / program 不匹配', () => {
+  it('脚本内嵌 op→program 白名单，argv 由 op+params 重建（不接受 payload program/args）', () => {
     const script = buildElevationHelperScript()
     for (const [op, program] of Object.entries(ELEVATION_PROGRAMS)) {
       expect(script).toContain(op)
       expect(script).toContain(program)
     }
     expect(script).toContain('op not allowed')
-    expect(script).toContain('program mismatch')
-    // 参数数组 splat 调用，不经 shell 拼接
+    expect(script).toContain('function Build-Args')
+    expect(script).toContain('Assert-DistroName')
+    // 明确不接受 program/args（UAC 期间临时文件不可信；载荷走命令行）
+    expect(script).not.toContain('$item.program')
+    expect(script).not.toContain('$item.args')
     expect(script).toContain('& $program @argList')
     expect(script).toContain('ConvertFrom-Json')
-    // 结果落盘供主进程读取
     expect(script).toContain('$ResultFile')
   })
 
@@ -271,6 +274,10 @@ describe('提权客户端启动器细节（review 根治回归）', () => {
     const scriptWrite = fsLike.writeFile.mock.calls.find((c) => String(c[0]).endsWith('helper.ps1'))
     expect(scriptWrite).toBeTruthy()
     expect(String(scriptWrite![1]).startsWith('\ufeff')).toBe(true)
+    // 提权进程只执行哈希匹配的脚本，避免 UAC 期间临时脚本被替换
+    const expectedHash = createHash('sha256').update(String(scriptWrite![1]), 'utf8').digest('hex')
+    expect(String(runTool.mock.calls[0]![1].at(-1))).toContain(expectedHash)
+    expect(String(runTool.mock.calls[0]![1].at(-1))).toContain('ReadAllBytes')
   })
 
   it('含空格的临时目录：ArgumentList 元素自带双引号（空格路径不被拆开）', async () => {
@@ -283,10 +290,15 @@ describe('提权客户端启动器细节（review 根治回归）', () => {
     const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
     await client.run([bindReq])
     const command = String(runTool.mock.calls[0]![1].at(-1))
-    // 双引号包住完整路径（含空格部分整体在引号内）— 此前单引号只定界 PS 源码，子进程拆路径
-    expect(command).toMatch(/'"[^"]*wslpilot elev [^"]*helper\.ps1"'/)
-    expect(command).toMatch(/'"[^"]*request\.json"'/)
-    expect(command).toMatch(/'"[^"]*result\.json"'/)
+    // 提权进程先校验脚本 SHA-256，再从内存执行；路径整体在 PS 单引号内，空格不被拆开
+    expect(command).toMatch(/wslpilot elev [^']*helper\.ps1/)
+    expect(command).toContain('ReadAllBytes')
+    expect(command).toContain('SHA256')
+    expect(command).toContain('ScriptBlock')
+    expect(command).not.toMatch(/-File\s/)
+    expect(command).toContain('-PayloadBase64')
+    expect(command).not.toContain('request.json')
+    expect(command).toMatch(/wslpilot elev [^']*result\.json/)
     // -FilePath 是参数值，只做 PS 单引号定界，**不得**内嵌双引号
     // （否则 FileName 为字面 `"powershell.exe"`，Start-Process 找不到文件 — 回验修复）
     expect(command).toContain("-FilePath 'powershell.exe'")
@@ -319,20 +331,20 @@ describe('提权客户端启动器细节（review 根治回归）', () => {
     }
     let duringRun: string[] = []
     const runTool = vi.fn(async () => {
-      // 运行中途：提权工作目录真实存在且 helper/request/result 三件套已落盘
+      // 运行中途：提权工作目录真实存在且 helper/result 已落盘（载荷不再落盘）
       duringRun = readdirSync(spaceRoot).flatMap((d) => readdirSync(join(spaceRoot, d)))
       return { stdout: '', stderr: '', code: 0 }
     })
     const client = createElevationClient({ logger, runTool, tempRoot: spaceRoot }, fsLike)
     await client.run([bindReq])
-    expect(duringRun.sort()).toEqual(['helper.ps1', 'request.json', 'result.json'])
+    expect(duringRun.sort()).toEqual(['helper.ps1', 'result.json'])
     expect(readdirSync(spaceRoot)).toEqual([])
 
     // 失败路径（结果 JSON 损坏）同样清理
     fsLike.readFile.mockResolvedValueOnce('not-json{{')
     duringRun = []
     await client.run([bindReq])
-    expect(duringRun.sort()).toEqual(['helper.ps1', 'request.json', 'result.json'])
+    expect(duringRun.sort()).toEqual(['helper.ps1', 'result.json'])
     expect(readdirSync(spaceRoot)).toEqual([])
   })
 })

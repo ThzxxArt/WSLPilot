@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import {
   defaultConfig,
+  repairDuplicateRuleIds,
   toAppError,
   type AppError,
   type NetworkStatus,
@@ -63,6 +64,16 @@ export const useNetworkStore = defineStore('network', {
           (e) => e.listenAddress === r.listenAddress && e.listenPort === r.listenPort,
         ),
       ).length,
+    /** 重复的规则 id（0.1.4：可一键修复，避免整个文件永远无法保存） */
+    duplicateRuleIds: (s): string[] => {
+      const seen = new Set<string>()
+      const dup = new Set<string>()
+      for (const r of s.rules) {
+        if (seen.has(r.id)) dup.add(r.id)
+        seen.add(r.id)
+      }
+      return [...dup]
+    },
   },
 
   actions: {
@@ -121,6 +132,21 @@ export const useNetworkStore = defineStore('network', {
       } finally {
         if (gen === this.rulesSaveGen) this.saving = false
       }
+    },
+
+    /**
+     * 修复重复规则 id（0.1.4）：保留第一条，后续改成 `<id>-2`...
+     * 返回是否真的改了；没有重复时幂等不写盘。
+     */
+    async repairRuleIds(): Promise<boolean> {
+      // 必须走写队列：直接读 this.rules 会与排队的 setEnabled/upsert 基于同一旧快照，
+      // 后写覆盖先写（开关刚切换就点修复会丢改动）。
+      return enqueueRulesWrite(async () => {
+        const { rules, changed } = repairDuplicateRuleIds(this.rules)
+        if (!changed) return false
+        await this.persistRules(rules)
+        return true
+      })
     },
 
     /**

@@ -5,6 +5,8 @@ import {
   uiStateFileSchema,
   distrosFileSchema,
   networkFileSchema,
+  distroMetaSchema,
+  wslActionSchema,
 } from '../src/config-schema'
 import { migrateConfig } from '../src/config-migrations'
 import { sanitizeWithSchema } from '../src/schema-sanitize'
@@ -156,6 +158,17 @@ describe('config schema 加固（review 0.1.2）', () => {
       ],
     })
     expect(ok.success).toBe(true)
+  })
+
+  it('动作 id / quickActions / meta name 读入时 trim，执行查找与存储键一致', () => {
+    const action = wslActionSchema.parse({ id: '  git:pull  ', label: ' 拉取 ', program: 'git' })
+    expect(action.id).toBe('git:pull')
+    const meta = distroMetaSchema.parse({
+      name: '  Ubuntu  ',
+      quickActions: ['  git:pull  '],
+    })
+    expect(meta.name).toBe('Ubuntu')
+    expect(meta.quickActions).toEqual(['git:pull'])
   })
 })
 

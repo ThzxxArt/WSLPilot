@@ -33,6 +33,11 @@ export interface Logger {
   warn(msg: string, extra?: Record<string, unknown>): void
   error(msg: string, extra?: Record<string, unknown>): void
   setLevel(level: LogLevel): void
+  /**
+   * 等待当前队列里的日志全部落盘（退出前调用，0.1.4）。
+   * 可选：测试/轻量替换实现可以只实现写日志；生产 createLogger 必须提供。
+   */
+  flush?(): Promise<void>
 }
 
 /**
@@ -122,6 +127,9 @@ export function createLogger(userDataDir: string, level: LogLevel = 'info'): Log
     error: make('error'),
     setLevel(l: LogLevel) {
       currentLevel = LEVELS[l]
+    },
+    async flush() {
+      await queue.catch(() => {})
     },
   }
 }

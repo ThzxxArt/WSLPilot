@@ -22,6 +22,8 @@ export interface ExportForm {
   name: string
   path: string
   format: BackupFormat
+  /** 运行中发行版是否允许先终止再导出（WSL --export 会终止它） */
+  terminateFirst?: boolean
 }
 
 export interface ImportForm {
@@ -48,6 +50,7 @@ export const DEFAULT_EXPORT_FORM: ExportForm = {
   name: '',
   path: '',
   format: 'tar',
+  terminateFirst: false,
 }
 
 export const DEFAULT_IMPORT_FORM: ImportForm = {
@@ -119,7 +122,19 @@ export function validateExportForm(form: ExportForm): string | null {
 }
 
 export function buildExportRequest(form: ExportForm): IoExportRequest {
-  return { name: form.name.trim(), path: form.path.trim(), format: form.format }
+  return {
+    name: form.name.trim(),
+    path: form.path.trim(),
+    format: form.format,
+    terminateFirst: form.terminateFirst === true,
+  }
+}
+
+/** 备份格式展示名（0.1.4 增加 tar.gz） */
+export function backupFormatLabel(format: BackupFormat): string {
+  if (format === 'vhd') return 'vhd（vhdx 虚拟磁盘）'
+  if (format === 'tar.gz') return 'tar.gz（gzip 压缩归档）'
+  return 'tar（归档）'
 }
 
 export function exportSummary(form: ExportForm): SummaryRow[] {
@@ -127,7 +142,10 @@ export function exportSummary(form: ExportForm): SummaryRow[] {
     { label: '操作', value: '导出备份' },
     { label: '发行版', value: form.name || '—' },
     { label: '保存到', value: form.path || '—' },
-    { label: '格式', value: form.format === 'vhd' ? 'vhd（vhdx 虚拟磁盘）' : 'tar（归档）' },
+    { label: '格式', value: backupFormatLabel(form.format) },
+    ...(form.terminateFirst
+      ? [{ label: '运行中处理', value: '先停止发行版（会关闭其中的终端与进程）' }]
+      : []),
   ]
 }
 
@@ -155,6 +173,17 @@ export function validateImportForm(
   }
   const err = validatePathField(form.archivePath, '备份文件路径')
   if (err) return err
+  // 扩展名与格式必须一致：用户在选完 vhdx 后切回「归档导入」时，不能让
+  // `--import`（无 --vhd）去解一个 vhdx（反之亦然）；否则长任务跑到一半才失败。
+  const lowerPath = form.archivePath.trim().toLowerCase()
+  const detected: BackupFormat = /\.vhdx?$/i.test(lowerPath)
+    ? 'vhd'
+    : /\.(?:tar\.gz|tgz)$/i.test(lowerPath)
+      ? 'tar.gz'
+      : 'tar'
+  if (detected !== form.format) {
+    return `文件扩展名与导入格式不一致：当前格式为 ${form.format}，文件看起来是 ${detected}；请重新选择文件或切换导入方式`
+  }
   if (form.inPlace && form.format !== 'vhd') {
     return '就地导入仅支持 vhd（.vhdx）文件，请改用归档导入'
   }
@@ -181,8 +210,8 @@ export function importSummary(form: ImportForm): SummaryRow[] {
     form.inPlace
       ? { label: '安装位置', value: '（就地使用源 vhdx，不复制）' }
       : { label: '安装位置', value: form.installPath || '—' },
-    { label: '格式', value: form.format === 'vhd' ? 'vhd（vhdx 虚拟磁盘）' : 'tar（归档）' },
-    ...(form.format === 'tar' && !form.inPlace
+    { label: '格式', value: backupFormatLabel(form.format) },
+    ...(form.format !== 'vhd' && !form.inPlace
       ? [{ label: 'WSL 版本', value: form.version === 1 ? 'WSL 1' : 'WSL 2' }]
       : []),
   ]

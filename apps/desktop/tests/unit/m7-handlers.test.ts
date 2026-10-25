@@ -75,9 +75,12 @@ function collectApp(ctx: any): Map<string, (ctx: unknown, arg: unknown) => unkno
       })),
       setDefaultVersion: vi.fn(async () => {}),
       update: vi.fn(async () => {}),
-      updateRollback: vi.fn(async () => {}),
     },
-    tasks: { start: vi.fn(() => ({ taskId: 't1' })) },
+    tasks: {
+      start: vi.fn(() => ({ taskId: 't1' })),
+      running: vi.fn(() => []),
+      withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
+    },
   } as any)
   return handlers
 }
@@ -250,17 +253,18 @@ describe('app 域 0.1.3（WSL 本体生命周期 / 剪贴板）', () => {
     expect(getEnv).toHaveBeenCalled()
   })
 
-  it('app:wslUpdate / rollback：任务派发（全局锁串行 + preRelease 透传）', async () => {
+  it('app:wslUpdate：任务派发（全局锁串行 + preRelease 透传）', async () => {
     const update = vi.fn(async () => {})
-    const updateRollback = vi.fn(async () => {})
     const starts: Array<Record<string, unknown>> = []
     const tasks = {
       start: vi.fn((opts: Record<string, unknown>) => {
         starts.push(opts)
         return { taskId: `t${starts.length}` }
       }),
+      running: vi.fn(() => []),
+      withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
     }
-    const handlers = collectWith({ update, updateRollback }, tasks)
+    const handlers = collectWith({ update }, tasks)
 
     const handle = handlers.get(CH.appWslUpdate)!(makeCtx(), { preRelease: true }) as {
       taskId: string
@@ -270,24 +274,45 @@ describe('app 域 0.1.3（WSL 本体生命周期 / 剪贴板）', () => {
     const ctl = { taskId: 't1', report: vi.fn(), log: vi.fn() }
     await (starts[0]!.run as (c: unknown) => Promise<void>)(ctl)
     expect(update).toHaveBeenCalledWith(ctl, { preRelease: true })
-
-    handlers.get(CH.appWslUpdateRollback)!(makeCtx(), undefined)
-    expect(starts[1]).toMatchObject({ type: 'update', lockKey: 'wsl:global' })
-    await (starts[1]!.run as (c: unknown) => Promise<void>)(ctl)
-    expect(updateRollback).toHaveBeenCalledWith(ctl)
   })
 
-  it('app:wslSetDefaultVersion 委托服务（仅 1/2 由 schema 保证）', async () => {
+  it('app:wslSetDefaultVersion 委托服务（仅 1/2 由 schema 保证；走全局锁）', async () => {
     const setDefaultVersion = vi.fn(async () => {})
-    const handlers = collectWith({ setDefaultVersion }, { start: vi.fn() })
+    const tasks = {
+      start: vi.fn(),
+      running: vi.fn(() => []),
+      withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
+    }
+    const handlers = collectWith({ setDefaultVersion }, tasks)
     await handlers.get(CH.appWslSetDefaultVersion)!(makeCtx(), { version: 1 })
     expect(setDefaultVersion).toHaveBeenCalledWith(1)
+    expect(tasks.withLock).toHaveBeenCalledWith('wsl:global', expect.any(Function))
+  })
+
+  it('app:wslSetDefaultVersion 在有按名安装任务时也拒绝（不能只挡无 distro 的本体安装）', async () => {
+    const setDefaultVersion = vi.fn(async () => {})
+    const tasks = {
+      start: vi.fn(),
+      running: vi.fn(() => [
+        { taskId: 'i1', type: 'install', distro: 'Ubuntu', message: '安装 Ubuntu' },
+      ]),
+      withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
+    }
+    const handlers = collectWith({ setDefaultVersion }, tasks)
+    await expect(
+      handlers.get(CH.appWslSetDefaultVersion)!(makeCtx(), { version: 1 }),
+    ).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    expect(setDefaultVersion).not.toHaveBeenCalled()
   })
 
   it('clipboard:read / write 走主进程 Electron 剪贴板', () => {
     const handlers = collectWith(
-      { getEnv: vi.fn(), update: vi.fn(), updateRollback: vi.fn(), setDefaultVersion: vi.fn() },
-      { start: vi.fn() },
+      { getEnv: vi.fn(), update: vi.fn(), setDefaultVersion: vi.fn() },
+      {
+        start: vi.fn(),
+        running: vi.fn(() => []),
+        withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
+      },
     )
     expect(handlers.get(CH.clipboardRead)!(makeCtx(), undefined)).toBe('clipboard-content')
     handlers.get(CH.clipboardWrite)!(makeCtx(), 'hello')

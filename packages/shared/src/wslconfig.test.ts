@@ -42,7 +42,7 @@ describe('parseWslConfigModel（.wslconfig 表单模型 — 0.1.3）', () => {
     const t = '[WSL2]\nMemory=8GB\n'
     expect(parseWslConfigModel(t).wsl2.memory).toBe('8GB')
     const out = applyWslConfigModel(t, { ...emptyWslConfigModel(), wsl2: { memory: '16GB' } })
-    expect(out.text).toContain('Memory = 16GB')
+    expect(out.text).toContain('Memory=16GB')
     expect(out.text.match(/memory/gi)).toHaveLength(1)
     expect(collectUnknownWslConfigKeys(t)).toHaveLength(0)
   })
@@ -51,7 +51,7 @@ describe('parseWslConfigModel（.wslconfig 表单模型 — 0.1.3）', () => {
     const model = parseWslConfigModel('')
     expect(model.wsl2.memory).toBeUndefined()
     expect(model.experimental.sparseVhd).toBeUndefined()
-    expect(emptyWslConfigModel()).toEqual({ wsl2: {}, experimental: {} })
+    expect(emptyWslConfigModel()).toEqual({ wsl2: {}, general: {}, experimental: {} })
   })
 
   it('注释行与未知键不影响已知字段解析', () => {
@@ -60,31 +60,98 @@ describe('parseWslConfigModel（.wslconfig 表单模型 — 0.1.3）', () => {
     const unknown = collectUnknownWslConfigKeys(SAMPLE)
     expect(unknown).toEqual([{ section: 'experimental', key: 'customKey', value: 'custom value' }])
   })
+
+  it('WP3 验收：general / none / consomme / dropCache 可读、可存、可往返', () => {
+    const text =
+      '[general]\ninstanceIdleTimeout=-1\ndistributionInstallPath=D:\\WSL\n' +
+      '[wsl2]\nnetworkingMode=consomme\n' +
+      '[experimental]\nautoMemoryReclaim=dropcache\n'
+    const model = parseWslConfigModel(text)
+    expect(model.general.instanceIdleTimeout).toBe(-1)
+    expect(model.general.distributionInstallPath).toBe('D:\\WSL')
+    expect(model.wsl2.networkingMode).toBe('consomme')
+    expect(model.experimental.autoMemoryReclaim).toBe('dropCache')
+
+    const { text: out, changes } = applyWslConfigModel(text, model)
+    expect(getIniValue(out, 'general', 'instanceIdleTimeout')).toBe('-1')
+    // 写侧必须按 WSL 转义反斜杠；读回是单反斜杠
+    expect(getIniValue(out, 'general', 'distributionInstallPath')).toBe('D:\\WSL')
+    expect(getIniValue(out, 'wsl2', 'networkingMode')).toBe('consomme')
+    // 加载即 dirty 是缺陷：dropcache 语义等同 dropCache，未编辑不重写
+    expect(getIniValue(out, 'experimental', 'autoMemoryReclaim')).toBe('dropcache')
+    expect(changes).toEqual([])
+
+    // 真正编辑时才写规范值（disabled → dropCache）
+    const edited = parseWslConfigModel('[experimental]\nautoMemoryReclaim=disabled\n')
+    edited.experimental.autoMemoryReclaim = 'dropCache'
+    const toWrite = applyWslConfigModel('[experimental]\nautoMemoryReclaim=disabled\n', edited)
+    expect(getIniValue(toWrite.text, 'experimental', 'autoMemoryReclaim')).toBe('dropCache')
+    expect(toWrite.changes).toHaveLength(1)
+
+    // none 也可读写；未知 enum 原样保留（不强行改写成推荐值）
+    const none = applyWslConfigModel('[wsl2]\nnetworkingMode=none\n', {
+      ...emptyWslConfigModel(),
+      wsl2: { networkingMode: 'none' },
+    }).text
+    expect(getIniValue(none, 'wsl2', 'networkingMode')).toBe('none')
+    const custom = applyWslConfigModel('[wsl2]\nnetworkingMode=bridge\n', {
+      ...emptyWslConfigModel(),
+      wsl2: { networkingMode: 'bridge' },
+    })
+    expect(custom.changes).toEqual([])
+  })
+
+  it('0.1.4 高价值键：kernel/defaultVhdSize/gpuSupport/bestEffortDnsParsing 可读可写', () => {
+    const text =
+      '[wsl2]\nkernel=C:\\Temp\\kernel\ndefaultVhdSize=1TB\ngpuSupport=true\n' +
+      '[experimental]\nbestEffortDnsParsing=true\nhostAddressLoopback=true\nignoredPorts=3000,4000\n'
+    const m = parseWslConfigModel(text)
+    expect(m.wsl2.kernel).toBe('C:\\Temp\\kernel')
+    expect(m.wsl2.defaultVhdSize).toBe('1TB')
+    expect(m.wsl2.gpuSupport).toBe(true)
+    expect(m.experimental.bestEffortDnsParsing).toBe(true)
+    expect(m.experimental.hostAddressLoopback).toBe(true)
+    expect(m.experimental.ignoredPorts).toBe('3000,4000')
+    m.wsl2.gpuSupport = false
+    m.experimental.bestEffortDnsParsing = false
+    const out = applyWslConfigModel(text, m)
+    expect(getIniValue(out.text, 'wsl2', 'gpuSupport')).toBe('false')
+    expect(getIniValue(out.text, 'experimental', 'bestEffortDnsParsing')).toBe('false')
+    // kernel 的 Windows 反斜杠写入必须被 WSL 转义后仍读回单反斜杠
+    expect(getIniValue(out.text, 'wsl2', 'kernel')).toBe('C:\\Temp\\kernel')
+  })
 })
 
 describe('validateWslConfigValue（表单校验）', () => {
   const field = (key: string) => WSL_CONFIG_FIELDS.find((f) => f.key === key)!
 
-  it('size：数字 + MB/GB；空串 = 清除（合法）', () => {
+  it('size：WSL 语法（整数 + B/K/KB/M/MB/G/GB/T/TB）；空串 = 清除', () => {
     expect(SIZE_VALUE_RE.test('8GB')).toBe(true)
     expect(validateWslConfigValue(field('memory'), '8GB')).toBeNull()
     expect(validateWslConfigValue(field('memory'), '4096MB')).toBeNull()
+    expect(validateWslConfigValue(field('memory'), '8G')).toBeNull()
+    expect(validateWslConfigValue(field('memory'), '8')).toBeNull()
     expect(validateWslConfigValue(field('memory'), '')).toBeNull()
-    expect(validateWslConfigValue(field('memory'), '8')).toMatch(/MB\/GB/)
-    expect(validateWslConfigValue(field('memory'), 'eight gb')).toMatch(/MB\/GB/)
-    // swap=0 语义为禁用交换：允许字面 0（与字段提示一致）；memory 0 仍拒绝
+    expect(validateWslConfigValue(field('memory'), '1.5GB')).toMatch(/整数/)
+    expect(validateWslConfigValue(field('memory'), '8gb')).toMatch(/整数/)
+    expect(validateWslConfigValue(field('memory'), 'eight gb')).toMatch(/整数/)
+    // swap=0 语义为禁用交换：允许字面 0；memory 0 仍拒绝
     expect(validateWslConfigValue(field('swap'), '0')).toBeNull()
     expect(validateWslConfigValue(field('memory'), '0')).toBeTruthy()
   })
 
-  it('number：1–256 整数；enum：白名单', () => {
+  it('number：范围校验；enum：白名单或显式 allowCustom', () => {
     expect(validateWslConfigValue(field('processors'), '4')).toBeNull()
     expect(validateWslConfigValue(field('processors'), '0')).toBeTruthy()
     expect(validateWslConfigValue(field('processors'), '4.5')).toBeTruthy()
     expect(validateWslConfigValue(field('networkingMode'), 'mirrored')).toBeNull()
-    expect(validateWslConfigValue(field('networkingMode'), 'bridge')).toBeTruthy()
+    // WSL 对未知 networkingMode 有 NAT 回退；UI 允许保存并提示
+    expect(validateWslConfigValue(field('networkingMode'), 'bridge')).toBeNull()
     expect(validateWslConfigValue(field('autoMemoryReclaim'), 'dropcache')).toBeNull()
-    expect(validateWslConfigValue(field('autoMemoryReclaim'), 'fast')).toBeTruthy()
+    expect(validateWslConfigValue(field('autoMemoryReclaim'), 'fast')).toBeNull()
+    // 非 allowCustom 的 enum 仍严格
+    const strict = { ...field('networkingMode'), allowCustom: false }
+    expect(validateWslConfigValue(strict, 'bridge')).toBeTruthy()
   })
 })
 

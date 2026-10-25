@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   toAppError,
   type AppError,
+  type DistroInstallOptions,
   type IoCloneRequest,
   type IoExportRequest,
   type IoImportRequest,
@@ -152,11 +153,14 @@ export const useTasksStore = defineStore('tasks', {
       }
     },
 
-    /** 安装发行版（wsl --install） */
-    async startInstall(name?: string): Promise<TaskEntry | null> {
+    /** 安装发行版（wsl --install，0.1.4 支持高级选项） */
+    async startInstall(opts?: string | DistroInstallOptions): Promise<TaskEntry | null> {
       this.lastError = null
+      const normalized: DistroInstallOptions =
+        typeof opts === 'string' ? { name: opts } : (opts ?? {})
+      const name = normalized.name
       try {
-        const handle = await window.wslAPI.distros.install(name)
+        const handle = await window.wslAPI.distros.install(normalized)
         return this.track(handle, {
           type: 'install',
           distro: name,
@@ -183,18 +187,6 @@ export const useTasksStore = defineStore('tasks', {
       }
     },
 
-    /** 回滚最近一次 WSL 更新（wsl --update --rollback — 0.1.3） */
-    async startUpdateRollback(): Promise<TaskEntry | null> {
-      this.lastError = null
-      try {
-        const handle = await window.wslAPI.app.wslUpdateRollback()
-        return this.track(handle, { type: 'update', message: '回滚 WSL 更新' })
-      } catch (e) {
-        this.lastError = toAppError(e)
-        return null
-      }
-    },
-
     /** 稀疏磁盘（wsl --manage --set-sparse — 0.1.3） */
     async startSparse(name: string, sparse: boolean): Promise<TaskEntry | null> {
       this.lastError = null
@@ -204,6 +196,54 @@ export const useTasksStore = defineStore('tasks', {
           type: 'manage',
           distro: name,
           message: sparse ? `启用 ${name} 的稀疏磁盘` : `关闭 ${name} 的稀疏磁盘`,
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 压缩虚拟磁盘（0.1.4；会终止运行中发行版，terminateFirst 已由 UI 确认） */
+    async startCompact(name: string, terminateFirst: boolean): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.compact(name, terminateFirst)
+        return this.track(handle, {
+          type: 'manage',
+          distro: name,
+          message: `压缩 ${name} 的虚拟磁盘`,
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 扩容虚拟磁盘（0.1.4；只增不减） */
+    async startResize(name: string, size: string): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.resize(name, size)
+        return this.track(handle, {
+          type: 'manage',
+          distro: name,
+          message: `扩容 ${name} 到 ${size}`,
+        })
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      }
+    },
+
+    /** 设置默认用户（0.1.4；新会话生效） */
+    async startSetDefaultUser(name: string, user: string): Promise<TaskEntry | null> {
+      this.lastError = null
+      try {
+        const handle = await window.wslAPI.distros.setDefaultUser(name, user)
+        return this.track(handle, {
+          type: 'manage',
+          distro: name,
+          message: `设置 ${name} 的默认用户为 ${user}`,
         })
       } catch (e) {
         this.lastError = toAppError(e)

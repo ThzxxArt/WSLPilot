@@ -74,20 +74,20 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext, deps: AppHandl
     })
   })
 
-  /** 回滚最近一次 WSL 更新（0.1.3）：危险操作，二次确认由渲染层负责 */
-  add(CH.appWslUpdateRollback, (): TaskHandle => {
-    return deps.tasks.start({
-      type: 'update',
-      message: '回滚 WSL 更新',
-      lockKey: WSL_GLOBAL_LOCK,
-      run: (ctl) => deps.wsl.updateRollback(ctl),
-    })
-  })
-
   /** 设置默认 WSL 版本（0.1.3）：仅影响新导入的发行版 */
   add(CH.appWslSetDefaultVersion, async (_c, arg: never): Promise<void> => {
     const o = arg as { version: 1 | 2 }
-    await deps.wsl.setDefaultVersion(o.version)
+    // 默认版本会影响正在进行的安装（含按名安装）与更新：运行中直接拒绝。
+    // 不能只匹配无 distro 的“安装 WSL 本体”：命名安装同样使用默认版本。
+    const busy = deps.tasks.running().filter((t) => t.type === 'update' || t.type === 'install')
+    if (busy.length > 0) {
+      throw createAppError('TASK_FAILED', {
+        message: 'WSL 本体/安装任务运行中，无法修改默认版本',
+        detail: busy.map((t) => t.message).join('\n'),
+        suggestion: '请等待安装/更新完成后再试',
+      })
+    }
+    await deps.tasks.withLock(WSL_GLOBAL_LOCK, () => deps.wsl.setDefaultVersion(o.version))
   })
 
   /** 剪贴板读取（0.1.3 终端粘贴可靠通道 — Electron clipboard，不受 file:// 权限限制） */

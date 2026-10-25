@@ -19,10 +19,60 @@ export const MAX_PORT_FORWARD_RULES = 100
 
 /**
  * 转发规则 id 安全校验（执行白名单的键）：非空、≤100、无控制字符与文件名非法字符。
- * 与 `assertSafeActionId` 同一规则族：唯一实现收敛在 slug.ts（review 0.1.2）。
+ * 唯一实现收敛在 `slug.ts`；动作 id 另有 legacy `:` 兼容，不复用本规则。
  */
 export function assertSafeRuleId(id: unknown): string {
   return assertSafeSlugId(id, '规则 id')
+}
+
+/**
+ * 修复重复的转发规则 id（0.1.4）。
+ * 重复 id 会让“按 id 执行”的白名单不可达：保留第一条，后续重复项改成
+ * `<id>-2` / `<id>-3`…，既不丢规则，也不让整个 network.jsonc 永远无法保存。
+ * 纯函数，供 schema 迁移与 UI「修复重复 id」共用。
+ */
+export interface RepairRuleIdsOptions {
+  /** false：只修空/非法 id，保留重复（v2 读取时让网络页显示重复并提供一键修复） */
+  dedupe?: boolean
+}
+
+export function repairDuplicateRuleIds<T extends { id: string }>(
+  rules: readonly T[],
+  opts: RepairRuleIdsOptions = {},
+): { rules: T[]; changed: boolean } {
+  const dedupe = opts.dedupe !== false
+  const seen = new Set<string>()
+  let changed = false
+  const out = rules.map((r) => {
+    let id = String(r.id ?? '').trim()
+    if (!id) {
+      // 空 id 无法安全引用：给一个稳定占位
+      id = 'rule'
+      changed = true
+    } else {
+      try {
+        assertSafeRuleId(id)
+      } catch {
+        // 非法 id 会被 networkFileSchema 拒绝并被 sanitize 丢弃整条规则；
+        // 修复成可执行的安全 id，保住规则本身（用户可再改名）。
+        id = 'rule'
+        changed = true
+      }
+    }
+    let candidate = id
+    if (dedupe) {
+      let n = 2
+      while (seen.has(candidate)) {
+        const suffix = `-${n}`
+        candidate = `${id.slice(0, Math.max(1, 100 - suffix.length))}${suffix}`
+        n++
+        changed = true
+      }
+      seen.add(candidate)
+    }
+    return candidate === r.id ? r : { ...r, id: candidate }
+  })
+  return { rules: out, changed }
 }
 
 export interface PortProxyTarget {

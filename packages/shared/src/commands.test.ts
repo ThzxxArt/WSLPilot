@@ -16,7 +16,10 @@ import {
   buildSetSparseArgs,
   buildSetDefaultVersionArgs,
   buildUpdateArgs,
-  buildUpdateRollbackArgs,
+  buildCompactArgs,
+  buildResizeArgs,
+  buildSetDefaultUserArgs,
+  buildInstallArgs,
 } from './commands'
 import { formatBytes } from './format'
 
@@ -36,10 +39,56 @@ describe('0.1.3 WSL 本体/磁盘 argv 构建（唯一事实源）', () => {
     ])
   })
 
-  it('buildUpdateArgs / buildUpdateRollbackArgs', () => {
+  it('buildUpdateArgs / buildCompactArgs / buildResizeArgs / buildSetDefaultUserArgs', () => {
     expect(buildUpdateArgs()).toEqual(['--update'])
     expect(buildUpdateArgs(true)).toEqual(['--update', '--pre-release'])
-    expect(buildUpdateRollbackArgs()).toEqual(['--update', '--rollback'])
+    expect(buildCompactArgs('Ubuntu')).toEqual(['--manage', 'Ubuntu', '--compact'])
+    expect(buildResizeArgs('Ubuntu', '50GB')).toEqual(['--manage', 'Ubuntu', '--resize', '50GB'])
+    expect(buildSetDefaultUserArgs('Ubuntu', 'dev')).toEqual([
+      '--manage',
+      'Ubuntu',
+      '--set-default-user',
+      'dev',
+    ])
+  })
+
+  it('buildInstallArgs：高级选项顺序稳定，默认 --no-launch', () => {
+    expect(buildInstallArgs({ name: 'Ubuntu' })).toEqual([
+      '--install',
+      '-d',
+      'Ubuntu',
+      '--no-launch',
+    ])
+    expect(
+      buildInstallArgs({
+        name: 'Ubuntu',
+        location: 'D:\\WSL\\Ubuntu',
+        version: 2,
+        vhdSize: '50GB',
+        fixedVhd: true,
+        webDownload: true,
+      }),
+    ).toEqual([
+      '--install',
+      '-d',
+      'Ubuntu',
+      '--location',
+      'D:\\WSL\\Ubuntu',
+      '--version',
+      '2',
+      '--vhd-size',
+      '50GB',
+      '--fixed-vhd',
+      '--web-download',
+      '--no-launch',
+    ])
+    expect(buildInstallArgs({ version: 1 })).toEqual([
+      '--install',
+      '--enable-wsl1',
+      '--version',
+      '1',
+      '--no-launch',
+    ])
   })
 
   it('buildSetDefaultVersionArgs：仅 1/2', () => {
@@ -85,6 +134,15 @@ describe('preview commands (display only)', () => {
     expect(previewExportCommand({ name: 'U', path: '/tmp/u.tar', format: 'tar' })).toBe(
       'wsl.exe --export U /tmp/u.tar',
     )
+    // 实跑会先 terminate；预览必须包含这一步，不能只显示 export
+    expect(
+      previewExportCommand({
+        name: 'U',
+        path: '/tmp/u.tar',
+        format: 'tar',
+        terminateFirst: true,
+      }),
+    ).toBe('wsl.exe --terminate U\nwsl.exe --export U /tmp/u.tar')
   })
 
   it('previewImportCommand branches on inPlace / format / version', () => {
@@ -147,6 +205,8 @@ describe('normalizeBackupTarget（扩展名归一唯一事实源）', () => {
   it('vhd：.vhd/.tar 错配归一为 .vhdx，缺失补 .vhdx', () => {
     expect(normalizeBackupTarget('u.vhd', 'vhd')).toBe('u.vhdx')
     expect(normalizeBackupTarget('u.tar', 'vhd')).toBe('u.vhdx')
+    expect(normalizeBackupTarget('u.tar.gz', 'vhd')).toBe('u.vhdx')
+    expect(normalizeBackupTarget('u.tgz', 'vhd')).toBe('u.vhdx')
     expect(normalizeBackupTarget('u.vhdx', 'vhd')).toBe('u.vhdx')
     expect(normalizeBackupTarget('u', 'vhd')).toBe('u.vhdx')
   })
@@ -154,8 +214,16 @@ describe('normalizeBackupTarget（扩展名归一唯一事实源）', () => {
   it('tar：.vhdx/.vhd 错配归一为 .tar，缺失补 .tar', () => {
     expect(normalizeBackupTarget('u.vhdx', 'tar')).toBe('u.tar')
     expect(normalizeBackupTarget('u.vhd', 'tar')).toBe('u.tar')
+    expect(normalizeBackupTarget('u.tar.gz', 'tar')).toBe('u.tar')
+    expect(normalizeBackupTarget('u.tgz', 'tar')).toBe('u.tar')
     expect(normalizeBackupTarget('u.tar', 'tar')).toBe('u.tar')
     expect(normalizeBackupTarget('u', 'tar')).toBe('u.tar')
+    // 0.1.4 gzip
+    expect(normalizeBackupTarget('u', 'tar.gz')).toBe('u.tar.gz')
+    expect(normalizeBackupTarget('u.tar', 'tar.gz')).toBe('u.tar.gz')
+    expect(normalizeBackupTarget('u.tar.gz', 'tar.gz')).toBe('u.tar.gz')
+    expect(normalizeBackupTarget('u.tgz', 'tar.gz')).toBe('u.tar.gz')
+    expect(normalizeBackupTarget('u.vhdx', 'tar.gz')).toBe('u.tar.gz')
   })
 
   it('trim + 幂等（对归一结果再调用不变）', () => {
@@ -168,9 +236,16 @@ describe('normalizeBackupTarget（扩展名归一唯一事实源）', () => {
 })
 
 describe('build*Args（argv 唯一事实源 — preview 与实跑同源）', () => {
-  it('buildExportArgs 归一目标扩展名并按格式追加 --vhd', () => {
+  it('buildExportArgs 归一目标扩展名并按格式追加 --vhd / --format tar.gz', () => {
     expect(buildExportArgs('U', 'u.vhd', 'vhd')).toEqual(['--export', 'U', 'u.vhdx', '--vhd'])
     expect(buildExportArgs('U', 'C:\\b\\u.tar', 'tar')).toEqual(['--export', 'U', 'C:\\b\\u.tar'])
+    expect(buildExportArgs('U', 'u.tar', 'tar.gz')).toEqual([
+      '--export',
+      'U',
+      'u.tar.gz',
+      '--format',
+      'tar.gz',
+    ])
   })
 
   it('preview* 就是 build*Args 的等价命令行（同源）', () => {
@@ -224,12 +299,14 @@ describe('build*Args（argv 唯一事实源 — preview 与实跑同源）', () 
 describe('backup naming & rotation pattern', () => {
   it('backupExtension maps vhd → vhdx', () => {
     expect(backupExtension('tar')).toBe('tar')
+    expect(backupExtension('tar.gz')).toBe('tar.gz')
     expect(backupExtension('vhd')).toBe('vhdx')
   })
 
   it('exportFileName embeds sortable timestamp and sanitizes illegal chars', () => {
     const at = new Date(2026, 0, 2, 3, 4, 5)
     expect(exportFileName('Ubuntu-22.04', 'tar', at)).toBe('Ubuntu-22.04_20260102-030405.tar')
+    expect(exportFileName('Ubuntu-22.04', 'tar.gz', at)).toBe('Ubuntu-22.04_20260102-030405.tar.gz')
     // 非法字符 %XX 转义（不与 `_` 形态碰撞）
     expect(exportFileName('a:b', 'vhd', at)).toBe('a%3Ab_20260102-030405.vhdx')
   })

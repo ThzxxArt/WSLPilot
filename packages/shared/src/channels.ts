@@ -12,6 +12,10 @@ export const CH = {
   distrosListOnline: 'distros:listOnline',
   // 磁盘管理（0.1.3）：稀疏磁盘等 wsl --manage 子操作
   distrosSetSparse: 'distros:setSparse',
+  // 存储与身份（0.1.4）：compact / resize / set-default-user
+  distrosCompact: 'distros:compact',
+  distrosResize: 'distros:resize',
+  distrosSetDefaultUser: 'distros:setDefaultUser',
 
   // io
   ioExport: 'io:export',
@@ -100,10 +104,9 @@ export const CH = {
   appWindowClose: 'app:windowClose',
   appNavigate: 'app:navigate',
   appGetWslVersion: 'app:getWslVersion',
-  // WSL 本体生命周期（0.1.3）：环境体检 / 更新 / 回滚 / 默认版本
+  // WSL 本体生命周期（0.1.3）：环境体检 / 更新 / 默认版本
   appWslEnv: 'app:wslEnv',
   appWslUpdate: 'app:wslUpdate',
-  appWslUpdateRollback: 'app:wslUpdateRollback',
   appWslSetDefaultVersion: 'app:wslSetDefaultVersion',
   appPickDirectory: 'app:pickDirectory',
   appPickSaveFile: 'app:pickSaveFile',
@@ -139,6 +142,9 @@ export const INVOKE_CHANNELS = [
   CH.distrosInstall,
   CH.distrosListOnline,
   CH.distrosSetSparse,
+  CH.distrosCompact,
+  CH.distrosResize,
+  CH.distrosSetDefaultUser,
   CH.ioExport,
   CH.ioImport,
   CH.ioMove,
@@ -191,7 +197,6 @@ export const INVOKE_CHANNELS = [
   CH.appGetWslVersion,
   CH.appWslEnv,
   CH.appWslUpdate,
-  CH.appWslUpdateRollback,
   CH.appWslSetDefaultVersion,
   CH.appPickDirectory,
   CH.appPickSaveFile,

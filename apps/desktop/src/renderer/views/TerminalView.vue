@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NDropdown, useMessage } from 'naive-ui'
 import { EmptyState } from '@wslpilot/ui'
 import { useRoute } from 'vue-router'
@@ -9,10 +9,19 @@ import { useSettingsStore } from '../stores/settings'
 import { errorLine } from '../composables/useAppError'
 import TerminalTabs, { type TerminalTabItem } from '../features/terminal/TerminalTabs.vue'
 import TerminalToolbar from '../features/terminal/TerminalToolbar.vue'
-import SplitPane from '../features/terminal/SplitPane.vue'
 import XtermPane from '../features/terminal/XtermPane.vue'
 import { DEFAULT_TERMINAL_PREFS, type TerminalFontPrefs } from '../features/terminal/theme'
-import { leafIds, paneCount } from '../features/terminal/panes'
+import {
+  leafIds,
+  paneCount,
+  layoutRects,
+  layoutDividers,
+  type PaneRect,
+  type PaneDividerPlacement,
+} from '../features/terminal/panes'
+
+// KeepAlive include 按组件名匹配；script setup 必须显式命名
+defineOptions({ name: 'TerminalView' })
 
 const route = useRoute()
 const terminal = useTerminalStore()
@@ -29,7 +38,10 @@ const lastQuery = ref('')
 const lastPrefs = ref({ caseSensitive: false, regex: false })
 const searchState = ref({ index: -1, count: 0 })
 const atBottom = ref(true)
+const panesEl = ref<HTMLElement | null>(null)
 let timer: number | undefined
+/** 分屏拖拽的 window 监听清理（拖拽中切路由/卸载时兜底） */
+let dividerDragCleanup: (() => void) | null = null
 
 function setPaneRef(id: string, el: unknown) {
   if (el) paneRefs.set(id, el as InstanceType<typeof XtermPane>)
@@ -69,6 +81,59 @@ const defaultDistro = computed(() => {
 })
 
 const defaultShell = computed(() => settings.wslDefaultShell?.trim() || '/bin/bash')
+
+/** 面板矩形 → 绝对定位样式（扁平渲染：pty 实例不随 split 重建） */
+function rectStyle(r: PaneRect): Record<string, string> {
+  return {
+    left: `${r.x * 100}%`,
+    top: `${r.y * 100}%`,
+    width: `${r.w * 100}%`,
+    height: `${r.h * 100}%`,
+  }
+}
+
+/** 分割条位置：row 竖线 / col 横线，均以父矩形比例换算 */
+function dividerStyle(d: PaneDividerPlacement): Record<string, string> {
+  if (d.dir === 'row') {
+    return {
+      left: `calc(${(d.parent.x + d.parent.w * d.ratio) * 100}% - 3px)`,
+      top: `${d.parent.y * 100}%`,
+      width: '6px',
+      height: `${d.parent.h * 100}%`,
+    }
+  }
+  return {
+    left: `${d.parent.x * 100}%`,
+    top: `calc(${(d.parent.y + d.parent.h * d.ratio) * 100}% - 3px)`,
+    width: `${d.parent.w * 100}%`,
+    height: '6px',
+  }
+}
+
+/** 拖拽分割条：按父矩形换算比例，夹取交给 store 的 setRatio */
+function onDividerDown(tabId: string, d: PaneDividerPlacement, e: PointerEvent) {
+  e.preventDefault()
+  const container = panesEl.value
+  if (!container) return
+  dividerDragCleanup?.()
+  const rect = container.getBoundingClientRect()
+  const px = rect.left + d.parent.x * rect.width
+  const py = rect.top + d.parent.y * rect.height
+  const pw = Math.max(1, d.parent.w * rect.width)
+  const ph = Math.max(1, d.parent.h * rect.height)
+  const move = (ev: PointerEvent) => {
+    const ratio = d.dir === 'row' ? (ev.clientX - px) / pw : (ev.clientY - py) / ph
+    terminal.setRatio(tabId, d.path, ratio)
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    dividerDragCleanup = null
+  }
+  dividerDragCleanup = up
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
 
 /** 时间 HH:mm:ss（标签悬浮提示用；本地时区） */
 function timeOf(ts: number): string {
@@ -115,6 +180,11 @@ function tickElapsed() {
   elapsed.value = `${m}:${ss}`
 }
 
+function startTimer() {
+  if (timer) window.clearInterval(timer)
+  timer = window.setInterval(tickElapsed, 1000)
+}
+
 onMounted(async () => {
   await Promise.all([distros.refresh(), terminal.loadLimits()])
   // query 意图优先（review M1）：已有该发行版会话则激活，否则新建
@@ -126,11 +196,34 @@ onMounted(async () => {
   } else if (!terminal.activeTabId && terminal.tabs.length > 0) {
     terminal.setActiveTab(terminal.tabs[0]!.id)
   }
-  timer = window.setInterval(tickElapsed, 1000)
+  startTimer()
+})
+
+/**
+ * KeepAlive 恢复：路由切回终端时不重建 xterm，但需要重新 fit（隐藏期间尺寸为 0），
+ * 并确保 query 意图仍被处理（deactivated 期间 watcher 也会跑，openOrActivate 幂等）。
+ */
+onActivated(() => {
+  startTimer()
+  const wanted = route.query.distro
+  if (typeof wanted === 'string' && wanted) void openOrActivate(wanted)
+  requestAnimationFrame(() => {
+    activePane()?.fit()
+    activePane()?.focus()
+  })
+})
+
+onDeactivated(() => {
+  if (timer) {
+    window.clearInterval(timer)
+    timer = undefined
+  }
 })
 
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
+  dividerDragCleanup?.()
+  dividerDragCleanup = null
 })
 
 /** 同名发行版开标签请求去重：query 快速切换 / 双入口并发时防双开（review 并发竞态） */
@@ -439,35 +532,47 @@ onUnmounted(() => {
       />
     </div>
 
-    <div class="panes">
-      <!-- v-show 保活：切换标签不 dispose xterm，现场不丢；分屏树逐标签渲染 -->
+    <div ref="panesEl" class="panes">
+      <!--
+        扁平保活（0.1.4）：所有标签的叶子都按 ptyId 渲染为独立绝对定位 host，
+        分屏只改变矩形、不改变组件树位置 —— 因此 split/close 不会销毁已有 xterm。
+      -->
       <div
         v-for="tab in terminal.tabs"
         v-show="tab.id === terminal.activeTabId"
         :key="tab.id"
         class="tab-panes"
       >
-        <SplitPane
-          :node="tab.layout"
-          :active-pane-id="terminal.activeId"
-          :tab-id="tab.id"
-          @focus="terminal.setActivePane"
-          @ratio="(t, p, r) => terminal.setRatio(t, p, r)"
+        <div
+          v-for="p in layoutRects(tab.layout)"
+          :key="p.ptyId"
+          class="pane-host"
+          :class="{ active: p.ptyId === terminal.activeId }"
+          :style="rectStyle(p)"
+          @mousedown.capture="terminal.setActivePane(p.ptyId)"
         >
-          <template #default="{ ptyId }">
-            <XtermPane
-              :ref="(el) => setPaneRef(ptyId, el)"
-              :pty-id="ptyId"
-              :prefs="prefs"
-              :initial-buffer="terminal.getBuffer(ptyId)"
-              @cursor-move="onCursorMove"
-              @request-search="onRequestSearch"
-              @search-results="(p) => onSearchResults(ptyId, p)"
-              @at-bottom="(v) => onAtBottom(ptyId, v)"
-              @context-menu="onPaneContextMenu"
-            />
-          </template>
-        </SplitPane>
+          <XtermPane
+            :ref="(el) => setPaneRef(p.ptyId, el)"
+            :pty-id="p.ptyId"
+            :prefs="prefs"
+            :initial-buffer="terminal.getBuffer(p.ptyId)"
+            @cursor-move="onCursorMove"
+            @request-search="onRequestSearch"
+            @search-results="(payload) => onSearchResults(p.ptyId, payload)"
+            @at-bottom="(v) => onAtBottom(p.ptyId, v)"
+            @context-menu="onPaneContextMenu"
+          />
+        </div>
+        <div
+          v-for="d in layoutDividers(tab.layout)"
+          :key="d.path.join('.') || 'root'"
+          class="pane-divider"
+          :class="d.dir"
+          role="separator"
+          :aria-label="d.dir === 'row' ? '左右分屏分隔条' : '上下分屏分隔条'"
+          :style="dividerStyle(d)"
+          @pointerdown="onDividerDown(tab.id, d, $event)"
+        />
       </div>
 
       <EmptyState
@@ -544,10 +649,54 @@ onUnmounted(() => {
 }
 
 .tab-panes {
+  position: relative;
   flex: 1;
   min-height: 0;
   height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 扁平 pane host：绝对定位，XtermPane 实例按 ptyId 保活 */
+.pane-host {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
   display: flex;
+  border-radius: var(--radius-md);
+  outline: 1px solid transparent;
+  transition: outline-color var(--dur-fast) var(--ease-standard);
+}
+
+.pane-host.active {
+  outline-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.pane-host > :deep(*) {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 分割条覆盖在 pane 之上；row=竖线，col=横线 */
+.pane-divider {
+  position: absolute;
+  z-index: 2;
+  background: var(--color-border-subtle);
+  border-radius: 999px;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.pane-divider.row {
+  cursor: col-resize;
+}
+
+.pane-divider.col {
+  cursor: row-resize;
+}
+
+.pane-divider:hover {
+  background: var(--color-accent);
 }
 
 .empty {

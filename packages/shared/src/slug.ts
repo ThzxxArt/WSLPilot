@@ -1,8 +1,8 @@
 /**
- * 白名单键（动作 id / 转发规则 id）安全校验的**唯一实现**。
+ * 转发规则 id 的白名单校验（`assertSafeRuleId` 的唯一实现）。
  *
- * 此前 `assertSafeActionId`（actions.ts）与 `assertSafeRuleId`（network.ts）逐字重复两份，
- * 规则漂移风险真实存在 — review 0.1.2 收敛至此，两处仅保留语义化薄壳。
+ * 动作 id 使用自己的 `assertSafeActionId`：兼容 0.1.3 的 `git:pull` 等 legacy id，
+ * 仅额外允许 `:`，其余仍禁止路径/控制字符。两者不再共享“文件名非法字符”规则。
  * 规则：非空（trim 后）、长度 1–100、无控制字符、无文件名非法字符（`\ / : * ? " < > |`）。
  */
 import { createAppError } from './errors'

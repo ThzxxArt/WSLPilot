@@ -120,17 +120,18 @@ describe('resolveActionInvocation / previewActionCommand', () => {
 })
 
 describe('assertSafeActionId', () => {
-  it('合法 id 原样返回', () => {
+  it('合法 id 原样返回（兼容 legacy colon id）', () => {
     expect(assertSafeActionId('update-all')).toBe('update-all')
     expect(assertSafeActionId('  spaced  ')).toBe('spaced')
+    expect(assertSafeActionId('git:pull')).toBe('git:pull')
   })
 
-  it('拒绝空/超长/控制字符/文件名非法字符/非字符串', () => {
+  it('拒绝空/超长/控制字符/路径非法字符/非字符串', () => {
     expect(() => assertSafeActionId('')).toThrow()
     expect(() => assertSafeActionId('x'.repeat(101))).toThrow()
     expect(() => assertSafeActionId('a\u0000b')).toThrow()
     expect(() => assertSafeActionId('a/b')).toThrow()
-    expect(() => assertSafeActionId('a:b')).toThrow()
+    expect(() => assertSafeActionId('a\\b')).toThrow()
     expect(() => assertSafeActionId(null)).toThrow()
     expect(() => assertSafeActionId(123)).toThrow()
   })

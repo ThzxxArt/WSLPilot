@@ -11,6 +11,8 @@ import {
   setRatioAt,
   splitLeaf,
   splitPaths,
+  layoutRects,
+  layoutDividers,
   MAX_LAYOUT_DEPTH,
   PANE_MAX_RATIO,
   PANE_MIN_RATIO,
@@ -145,5 +147,39 @@ describe('panes 纯逻辑（0.1.3 终端分屏）', () => {
       b: { kind: 'leaf', ptyId: 'p1' },
     }
     expect(pruneLayout(dup, new Set(['p1']))).toEqual({ kind: 'leaf', ptyId: 'p1' })
+  })
+
+  it('layoutRects：归一化矩形无缝铺满，split/close 只改几何不换 ptyId', () => {
+    const tree: PaneNode = {
+      kind: 'split',
+      dir: 'row',
+      ratio: 0.3,
+      a: leaf('a'),
+      b: { kind: 'split', dir: 'col', ratio: 0.6, a: leaf('b'), b: leaf('c') },
+    }
+    const rects = layoutRects(tree)
+    expect(rects.map((r) => r.ptyId)).toEqual(['a', 'b', 'c'])
+    expect(rects[0]).toMatchObject({ x: 0, y: 0, w: 0.3, h: 1 })
+    expect(rects[1]!.x).toBeCloseTo(0.3)
+    expect(rects[1]!.h).toBeCloseTo(0.6)
+    expect(rects[2]!.y).toBeCloseTo(0.6)
+    // 面积和 = 1（没有重叠/空洞）
+    const area = rects.reduce((s, r) => s + r.w * r.h, 0)
+    expect(area).toBeCloseTo(1)
+  })
+
+  it('layoutDividers：每个 split 一条，父矩形用于拖拽换算', () => {
+    const tree: PaneNode = {
+      kind: 'split',
+      dir: 'col',
+      ratio: 0.25,
+      a: leaf('a'),
+      b: { kind: 'split', dir: 'row', ratio: 0.5, a: leaf('b'), b: leaf('c') },
+    }
+    const ds = layoutDividers(tree)
+    expect(ds).toHaveLength(2)
+    expect(ds[0]).toMatchObject({ dir: 'col', path: [], parent: { x: 0, y: 0, w: 1, h: 1 } })
+    expect(ds[1]!.parent.h).toBeCloseTo(0.75)
+    expect(ds[1]!.parent.y).toBeCloseTo(0.25)
   })
 })

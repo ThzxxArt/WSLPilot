@@ -1,6 +1,6 @@
 {
   "name": "@wslpilot/shared",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "WSLPilot 跨进程共享类型、IPC 通道、schema 与错误码",
   "license": "MIT",

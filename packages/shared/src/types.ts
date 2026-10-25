@@ -43,7 +43,7 @@ export type LocaleCode = 'system' | 'zh-CN' | 'en-US'
 export type CloseBehavior = 'minimizeToTray' | 'quit'
 export type CursorStyle = 'block' | 'underline' | 'bar'
 export type TerminalTheme = 'auto' | 'follow-app' | 'custom'
-export type BackupFormat = 'tar' | 'vhd'
+export type BackupFormat = 'tar' | 'tar.gz' | 'vhd'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
 
 export interface GeneralSettings {
@@ -312,6 +312,12 @@ export interface IoExportRequest {
   name: string
   path: string
   format: BackupFormat
+  /**
+   * 运行中发行版是否允许先终止再导出（0.1.4）。
+   * WSL 的 `--export` 会终止运行中的发行版；false/缺省时主进程拒绝并给行动指引，
+   * 绝不在用户不知情时杀掉其终端与未保存进程。
+   */
+  terminateFirst?: boolean
 }
 
 /** io:import 入参 */
@@ -432,6 +438,71 @@ export interface WslEnvInfo {
   defaultVersion: 1 | 2 | null
   /** `--version` + `--status` 原始输出（诊断/展示用） */
   statusRaw: string
+  /** 能力矩阵（0.1.4）：未安装或探测失败为 null；UI 不得在 null 时猜测“支持” */
+  capabilities: WslCapabilities | null
+}
+
+/** 0.1.4 新增能力开关（由 `wsl --help` 主探测、版本表兜底） */
+export interface WslCapabilityFlags {
+  compact: boolean
+  resize: boolean
+  setDefaultUser: boolean
+  installLocation: boolean
+  vhdSize: boolean
+  fixedVhd: boolean
+  webDownload: boolean
+  /** `--export --format tar.gz` */
+  exportFormats: boolean
+  importFromFile: boolean
+  updatePreRelease: boolean
+  manageSparse: boolean
+}
+
+export interface WslCapabilities {
+  /** help = 逐 flag 探测；version = 旧版无 help 时的版本推断；none = 两者都失败 */
+  source: 'help' | 'version' | 'none'
+  wslVersion: string
+  /** Windows build（如 26300）；解析不到为 0 */
+  windowsBuild: number
+  /** wslc 版本（无 wslc 为空串） */
+  wslcVersion: string
+  /** inbox（系统内置 WSL，无独立 `--version`） */
+  inbox: boolean
+  flags: WslCapabilityFlags
+}
+
+/** `wsl --install` 高级选项（0.1.4） */
+export interface DistroInstallOptions {
+  name?: string
+  location?: string
+  version?: 1 | 2
+  /** 安装 WSL1 时启用可选组件（与 --version 1 配套） */
+  enableWsl1?: boolean
+  /** 如 50GB / 1TB（WSL MemoryString） */
+  vhdSize?: string
+  fixedVhd?: boolean
+  webDownload?: boolean
+}
+
+/** 能力要求的展示信息（UI 统一文案） */
+export interface WslFeatureRequirement {
+  label: string
+  minVersion: string
+}
+
+/** 能力 → 用户可读标签与最低版本（UI 门禁文案唯一事实源） */
+export const WSL_FEATURE_META: Record<keyof WslCapabilityFlags, WslFeatureRequirement> = {
+  compact: { label: '压缩磁盘', minVersion: '2.9.8' },
+  resize: { label: '扩容磁盘', minVersion: '2.5.1' },
+  setDefaultUser: { label: '设置默认用户', minVersion: '2.4.4' },
+  installLocation: { label: '自定义安装位置', minVersion: '2.5.4' },
+  vhdSize: { label: '自定义磁盘大小', minVersion: '2.5.4' },
+  fixedVhd: { label: '固定大小磁盘', minVersion: '2.5.4' },
+  webDownload: { label: '从 Internet 下载发行版', minVersion: '2.5.4' },
+  exportFormats: { label: 'tar.gz 导出', minVersion: '2.4.4' },
+  importFromFile: { label: '从本地文件安装', minVersion: '2.5.1' },
+  updatePreRelease: { label: '预发布通道', minVersion: '2.7.0' },
+  manageSparse: { label: '稀疏磁盘', minVersion: '2.0' },
 }
 
 /** `wsl --list --online` 条目（0.1.3：保留友好名，安装向导展示用） */

@@ -398,7 +398,7 @@ WSLPilot/
 │     │  │  │  ├─ registry-service.ts
 │     │  │  │  ├─ config-service.ts
 │     │  │  │  ├─ wslconf-service.ts
-│     │  │  │  ├─ wslconfig-service.ts   # 全局 %UserProfile%\.wslconfig 读写（0.1.3）
+│     │  │  │  ├─ wslconfig-service.ts   # 全局 %UserProfile%\.wslconfig 读写（0.1.4）
 │     │  │  │  ├─ pty-manager.ts
 │     │  │  │  ├─ task-runner.ts
 │     │  │  │  ├─ spawn-task.ts
@@ -446,8 +446,7 @@ WSLPilot/
 │     │     │  ├─ terminal/
 │     │     │  │  ├─ TerminalTabs.vue
 │     │     │  │  ├─ XtermPane.vue
-│     │     │  │  ├─ SplitPane.vue        # 分屏容器（0.1.3）
-│     │     │  │  ├─ panes.ts             # 分屏树纯逻辑（0.1.3）
+│     │     │  │  ├─ panes.ts             # 分屏树 + 扁平矩形/分隔条几何（0.1.4）
 │     │     │  │  ├─ TerminalToolbar.vue
 │     │     │  │  ├─ input-chunk.ts
 │     │     │  │  └─ theme.ts
@@ -1618,7 +1617,7 @@ WSLPilot 追求 **「明亮通透的现代驾驶舱」** 的美学：
 ```
 设置
 ├─ 外观      强调色、语言、关闭行为、启动行为、减弱动效
-├─ WSL       环境体检与本体生命周期（版本/更新/回滚/默认版本，0.1.3）、默认 Shell、
+├─ WSL       环境体检与本体生命周期（版本/更新/默认版本/能力矩阵，0.1.4）、默认 Shell、
 │            wsl.conf 变更后自动终止发行版、.wslconfig 编辑入口
 ├─ 终端      字体、字号、光标、回滚缓冲、行高、选中即复制、配色
 ├─ 备份      默认目录、格式、保留数量、破坏性操作前自动备份
@@ -1876,26 +1875,28 @@ export const migrations: Record<ConfigKey, Array<(old: any) => any>> = {
 
 ### 22.1 常用 wsl.exe 命令对照
 
-| 功能         | 命令                                                         |
-| ------------ | ------------------------------------------------------------ |
-| 列出（详细） | `wsl --list --verbose`                                       |
-| 列出可安装   | `wsl --list --online`                                        |
-| 安装         | `wsl --install [-d <name>]`                                  |
-| **更新 WSL** | `wsl --update [--pre-release]`                               |
-| **回滚更新** | `wsl --update --rollback`                                    |
-| 设为默认     | `wsl --set-default <name>`                                   |
-| **默认版本** | `wsl --set-default-version <1\|2>`                           |
-| 设置版本     | `wsl --set-version <name> <1\|2>`                            |
-| 终止         | `wsl --terminate <name>`                                     |
-| 全局关机     | `wsl --shutdown`                                             |
-| 注销         | `wsl --unregister <name>`                                    |
-| 导出         | `wsl --export <name> <path> [--vhd]`                         |
-| 导入         | `wsl --import <name> <installPath> <tar> [--version <1\|2>]` |
-| 就地导入     | `wsl --import-in-place <name> <vhdx>`                        |
-| 迁移磁盘     | `wsl --manage <name> --move <path>`                          |
-| **稀疏磁盘** | `wsl --manage <name> --set-sparse <true\|false>`             |
-| 状态         | `wsl --status` / `wsl --version`                             |
-| 执行命令     | `wsl -d <name> -u <user> --cd <dir> -e <program> <args...>`  |
+| 功能         | 命令                                                                           |
+| ------------ | ------------------------------------------------------------------------------ |
+| 列出（详细） | `wsl --list --verbose`                                                         |
+| 列出可安装   | `wsl --list --online`                                                          |
+| 安装         | `wsl --install [-d <name>] [--location ...] [--version 1\|2] [--vhd-size ...]` |
+| **更新 WSL** | `wsl --update [--pre-release]`（3.0 已无 `--rollback`）                        |
+| 设为默认     | `wsl --set-default <name>`                                                     |
+| **默认版本** | `wsl --set-default-version <1\|2>`                                             |
+| 设置版本     | `wsl --set-version <name> <1\|2>`                                              |
+| 终止         | `wsl --terminate <name>`                                                       |
+| 全局关机     | `wsl --shutdown`（会停止所有发行版）                                           |
+| 注销         | `wsl --unregister <name>`                                                      |
+| 导出         | `wsl --export <name> <path> [--format tar\|tar.gz\|tar.xz\|vhd]`               |
+| 导入         | `wsl --import <name> <installPath> <tar\|tar.gz> [--version <1\|2>]`           |
+| 就地导入     | `wsl --import-in-place <name> <vhdx>`                                          |
+| 迁移磁盘     | `wsl --manage <name> --move <path>`                                            |
+| **压缩磁盘** | `wsl --manage <name> --compact`                                                |
+| **扩容磁盘** | `wsl --manage <name> --resize <size>`                                          |
+| **默认用户** | `wsl --manage <name> --set-default-user <user>`                                |
+| **稀疏磁盘** | `wsl --manage <name> --set-sparse <true\|false>`                               |
+| 状态         | `wsl --status` / `wsl --version`                                               |
+| 执行命令     | `wsl -d <name> -u <user> --cd <dir> -e <program> <args...>`                    |
 
 ### 22.2 配置文件清单速查
 

@@ -70,8 +70,11 @@ chore: 升级依赖
 - 新增功能必须附带单元测试。
 - 修改 `parseDistroList`、配置 schema、IPC 通道时，同步更新对应用例。
 - UI 改动需保证 `npm run typecheck` 与组件测试通过。
-- **覆盖率门禁 ≥85%**（lines/statements/branches/functions）。`npm run test:coverage` 不达标即失败，CI 同此标准。新增代码请自带测试，避免拉低整体覆盖率。
-- **组件测试门禁另为 ≥70%**（`vitest.component.config.ts`，由 `npm run test:component` 强制执行）。
+- **覆盖率门禁**：总体 ≥85%（lines/statements/branches/functions），并对
+  `main/services` / `main/ipc/handlers` / `renderer/stores` / `renderer/composables`
+  设 per-glob 地板（见 `vitest.config.ts`）。`npm run test:coverage` 不达标即失败。
+- **组件测试门禁**：`npm run test:component` 执行 per-glob 两档地板（UI 与 renderer，
+  见 `vitest.component.config.ts`），不是“整体 70%”。
 
 ## 报告 Bug
 

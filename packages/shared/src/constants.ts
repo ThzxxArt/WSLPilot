@@ -37,9 +37,9 @@ export const DEFAULT_BACKUP_KEEP = 5
 export const MAX_PTY_SESSIONS = 10
 
 /**
- * WSL 本体全局操作串行锁键（0.1.3）：
- * 安装 WSL 本体 / `wsl --update` / `wsl --update --rollback` 共用 ——
- * 三者都改动 WSL 本体，绝不允许并发执行。
+ * WSL 本体全局操作串行锁键（0.1.3；0.1.4 起所有 install 也共用）：
+ * WSL 本体安装 / 发行版安装 / `wsl --update` / `--set-default-version` 共用 ——
+ * 它们都改动 WSL 全局状态，绝不允许并发执行；`--rollback` 已在 0.1.4 移除。
  */
 export const WSL_GLOBAL_LOCK = 'wsl:global'
 

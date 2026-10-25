@@ -69,7 +69,12 @@ describe('export form', () => {
     expect(validateExportForm({ name: 'U', path: 'C:\\x.tar', format: 'tar' })).toBeNull()
 
     const req = buildExportRequest({ name: ' U ', path: '  C:\\x.tar  ', format: 'vhd' })
-    expect(req).toEqual({ name: 'U', path: 'C:\\x.tar', format: 'vhd' })
+    expect(req).toEqual({
+      name: 'U',
+      path: 'C:\\x.tar',
+      format: 'vhd',
+      terminateFirst: false,
+    })
   })
 
   it('非法发行版名硬拦截（与执行边界同源 — review 0.1.2 根治）', () => {

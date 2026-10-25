@@ -67,18 +67,19 @@ describe('getIniValue / setIniValue / removeIniKey', () => {
     expect(getIniValue(SAMPLE, 'nope', 'nope')).toBeUndefined()
   })
 
-  it('行内注释语义：# 与 ;（空白前缀）剥离；引号值内为字面量；无空白不算注释（0.1.3）', () => {
+  it('行内注释语义：引号外任意 # 截断、; 是字面量；引号值内为字面量（对齐 WSL）', () => {
     expect(getIniValue('[wsl2]\nnetworkingMode=mirrored # 备注', 'wsl2', 'networkingMode')).toBe(
       'mirrored',
     )
+    // WSL configfile.cpp 只把 # 当注释；; 属于值本体
     expect(getIniValue('[wsl2]\nnetworkingMode=mirrored ; 备注', 'wsl2', 'networkingMode')).toBe(
-      'mirrored',
+      'mirrored ; 备注',
     )
     // 引号值：内部 # / ; 是字面量，不截断（写侧遇这些字符也会加引号，读写闭环）
     expect(getIniValue('[network]\nhostname="a # b ; c"', 'network', 'hostname')).toBe('a # b ; c')
-    // 无空白前缀不作注释（字面量，避免误伤含 # 的非引号值）
+    // WSL 在引号外遇到 # 即截断，不要求空白前缀
     expect(getIniValue('[wsl2]\nnetworkingMode=mirrored#x', 'wsl2', 'networkingMode')).toBe(
-      'mirrored#x',
+      'mirrored',
     )
   })
 
@@ -86,7 +87,8 @@ describe('getIniValue / setIniValue / removeIniKey', () => {
     const t = '[WSL2]\nMemory=4GB\n'
     expect(getIniValue(t, 'wsl2', 'memory')).toBe('4GB')
     const out = setIniValue(t, 'wsl2', 'memory', '8GB')
-    expect(out).toContain('Memory = 8GB')
+    // 0.1.4：只替换 `=` 右侧，保留用户原有空白/键写法（不再强制重排成 `key = value`）
+    expect(out).toContain('Memory=8GB')
     expect(out.match(/memory/gi)).toHaveLength(1)
     expect(out.match(/\[/g)).toHaveLength(1)
     expect(removeIniKey(t, 'wsl2', 'memory')).not.toContain('Memory')
@@ -123,9 +125,10 @@ describe('getIniValue / setIniValue / removeIniKey', () => {
     expect(out).toContain('default = alice')
   })
 
-  it('setIniValue 对含空格的字符串加引号', () => {
+  it('setIniValue 对含空格的字符串加双引号（WSL 只识别双引号）', () => {
     const out = setIniValue('', 'boot', 'command', 'service docker start')
     expect(out).toContain('command = "service docker start"')
+    expect(out).not.toContain("'service docker start'")
   })
 
   it('removeIniKey 删除整行；键不存在原样返回', () => {
@@ -148,6 +151,27 @@ describe('wsl.conf 表单模型', () => {
     expect(m.interop.enabled).toBe(true)
     expect(m.user.default).toBeUndefined()
     expect(m.boot.systemd).toBeUndefined()
+  })
+
+  it('0.1.4 新增 [gpu]/[time]/protectBinfmt/ldconfig/cgroups 可读可写', () => {
+    const text =
+      '[gpu]\nenabled=true\nappendLibPath=false\n' +
+      '[time]\nuseWindowsTimezone=true\n' +
+      '[boot]\nprotectBinfmt=false\n' +
+      '[automount]\nldconfig=false\ncgroups=disabled\n'
+    const m = parseWslConf(text)
+    expect(m.gpu.enabled).toBe(true)
+    expect(m.gpu.appendLibPath).toBe(false)
+    expect(m.time.useWindowsTimezone).toBe(true)
+    expect(m.boot.protectBinfmt).toBe(false)
+    expect(m.automount.ldconfig).toBe(false)
+    expect(m.automount.cgroups).toBe('disabled')
+
+    m.time.useWindowsTimezone = false
+    m.automount.cgroups = 'enabled'
+    const out = applyWslConfModel(text, m)
+    expect(getIniValue(out.text, 'time', 'useWindowsTimezone')).toBe('false')
+    expect(getIniValue(out.text, 'automount', 'cgroups')).toBe('enabled')
   })
 
   it('值强制转换经 parseWslConf 可观测（布尔/数字/字符串/非法视为未设置 — 模块内 coerceWslConfValue）', () => {
@@ -245,7 +269,9 @@ describe('wsl.conf 表单模型', () => {
     expect(WSL_CONF_FIELDS.length).toBeGreaterThanOrEqual(12)
     for (const f of WSL_CONF_FIELDS) {
       expect(f.label.length).toBeGreaterThan(0)
-      expect(['automount', 'network', 'interop', 'user', 'boot']).toContain(f.section)
+      expect(['automount', 'network', 'interop', 'user', 'boot', 'gpu', 'time']).toContain(
+        f.section,
+      )
     }
   })
 })
@@ -292,5 +318,57 @@ describe('diffLines / isSameText', () => {
     expect(d.filter((x) => x.type === 'del')).toHaveLength(2100)
     expect(d.filter((x) => x.type === 'add')).toHaveLength(2100)
     expect(d.filter((x) => x.type === 'same')).toHaveLength(0)
+  })
+})
+
+describe('INI 最小编辑 0.1.4（注释 / 重复段 / 引号可逆）', () => {
+  it('保留行内注释与等号旁空白，只替换值片段', () => {
+    const t = '[wsl2]\nmemory = 8GB   # 上限\n'
+    const out = setIniValue(t, 'wsl2', 'memory', '16GB')
+    expect(out).toBe('[wsl2]\nmemory = 16GB   # 上限\n')
+    expect(getIniValue(out, 'wsl2', 'memory')).toBe('16GB')
+  })
+
+  it('重复段/键取第一处（WSL first-wins）；编辑改第一处生效值', () => {
+    const t = '[wsl2]\nmemory=1GB\n[wsl2]\nmemory=2GB\n'
+    expect(getIniValue(t, 'wsl2', 'memory')).toBe('1GB')
+    const out = setIniValue(t, 'wsl2', 'memory', '3GB')
+    expect(out).toBe('[wsl2]\nmemory=3GB\n[wsl2]\nmemory=2GB\n')
+  })
+
+  it('removeIniKey 删除全部重复键（避免旧值复活）', () => {
+    const t = '[wsl2]\nmemory=1GB\n[wsl2]\nmemory=2GB\n'
+    expect(removeIniKey(t, 'wsl2', 'memory')).toBe('[wsl2]\n[wsl2]\n')
+  })
+
+  it('引号值可逆：含双引号/反斜杠路径往返不损坏，且按 WSL 规则转义', () => {
+    const path = 'C:\\Program Files\\My "WSL"'
+    const t = setIniValue('', 'wsl2', 'kernel', path)
+    // WSL 解析器把反斜杠当转义起始，写侧必须 \\ 与 \"；单引号会被当字面量。
+    expect(t).toContain('kernel = "C:\\\\Program Files\\\\My \\"WSL\\""')
+    expect(getIniValue(t, 'wsl2', 'kernel')).toBe(path)
+  })
+
+  it('未闭合引号按裸值处理（不吞整行）', () => {
+    expect(getIniValue('[wsl2]\nmemory="8GB\n', 'wsl2', 'memory')).toBe('"8GB')
+  })
+
+  it('行内注释末尾的反斜杠不是续接（不能把注释下一行并进值）', () => {
+    const t = '[boot]\ncommand = echo ok # tail \\\n[wsl2]\nmemory=1GB\n'
+    expect(getIniValue(t, 'boot', 'command')).toBe('echo ok')
+    expect(getIniValue(t, 'wsl2', 'memory')).toBe('1GB')
+  })
+
+  it('反斜杠+换行按 WSL 行续接解析；编辑后收敛为单行', () => {
+    const t = '[boot]\ncommand = /bin/sh -c "echo \\\n  hello"\n'
+    expect(getIniValue(t, 'boot', 'command')).toBe('/bin/sh -c "echo   hello"')
+    expect(setIniValue(t, 'boot', 'command', 'echo ok')).toBe('[boot]\ncommand = "echo ok"\n')
+  })
+
+  it('真实换行/制表/退格写入时转义，往返不损坏', () => {
+    const value = 'a\nb\tc\bd'
+    const out = setIniValue('', 'boot', 'command', value)
+    expect(out).toContain('command = "a\\nb\\tc\\bd"')
+    expect(getIniValue(out, 'boot', 'command')).toBe(value)
   })
 })

@@ -151,7 +151,10 @@ onUnmounted(unbindHotkeys)
       <main id="main-content" class="layout-content" tabindex="-1">
         <router-view v-slot="{ Component }">
           <transition name="fade-slide" mode="out-in">
-            <component :is="Component" />
+            <!-- 只缓存终端页：切路由不卸载 xterm（0.1.4 回归修复）；其他页保持原有生命周期 -->
+            <KeepAlive :include="['TerminalView']">
+              <component :is="Component" />
+            </KeepAlive>
           </transition>
         </router-view>
       </main>

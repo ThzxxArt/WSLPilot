@@ -201,6 +201,54 @@ describe('IoService.runExport', () => {
     expect(ctl.report).toHaveBeenCalledWith(100, '导出完成')
   })
 
+  it('导出输出为空 → IO_ERROR 并清掉空文件（不把空归档当成功）', async () => {
+    const target = join(outDir, 'empty.tar')
+    const spawn = makeSpawnFn([], () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(0))
+      },
+    }))
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: true }],
+      basePath: distroDir,
+      spawn,
+    })
+    const io = createIoService(deps)
+    await expect(
+      io.runExport({ name: 'Ubuntu', path: target, format: 'tar' }, makeCtl([]) as never),
+    ).rejects.toMatchObject({ code: 'IO_ERROR', message: expect.stringContaining('输出文件为空') })
+    await expect(fs.stat(target)).rejects.toBeTruthy()
+  })
+
+  it('tar.gz 能力不支持时在终止运行中发行版之前拒绝（不先杀终端）', async () => {
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Running', version: 2, isDefault: true }],
+      basePath: distroDir,
+      spawn: makeSpawnFn([], () => ({})),
+    })
+    ;(deps.wsl as any).getCapabilities = vi.fn(async () => ({
+      source: 'version',
+      wslVersion: '2.4.0',
+      windowsBuild: 19045,
+      wslcVersion: '',
+      inbox: false,
+      flags: { exportFormats: false },
+    }))
+    const io = createIoService(deps)
+    await expect(
+      io.runExport(
+        {
+          name: 'Ubuntu',
+          path: join(outDir, 'u.tar.gz'),
+          format: 'tar.gz',
+          terminateFirst: true,
+        },
+        makeCtl([]) as never,
+      ),
+    ).rejects.toMatchObject({ code: 'WSL_FEATURE_UNSUPPORTED' })
+    expect(deps.wsl.terminate).not.toHaveBeenCalled()
+  })
+
   it('passes --vhd flag and refuses vhd for WSL1', async () => {
     const calls: string[][] = []
     const spawn = makeSpawnFn(calls, () => ({
@@ -518,6 +566,35 @@ describe('IoService.runImport', () => {
       makeCtl([]) as never,
     )
     expect(calls[0]).toEqual(['--import', 'New', installDir, archive, '--version', '1'])
+  })
+
+  it('imports tar.gz archive via native wsl --import（无 --format，WSL 自动识别）', async () => {
+    const archive = join(srcDir, 'a.tar.gz')
+    await fs.writeFile(archive, Buffer.alloc(100))
+    const calls: string[][] = []
+    let listCount = 0
+    const deps = makeDeps({ distros: [], spawn: makeSpawnFn(calls, () => ({})) })
+    deps.wsl.list = vi.fn(async () => {
+      listCount++
+      return listCount > 1
+        ? [{ name: 'NewGz', state: 'Stopped', version: 2, isDefault: false }]
+        : []
+    }) as any
+    const io = createIoService(deps)
+    await io.runImport(
+      {
+        name: 'NewGz',
+        installPath: installDir,
+        archivePath: archive,
+        format: 'tar.gz',
+        version: 2,
+        inPlace: false,
+      },
+      makeCtl([]) as never,
+    )
+    expect(calls[0]).toEqual(['--import', 'NewGz', installDir, archive, '--version', '2'])
+    // 导入 argv 没有 --format：不得调用导出能力探测/门禁
+    expect((deps.wsl as any).getCapabilities).toBeUndefined()
   })
 
   it('导入命令成功但未检测到新发行版 → TASK_FAILED（不谎报完成 — review）', async () => {
@@ -1073,12 +1150,15 @@ describe('IoService backups listing & rotation', () => {
     await fs.writeFile(join(dir, 'my.tar'), 'x')
     await fs.writeFile(join(dir, 'weird.vhdx'), 'x')
     await fs.writeFile(join(dir, 'Ubuntu_20250102-000000.vhdx'), 'x')
+    await fs.writeFile(join(dir, 'Ubuntu_20250103-000000.tar.gz'), 'x')
     const io = createIoService(makeDeps({ config: makeConfig({ defaultDir: dir }) }))
     const list = await io.listBackups()
     expect(list.map((f) => f.name).sort()).toEqual([
       'Ubuntu_20250102-000000.vhdx',
+      'Ubuntu_20250103-000000.tar.gz',
       'ubuntu_20250101-000000.tar',
     ])
+    expect(list.find((f) => f.name.endsWith('.tar.gz'))?.format).toBe('tar.gz')
   })
 
   it('cleanupBackups 按发行版分组轮转全部备份', async () => {
@@ -1440,5 +1520,80 @@ describe('IoService.runClone（0.1.3 克隆发行版）', () => {
       tempArchive.slice(0, tempArchive.lastIndexOf('/')) ||
       tempArchive.slice(0, tempArchive.lastIndexOf('\\'))
     expect(fsSync.existsSync(tempDir)).toBe(false)
+  })
+})
+
+describe('IoService 0.1.4（导出运行中发行版 / tar.gz / 克隆停机）', () => {
+  let outDir: string
+  beforeEach(async () => {
+    vi.mocked(runWsl).mockClear()
+    outDir = await tmp()
+  })
+
+  it('运行中未确认 terminateFirst → DISTRO_RUNNING，不启动 wsl --export', async () => {
+    const calls: string[][] = []
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Running', version: 2, isDefault: true }],
+      spawn: makeSpawnFn(calls, () => ({})),
+    })
+    const io = createIoService(deps)
+    const ctl = makeCtl([]) as unknown as Parameters<typeof io.runExport>[1]
+    await expect(
+      io.runExport({ name: 'Ubuntu', path: join(outDir, 'x'), format: 'tar' }, ctl),
+    ).rejects.toMatchObject({ code: 'DISTRO_RUNNING' })
+    expect(calls).toHaveLength(0)
+    expect(deps.wsl.terminate).not.toHaveBeenCalled()
+  })
+
+  it('运行中 + terminateFirst → 先 terminate 再导出，输出 tar.gz', async () => {
+    const calls: string[][] = []
+    const spawn = makeSpawnFn(calls, () => ({
+      before: async (args) => {
+        await fs.writeFile(args[2]!, Buffer.alloc(128))
+      },
+    }))
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Running', version: 2, isDefault: true }],
+      spawn,
+    })
+    const io = createIoService(deps)
+    const ctl = makeCtl([]) as unknown as Parameters<typeof io.runExport>[1]
+    const out = await io.runExport(
+      {
+        name: 'Ubuntu',
+        path: join(outDir, 'Ubuntu-backup'),
+        format: 'tar.gz',
+        terminateFirst: true,
+      },
+      ctl,
+    )
+    expect(deps.wsl.terminate).toHaveBeenCalledWith('Ubuntu')
+    expect(calls[0]).toEqual([
+      '--export',
+      'Ubuntu',
+      join(outDir, 'Ubuntu-backup.tar.gz'),
+      '--format',
+      'tar.gz',
+    ])
+    expect(out.format).toBe('tar.gz')
+    expect(out.path.endsWith('.tar.gz')).toBe(true)
+  })
+
+  it('克隆运行中源发行版直接拒绝（不静默杀会话）', async () => {
+    const deps = makeDeps({
+      distros: [{ name: 'Ubuntu', state: 'Running', version: 2, isDefault: true }],
+    })
+    const io = createIoService(deps)
+    const ctl = makeCtl([]) as unknown as Parameters<typeof io.runClone>[1]
+    await expect(
+      io.runClone({ name: 'Ubuntu', newName: 'U2', installPath: outDir }, ctl),
+    ).rejects.toMatchObject({ code: 'DISTRO_RUNNING' })
+    expect(deps.wsl.terminate).not.toHaveBeenCalled()
+  })
+
+  it('resolveTargetFile 支持 tar.gz 扩展名归一', () => {
+    expect(resolveTargetFile('backup', 'tar.gz')).toMatch(/backup\.tar\.gz$/)
+    expect(resolveTargetFile('backup.tar', 'tar.gz')).toMatch(/backup\.tar\.gz$/)
+    expect(resolveTargetFile('backup.vhdx', 'tar.gz')).toMatch(/backup\.tar\.gz$/)
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { NButton, NInput, NRadioGroup, NRadioButton, NSelect, NAlert } from 'naive-ui'
-import type { DistroView } from '@wslpilot/shared'
+import type { BackupFormat, DistroView } from '@wslpilot/shared'
 import type { ImportForm } from './forms'
 import { isValidDistroName } from './forms'
 
@@ -14,7 +14,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:form': [ImportForm] }>()
 
+/** 浏览对话框失败的非模态提示（向导可独立挂载，不依赖全局 message provider） */
+const browseError = ref('')
+
 type ImportMode = 'tar' | 'vhd-copy' | 'vhd-inplace'
+
+/** 路径 → 备份格式（tar.gz 优先于 .tar；.tgz 也按 gzip 处理） */
+function formatFromPath(path: string): BackupFormat {
+  const p = path.trim()
+  if (/\.vhdx?$/i.test(p)) return 'vhd'
+  if (/\.(?:tar\.gz|tgz)$/i.test(p)) return 'tar.gz'
+  return 'tar'
+}
 
 const mode = computed<ImportMode>(() => {
   if (props.form.inPlace) return 'vhd-inplace'
@@ -43,13 +54,13 @@ function setArchivePath(v: string | number | null) {
     return
   }
   // 手动输入的路径同样按扩展名同步格式（与浏览按钮同一规则 — review 0.1.2 根治），
-  // 非 vhdx 自动退出就地导入（非法组合 — review M12）
-  const looksVhd = /\.vhdx?$/i.test(trimmed)
+  // 非 vhdx 自动退出就地导入（非法组合 — review M12）；.tar.gz 自动识别为 gzip
+  const format = formatFromPath(trimmed)
   emit('update:form', {
     ...props.form,
     archivePath: s,
-    format: looksVhd ? 'vhd' : 'tar',
-    inPlace: looksVhd ? props.form.inPlace : false,
+    format,
+    inPlace: format === 'vhd' ? props.form.inPlace : false,
   })
 }
 
@@ -76,34 +87,42 @@ const nameInvalid = computed(
 )
 
 async function browseArchive() {
-  const picked = await window.wslAPI.app.pickOpenFile({
-    defaultPath: props.defaultDir,
-    filters:
-      props.form.format === 'vhd'
-        ? [
-            { name: 'WSL 虚拟磁盘', extensions: ['vhdx', 'vhd'] },
-            { name: '所有文件', extensions: ['*'] },
-          ]
-        : [
-            { name: 'TAR 归档', extensions: ['tar'] },
-            { name: '所有文件', extensions: ['*'] },
-          ],
-  })
-  if (picked) {
-    const looksVhd = /\.vhdx?$/i.test(picked)
-    emit('update:form', {
-      ...props.form,
-      archivePath: picked,
-      format: looksVhd ? 'vhd' : 'tar',
-      // 选到非 vhdx 时自动退出就地导入（非法组合 — review M12）
-      inPlace: looksVhd ? props.form.inPlace : false,
+  try {
+    const picked = await window.wslAPI.app.pickOpenFile({
+      defaultPath: props.defaultDir,
+      filters:
+        props.form.format === 'vhd'
+          ? [
+              { name: 'WSL 虚拟磁盘', extensions: ['vhdx', 'vhd'] },
+              { name: '所有文件', extensions: ['*'] },
+            ]
+          : [
+              { name: 'TAR / gzip 归档', extensions: ['tar', 'gz'] },
+              { name: '所有文件', extensions: ['*'] },
+            ],
     })
+    if (picked) {
+      const format = formatFromPath(picked)
+      emit('update:form', {
+        ...props.form,
+        archivePath: picked,
+        format,
+        // 选到非 vhdx 时自动退出就地导入（非法组合 — review M12）
+        inPlace: format === 'vhd' ? props.form.inPlace : false,
+      })
+    }
+  } catch (e) {
+    browseError.value = e instanceof Error ? e.message : '选择备份文件失败'
   }
 }
 
 async function browseInstallDir() {
-  const picked = await window.wslAPI.app.pickDirectory(props.defaultDir)
-  if (picked) emit('update:form', { ...props.form, installPath: picked })
+  try {
+    const picked = await window.wslAPI.app.pickDirectory(props.defaultDir)
+    if (picked) emit('update:form', { ...props.form, installPath: picked })
+  } catch (e) {
+    browseError.value = e instanceof Error ? e.message : '选择安装目录失败'
+  }
 }
 </script>
 
@@ -125,7 +144,7 @@ async function browseInstallDir() {
       <div class="field">
         <div class="label">导入方式</div>
         <n-radio-group :value="mode" @update:value="setMode">
-          <n-radio-button value="tar"> tar 归档导入 </n-radio-button>
+          <n-radio-button value="tar"> tar / tar.gz 归档导入 </n-radio-button>
           <n-radio-button value="vhd-copy"> vhdx 复制导入 </n-radio-button>
           <n-radio-button value="vhd-inplace"> vhdx 就地导入 </n-radio-button>
         </n-radio-group>
@@ -156,11 +175,12 @@ async function browseInstallDir() {
         <div class="row">
           <n-input
             :value="archivePath"
-            placeholder="选择 .tar 或 .vhdx 备份文件"
+            placeholder="选择 .tar / .tar.gz / .vhdx 备份文件"
             @update:value="setArchivePath"
           />
           <n-button secondary @click="browseArchive"> 浏览… </n-button>
         </div>
+        <div v-if="browseError" class="hint error">{{ browseError }}</div>
       </div>
 
       <div v-if="!form.inPlace" class="field">
@@ -205,6 +225,10 @@ async function browseInstallDir() {
   font-size: 12px;
   color: var(--color-text-secondary);
   line-height: 1.6;
+}
+
+.hint.error {
+  color: var(--color-danger);
 }
 
 .row {

@@ -183,6 +183,19 @@ describe('useNetworkStore', () => {
     expect(s.statusLoading).toBe(false)
   })
 
+  it('repairRuleIds 去重并写入，幂等时不再 save', async () => {
+    wslAPI.network.saveRules.mockResolvedValue({})
+    const s = useNetworkStore()
+    s.rules = [RULE, { ...RULE, listenPort: 3001 }]
+    expect(s.duplicateRuleIds).toEqual(['dev-3000'])
+
+    await expect(s.repairRuleIds()).resolves.toBe(true)
+    expect(s.rules.map((r) => r.id)).toEqual(['dev-3000', 'dev-3000-2'])
+    expect(wslAPI.network.saveRules).toHaveBeenCalledTimes(1)
+    await expect(s.repairRuleIds()).resolves.toBe(false)
+    expect(wslAPI.network.saveRules).toHaveBeenCalledTimes(1)
+  })
+
   it('upsert 新增与更新', async () => {
     wslAPI.network.saveRules.mockResolvedValue({})
     const s = useNetworkStore()

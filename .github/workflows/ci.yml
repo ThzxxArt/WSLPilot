@@ -117,3 +117,54 @@ jobs:
           name: e2e-test-results
           path: test-results/
           if-no-files-found: ignore
+
+  package-windows:
+    name: Package · Verify release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    needs: e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Enable npm 12 (corepack)
+        run: corepack enable && corepack prepare npm@12 --activate
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build main/preload/renderer
+        run: npm run build --workspace @wslpilot/desktop
+
+      # 0.1.4：CI 也走真实打包 + verify:release。未配置证书时显式 --allow-unsigned，
+      # 让“未签名”成为可见的警告而不是静默假绿（签名决策见 README/发布说明）。
+      - name: Package (signed when CSC_* secrets are configured)
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+        run: npm run package --workspace @wslpilot/desktop
+
+      - name: Verify release metadata / artifacts / signature
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: |
+          if ($env:CSC_LINK) {
+            node scripts/verify-release.mjs --require-artifacts
+          } else {
+            node scripts/verify-release.mjs --allow-unsigned --require-artifacts
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: wslpilot-windows-installer
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 14

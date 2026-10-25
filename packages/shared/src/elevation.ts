@@ -7,12 +7,16 @@
  * - 提权脚本二次校验 op 与 program 的对应关系（纵深防御）
  */
 import {
+  buildCompactArgs,
+  buildInstallArgs,
   buildMoveArgs,
+  buildResizeArgs,
+  buildSetDefaultUserArgs,
   buildSetDefaultVersionArgs,
   buildSetSparseArgs,
   buildUpdateArgs,
-  buildUpdateRollbackArgs,
   formatCommand,
+  WSL_SIZE_RE,
 } from './commands'
 import { assertSafeDistroName, createAppError } from './errors'
 import { assertSafeBusId } from './usbipd'
@@ -32,9 +36,12 @@ export const ELEVATION_OPS = [
   'wsl.setVersion',
   // 0.1.3 WSL 本体生命周期
   'wsl.update',
-  'wsl.updateRollback',
   'wsl.setDefaultVersion',
   'wsl.setSparse',
+  // 0.1.4 存储与身份
+  'wsl.compact',
+  'wsl.resize',
+  'wsl.setDefaultUser',
 ] as const
 
 export type ElevationOp = (typeof ELEVATION_OPS)[number]
@@ -49,9 +56,11 @@ export const ELEVATION_PROGRAMS: Record<ElevationOp, string> = {
   'wsl.install': 'wsl.exe',
   'wsl.setVersion': 'wsl.exe',
   'wsl.update': 'wsl.exe',
-  'wsl.updateRollback': 'wsl.exe',
   'wsl.setDefaultVersion': 'wsl.exe',
   'wsl.setSparse': 'wsl.exe',
+  'wsl.compact': 'wsl.exe',
+  'wsl.resize': 'wsl.exe',
+  'wsl.setDefaultUser': 'wsl.exe',
 }
 
 /** 提权操作的展示名（任务日志 / 确认框） */
@@ -64,9 +73,11 @@ export const ELEVATION_OP_LABEL: Record<ElevationOp, string> = {
   'wsl.install': '安装 WSL 发行版',
   'wsl.setVersion': '转换 WSL 版本',
   'wsl.update': '更新 WSL',
-  'wsl.updateRollback': '回滚 WSL 更新',
   'wsl.setDefaultVersion': '设置默认 WSL 版本',
   'wsl.setSparse': '设置稀疏磁盘',
+  'wsl.compact': '压缩发行版磁盘',
+  'wsl.resize': '扩容发行版磁盘',
+  'wsl.setDefaultUser': '设置发行版默认用户',
 }
 
 /** 结构化参数（各 op 的形状由 schema 校验） */
@@ -93,6 +104,18 @@ const distroField = z
   })
 
 const portField = z.number().int().min(1).max(65535)
+
+/** WSL MemoryString（--vhd-size / --resize）：与 WSL ParseMemorySize 同源 */
+const wslSizeField = z
+  .string()
+  .trim()
+  .regex(WSL_SIZE_RE, '磁盘大小格式应为整数 + B/K/KB/M/MB/G/GB/T/TB（如 50GB，不接受小数）')
+
+/** Linux 用户名（--set-default-user）：保守白名单，避免把怪字符送进 WSL */
+const linuxUserField = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z_][A-Za-z0-9_-]{0,31}$/, '用户名格式非法（字母/数字/下划线/连字符，1–32 位）')
 
 /** 各 op 的参数 schema（仅 validateElevationRequest 内部消费，不导出） */
 const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
@@ -147,6 +170,14 @@ const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
   'wsl.install': z
     .object({
       name: distroField.optional(),
+      location: ioPathSchema.optional(),
+      version: z.union([z.literal(1), z.literal(2)]).optional(),
+      enableWsl1: z.boolean().optional(),
+      vhdSize: wslSizeField.optional(),
+      fixedVhd: z.boolean().optional(),
+      webDownload: z.boolean().optional(),
+      /** 默认 true；老 WSL 的 plain 重试必须能显式关掉 */
+      noLaunch: z.boolean().optional(),
     })
     .strict(),
   'wsl.setVersion': z
@@ -160,7 +191,6 @@ const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
       preRelease: z.boolean().optional(),
     })
     .strict(),
-  'wsl.updateRollback': z.object({}).strict(),
   'wsl.setDefaultVersion': z
     .object({
       version: z.union([z.literal(1), z.literal(2)]),
@@ -170,6 +200,23 @@ const ELEVATION_PARAM_SCHEMAS: Record<ElevationOp, z.ZodTypeAny> = {
     .object({
       name: distroField,
       sparse: z.boolean(),
+    })
+    .strict(),
+  'wsl.compact': z
+    .object({
+      name: distroField,
+    })
+    .strict(),
+  'wsl.resize': z
+    .object({
+      name: distroField,
+      size: wslSizeField,
+    })
+    .strict(),
+  'wsl.setDefaultUser': z
+    .object({
+      name: distroField,
+      user: linuxUserField,
     })
     .strict(),
 }
@@ -242,10 +289,17 @@ export function buildElevatedInvocation(req: ElevationRequest): ElevatedInvocati
       args = buildMoveArgs(validated.params.name as string, validated.params.path as string)
       break
     case 'wsl.install':
-      // --no-launch：装完不拉起发行版首启会话（否则 wsl.exe 挂住永不退出 — review 根治）
-      args = validated.params.name
-        ? ['--install', '-d', validated.params.name as string, '--no-launch']
-        : ['--install', '--no-launch']
+      // 与 WslService 实跑同一 buildInstallArgs（唯一 argv 事实源）
+      args = buildInstallArgs({
+        name: validated.params.name as string | undefined,
+        location: validated.params.location as string | undefined,
+        version: validated.params.version as 1 | 2 | undefined,
+        enableWsl1: validated.params.enableWsl1 === true,
+        vhdSize: validated.params.vhdSize as string | undefined,
+        fixedVhd: validated.params.fixedVhd === true,
+        webDownload: validated.params.webDownload === true,
+        noLaunch: validated.params.noLaunch !== false,
+      })
       break
     case 'wsl.setVersion':
       args = ['--set-version', validated.params.name as string, String(validated.params.version)]
@@ -254,14 +308,23 @@ export function buildElevatedInvocation(req: ElevationRequest): ElevatedInvocati
       // 与 WslService 实跑同一 build*Args（唯一 argv 事实源）
       args = buildUpdateArgs(validated.params.preRelease === true)
       break
-    case 'wsl.updateRollback':
-      args = buildUpdateRollbackArgs()
-      break
     case 'wsl.setDefaultVersion':
       args = buildSetDefaultVersionArgs(validated.params.version === 1 ? 1 : 2)
       break
     case 'wsl.setSparse':
       args = buildSetSparseArgs(validated.params.name as string, validated.params.sparse === true)
+      break
+    case 'wsl.compact':
+      args = buildCompactArgs(validated.params.name as string)
+      break
+    case 'wsl.resize':
+      args = buildResizeArgs(validated.params.name as string, validated.params.size as string)
+      break
+    case 'wsl.setDefaultUser':
+      args = buildSetDefaultUserArgs(
+        validated.params.name as string,
+        validated.params.user as string,
+      )
       break
     default: {
       const never: never = validated.op
@@ -271,15 +334,20 @@ export function buildElevatedInvocation(req: ElevationRequest): ElevatedInvocati
   return { program, args, preview: formatCommand(program, args) }
 }
 
-/** Helper 请求文件载荷（写入临时 JSON，供提权进程读取）— 支持批量，合并 UAC 弹窗 */
+/**
+ * Helper 载荷（经命令行 base64 传入）— 支持批量，合并 UAC 弹窗。
+ *
+ * v2 起 **不再携带 program/args**：Helper 只接收 op + 结构化 params，并按内置映射
+ * 自行重建 argv。载荷不再落临时文件，UAC 弹窗期间同用户进程无法改写 op/params；
+ * 即使改写也无法注入任意 argv（TOCTOU 缺口已关闭）。
+ */
 export interface ElevationHelperOp {
   op: ElevationOp
-  program: string
-  args: string[]
+  params: ElevationParams
 }
 
 export interface ElevationHelperPayload {
-  v: 1
+  v: 2
   ops: ElevationHelperOp[]
 }
 
@@ -304,7 +372,7 @@ export interface ElevationRunResult {
 }
 
 /**
- * 结构化请求 → Helper 载荷（唯一事实源：op → program/argv）。
+ * 结构化请求 → Helper 载荷（唯一事实源：op + params）。
  * 一次调用生成一个载荷；批量操作合并为一次 UAC 提权会话。
  */
 export function buildElevationHelperPayload(
@@ -314,10 +382,10 @@ export function buildElevationHelperPayload(
     throw createAppError('CONFIG_INVALID', { message: '提权请求不能为空' })
   }
   return {
-    v: 1,
+    v: 2,
     ops: requests.map((req) => {
-      const inv = buildElevatedInvocation(req)
-      return { op: validateElevationRequest(req).op, program: inv.program, args: inv.args }
+      const validated = validateElevationRequest(req)
+      return { op: validated.op, params: validated.params }
     }),
   }
 }

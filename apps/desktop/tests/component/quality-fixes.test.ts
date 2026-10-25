@@ -71,7 +71,6 @@ const wslAPI = {
       statusRaw: '',
     })),
     wslUpdate: vi.fn(async () => ({ taskId: 'upd' })),
-    wslUpdateRollback: vi.fn(async () => ({ taskId: 'upd-rb' })),
     wslSetDefaultVersion: vi.fn(async () => {}),
     signatureStatus: vi.fn(async () => ({ checked: true, signed: true, detail: '' })),
     openPath: vi.fn(async () => {}),

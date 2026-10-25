@@ -4,6 +4,8 @@ import { assertSafeDistroName } from './errors'
 import { assertSafeActionId } from './actions'
 import { assertSafeRuleId } from './network'
 import { assertSafeBusId } from './usbipd'
+import { distroMetaSchema } from './config-schema'
+import { WSL_SIZE_RE } from './commands'
 import {
   DEFAULT_BACKUP_KEEP,
   CONFIG_FILE_NAMES,
@@ -38,6 +40,18 @@ export const nameSchema = z
 
 /** 会话/任务 id：非空 + 长度上限 */
 export const idSchema = z.string().min(1).max(200)
+
+/** WSL MemoryString（--vhd-size / --resize）：整数 + B/K/KB/M/MB/G/GB/T/TB（WSL 大小写敏感） */
+export const wslSizeSchema = z
+  .string()
+  .trim()
+  .regex(WSL_SIZE_RE, '磁盘大小格式应为整数 + B/K/KB/M/MB/G/GB/T/TB（如 50GB，不接受小数）')
+
+/** Linux 用户名（--set-default-user） */
+export const linuxUserSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z_][A-Za-z0-9_-]{0,31}$/, '用户名格式非法（字母/数字/下划线/连字符，1–32 位）')
 
 /**
  * metrics:sample 单发行版名：在 nameSchema 基础上拒绝全局保留键 `*`。
@@ -135,17 +149,11 @@ export const fileFilterSchema = z.object({
   extensions: z.array(z.string().min(1).max(20)).min(1).max(20),
 })
 
-export const metaPayloadSchema = z.object({
-  name: nameSchema,
-  alias: z.string().default(''),
-  tags: z.array(z.string().max(64)).max(20).default([]),
-  color: z.string().default(''),
-  icon: z.string().default(''),
-  note: z.string().default(''),
-  startupCwd: z.string().default('~'),
-  pinned: z.boolean().default(false),
-  quickActions: z.array(z.string().max(64)).max(20).default([]),
-})
+/**
+ * distros.jsonc 元数据与 `meta:set` 负载共用同一 schema（0.1.4 单一契约）。
+ * 此前两处各写一份，`quickActions` / `name` 的边界会漂移。
+ */
+export const metaPayloadSchema = distroMetaSchema
 
 /** 拒绝控制字符的字符串（max 由调用方先约束，refine 后无链式方法） */
 function noControl(maxLen: number) {
@@ -217,9 +225,31 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     name: nameSchema,
     sparse: z.boolean(),
   }),
-  // 安装走 `wsl --install [-d name]`，无「安装源」参数（installSource 幽灵配置已删除）
-  [CH.distrosInstall]: z.object({
-    name: nameSchema.optional(),
+  // 安装走 `wsl --install`（0.1.4：可选安装落点 / WSL 版本 / 磁盘大小）
+  [CH.distrosInstall]: z
+    .object({
+      name: nameSchema.optional(),
+      location: ioPathSchema.optional(),
+      version: z.union([z.literal(1), z.literal(2)]).optional(),
+      enableWsl1: z.boolean().default(false),
+      vhdSize: wslSizeSchema.optional(),
+      fixedVhd: z.boolean().default(false),
+      webDownload: z.boolean().default(false),
+    })
+    .default({}),
+  // 存储与身份（0.1.4）
+  [CH.distrosCompact]: z.object({
+    name: nameSchema,
+    /** WSL 的 --compact 会终止运行中发行版：必须显式确认 */
+    terminateFirst: z.boolean().default(false),
+  }),
+  [CH.distrosResize]: z.object({
+    name: nameSchema,
+    size: wslSizeSchema,
+  }),
+  [CH.distrosSetDefaultUser]: z.object({
+    name: nameSchema,
+    user: linuxUserSchema,
   }),
   [CH.registryDetail]: nameSchema,
   [CH.metaGet]: nameSchema,
@@ -267,14 +297,16 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   [CH.ioExport]: z.object({
     name: nameSchema,
     path: ioPathSchema,
-    format: z.enum(['tar', 'vhd']),
+    format: z.enum(['tar', 'tar.gz', 'vhd']),
+    // WSL 的 --export 会终止运行中发行版：false/缺省时主进程拒绝
+    terminateFirst: z.boolean().default(false),
   }),
   [CH.ioImport]: z.object({
     name: nameSchema,
     // 就地导入（inPlace）时允许为空；归档导入由 IoService 再校验非空
     installPath: ioPathSchema.or(z.literal('')),
     archivePath: ioPathSchema,
-    format: z.enum(['tar', 'vhd']),
+    format: z.enum(['tar', 'tar.gz', 'vhd']),
     version: z.union([z.literal(1), z.literal(2)]).default(2),
     inPlace: z.boolean().default(false),
   }),

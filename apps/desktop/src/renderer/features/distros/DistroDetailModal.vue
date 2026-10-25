@@ -16,6 +16,7 @@ import {
 import {
   formatBytes,
   formatKbPair,
+  isValidWslSize,
   type DistroMeta,
   type Metrics,
   type RegistryDetail,
@@ -25,6 +26,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useTasksStore } from '../../stores/tasks'
 import { useActionsStore } from '../../stores/actions'
 import { useMetricsStore } from '../../stores/metrics'
+import { useWslEnvStore } from '../../stores/wsl-env'
 import { errorLine } from '../../composables/useAppError'
 import { stateLabel } from '../../composables/state-label'
 import { taskStatusLabel, taskTypeLabel } from '../../composables/useTaskProgress'
@@ -44,6 +46,7 @@ const distros = useDistrosStore()
 const settings = useSettingsStore()
 const tasks = useTasksStore()
 const metricsStore = useMetricsStore()
+const wslEnv = useWslEnvStore()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -64,12 +67,47 @@ const converting = ref(false)
 const unregistering = ref(false)
 /** 稀疏磁盘操作在途（0.1.3） */
 const sparseBusy = ref(false)
+/** 存储与身份（0.1.4） */
+const compactBusy = ref(false)
+const resizeBusy = ref(false)
+const userBusy = ref(false)
+const shutdownBusy = ref(false)
+const resizeSize = ref('')
+const defaultUser = ref('')
 /** 克隆弹窗（0.1.3） */
 const cloneOpen = ref(false)
 
 const distro = computed(() => distros.byName(props.distroName))
 /** 运行状态单一事实源：按钮组严格状态驱动（review 停/启按钮错位根治） */
 const isRunning = computed(() => distro.value?.state === 'Running')
+/** 能力门禁（0.1.4）：未探测/旧版一律禁用 */
+const isWsl2 = computed(() => distro.value?.version === 2)
+const canCompact = computed(() => isWsl2.value && wslEnv.can('compact'))
+const canResize = computed(() => isWsl2.value && wslEnv.can('resize'))
+const canSetUser = computed(() => wslEnv.can('setDefaultUser'))
+/** 存储区一次只允许一个长任务：多个按钮共用单任务观察器，并发会互相覆盖 */
+const anyStorageBusy = computed(
+  () =>
+    compactBusy.value ||
+    resizeBusy.value ||
+    userBusy.value ||
+    sparseBusy.value ||
+    shutdownBusy.value,
+)
+const compactReason = computed(() =>
+  isWsl2.value ? wslEnv.requirement('compact') : '压缩磁盘仅支持 WSL2 发行版',
+)
+const resizeReason = computed(() =>
+  isWsl2.value ? wslEnv.requirement('resize') : '扩容磁盘仅支持 WSL2 发行版',
+)
+/** 宿主文件 - 内部已用：只能作为“可回收上限”估算，不是承诺值 */
+const reclaimEstimate = computed(() => {
+  const host = distro.value?.hostDiskBytes
+  const used = metrics.value?.diskUsedKB
+  if (!host || used === undefined || used <= 0) return null
+  const diff = host - used * 1024
+  return diff > 0 ? diff : 0
+})
 
 // ── 元数据编辑（meta:set 闭环 — 全字段可编辑，不留半套编辑面）──
 const actionsStore = useActionsStore()
@@ -205,6 +243,7 @@ watch(
     if (show) {
       if (!wasOpen) activeTab.value = 'overview'
       resetEditing()
+      void wslEnv.load()
       void loadDetail()
     }
     wasOpen = show
@@ -332,8 +371,13 @@ async function onConvert() {
   }
 }
 
-/** 任务终态观察（0.1.3 任务化操作共用）：返回停止函数 */
-let stopTaskWatch: (() => void) | null = null
+/**
+ * 任务终态观察（0.1.3 任务化操作共用）。
+ * 每个 taskId 独立 watcher，不能共用一个 stopTaskWatch：并发两个存储任务时，
+ * 后一个会停掉前一个的 watcher，前一个 busy 永远不归零。
+ * `immediate` 覆盖“任务在 watchTask 注册前已终态”的窗口（极快失败/成功）。
+ */
+const taskWatchers = new Map<string, () => void>()
 function watchTask(
   taskId: string,
   handlers: {
@@ -342,8 +386,16 @@ function watchTask(
     onCanceled?: () => void
   },
 ) {
-  stopTaskWatch?.()
-  stopTaskWatch = watch(
+  taskWatchers.get(taskId)?.()
+  let settled = false
+  let stop: (() => void) | null = null
+  const finish = () => {
+    if (settled) return
+    settled = true
+    stop?.()
+    taskWatchers.delete(taskId)
+  }
+  stop = watch(
     () => tasks.byId(taskId)?.status,
     (status, prev) => {
       if (!status || status === 'running' || status === prev) return
@@ -351,27 +403,57 @@ function watchTask(
       if (status === 'success') handlers.onSuccess(entry?.message ?? '任务完成')
       else if (status === 'failed') handlers.onFailed(entry?.error ?? '任务失败')
       else handlers.onCanceled?.()
-      stopTaskWatch?.()
-      stopTaskWatch = null
+      finish()
     },
+    { immediate: true },
   )
+  if (settled) {
+    stop()
+    return
+  }
+  taskWatchers.set(taskId, stop)
 }
-onUnmounted(() => stopTaskWatch?.())
+onUnmounted(() => {
+  for (const stop of taskWatchers.values()) stop()
+  taskWatchers.clear()
+})
 
-/** 启用稀疏磁盘（0.1.3）：wsl --manage <name> --set-sparse true */
+/** 启用稀疏磁盘：wsl --manage <name> --set-sparse true（WSL2；VHD 未被占用） */
 async function onSparse() {
-  if (sparseBusy.value) return
+  if (anyStorageBusy.value) return
+  if (!isWsl2.value) {
+    message.warning('稀疏磁盘仅支持 WSL2 发行版')
+    return
+  }
+  if (!wslEnv.can('manageSparse')) {
+    message.warning(wslEnv.requirement('manageSparse'))
+    return
+  }
+  if (isRunning.value) {
+    message.warning(`请先停止 ${props.distroName}，再启用稀疏磁盘`)
+    return
+  }
+  const ok = await confirmDangerous({
+    title: '启用稀疏磁盘',
+    content:
+      `将执行 wsl --manage ${props.distroName} --set-sparse true。\n\n` +
+      '稀疏磁盘让 vhdx 按实际使用增长；启用前请确认该发行版已停止，且 WSL 虚拟机未占用该虚拟磁盘。',
+  })
+  if (!ok) return
   sparseBusy.value = true
   try {
     const entry = await tasks.startSparse(props.distroName, true)
     if (!entry) {
+      sparseBusy.value = false
       message.error(errorLine(tasks.lastError, '启动稀疏磁盘操作失败'))
       return
     }
     watchTask(entry.taskId, {
-      onSuccess: (text) => {
-        message.success(text)
+      onSuccess: async (text) => {
         sparseBusy.value = false
+        await distros.refresh()
+        await loadDetail()
+        message.success(text)
       },
       onFailed: (err) => {
         message.error(err)
@@ -384,6 +466,196 @@ async function onSparse() {
   } catch (e) {
     sparseBusy.value = false
     message.error(errorLine(e, '稀疏磁盘操作失败'))
+  }
+}
+
+/**
+ * 完全停止 WSL（wsl --shutdown）：3.0.3 的 resize/set-default-user/set-sparse 在发行版
+ * Stopped 后仍可能报 VHD in use，官方错误提示就是执行 shutdown。这是全局破坏性动作，
+ * 必须逐次确认，绝不自动执行。
+ */
+async function onShutdownAll() {
+  if (anyStorageBusy.value) return
+  const ok = await confirmDangerous({
+    title: '停止全部 WSL',
+    content:
+      '将执行 wsl --shutdown：停止所有发行版、所有终端会话与 WSL 虚拟机。\n\n' +
+      '未保存的工作会丢失。这是扩容 / 设置默认用户 / 稀疏磁盘在“VHD 正在使用中”时的官方前置步骤。确定继续吗？',
+  })
+  if (!ok) return
+  shutdownBusy.value = true
+  try {
+    await window.wslAPI.distros.shutdown()
+    // shutdown 返回后给 WSL 一点释放 VHD 的时间
+    await new Promise((r) => setTimeout(r, 800))
+    await distros.refresh()
+    await loadDetail()
+    message.success('WSL 已完全停止；现在可以重试扩容 / 默认用户 / 稀疏磁盘')
+  } catch (e) {
+    message.error(errorLine(e, '停止全部 WSL 失败'))
+  } finally {
+    shutdownBusy.value = false
+  }
+}
+
+/** 压缩磁盘（0.1.4）：会终止运行中发行版，必须在确认框里说清 */
+async function onCompact() {
+  if (!canCompact.value || anyStorageBusy.value) {
+    if (!canCompact.value) message.warning(compactReason.value)
+    return
+  }
+  const running = isRunning.value
+  const ok = await confirmDangerous({
+    title: '压缩虚拟磁盘',
+    content:
+      `将执行 wsl --manage ${props.distroName} --compact。\n\n` +
+      (running
+        ? '该发行版正在运行，压缩会先终止它：其中的终端、编辑器与未保存进程都会被关闭。\n\n'
+        : '') +
+      '压缩只回收虚拟磁盘中未使用的块，不删除发行版内文件；完成后刷新可查看宿主文件变化。',
+  })
+  if (!ok) return
+  compactBusy.value = true
+  const before = distro.value?.hostDiskBytes
+  try {
+    const entry = await tasks.startCompact(props.distroName, running)
+    if (!entry) {
+      compactBusy.value = false
+      message.error(errorLine(tasks.lastError, '启动压缩失败'))
+      return
+    }
+    watchTask(entry.taskId, {
+      onSuccess: async (text) => {
+        await distros.refresh()
+        await loadDetail()
+        const after = distros.byName(props.distroName)?.hostDiskBytes
+        const delta =
+          before !== undefined && after !== undefined && before > after
+            ? ` · 宿主文件减少 ${formatBytes(before - after)}`
+            : ''
+        compactBusy.value = false
+        message.success(`${text}${delta}`)
+      },
+      onFailed: async (err) => {
+        compactBusy.value = false
+        // compact 会先 terminate 运行中发行版，即便随后失败，状态也已经变了；
+        // 自动刷新关闭时不能继续显示 Running。
+        await distros.refresh()
+        await loadDetail()
+        message.error(err)
+      },
+      onCanceled: async () => {
+        compactBusy.value = false
+        await distros.refresh()
+        await loadDetail()
+        message.info('压缩已取消')
+      },
+    })
+  } catch (e) {
+    compactBusy.value = false
+    message.error(errorLine(e, '压缩失败'))
+  }
+}
+
+/** 扩容磁盘（0.1.4）：只增不减；运行中先拒绝 */
+async function onResize() {
+  if (!canResize.value || anyStorageBusy.value) {
+    if (!canResize.value) message.warning(resizeReason.value)
+    return
+  }
+  const size = resizeSize.value.trim()
+  if (!isValidWslSize(size)) {
+    message.warning('磁盘大小格式应为整数 + B/K/KB/M/MB/G/GB/T/TB（如 50GB，不接受小数）')
+    return
+  }
+  if (isRunning.value) {
+    message.warning(`请先停止 ${props.distroName}，扩容要求文件系统离线`)
+    return
+  }
+  const ok = await confirmDangerous({
+    title: '扩容虚拟磁盘',
+    content:
+      `将执行 wsl --manage ${props.distroName} --resize ${size}。\n\n` +
+      '该操作只扩大虚拟磁盘，不会缩小或删除数据；完成后发行版内可用空间以 df 为准。',
+  })
+  if (!ok) return
+  resizeBusy.value = true
+  try {
+    const entry = await tasks.startResize(props.distroName, size)
+    if (!entry) {
+      resizeBusy.value = false
+      message.error(errorLine(tasks.lastError, '启动扩容失败'))
+      return
+    }
+    watchTask(entry.taskId, {
+      onSuccess: async (text) => {
+        resizeBusy.value = false
+        await distros.refresh()
+        await loadDetail()
+        message.success(text)
+      },
+      onFailed: (err) => {
+        resizeBusy.value = false
+        message.error(err)
+      },
+      onCanceled: () => {
+        resizeBusy.value = false
+        message.info('扩容已取消')
+      },
+    })
+  } catch (e) {
+    resizeBusy.value = false
+    message.error(errorLine(e, '扩容失败'))
+  }
+}
+
+/** 设置默认用户（0.1.4）：Linux 用户名白名单；运行中拒绝 */
+async function onSetDefaultUser() {
+  if (!canSetUser.value || anyStorageBusy.value) {
+    if (!canSetUser.value) message.warning(wslEnv.requirement('setDefaultUser'))
+    return
+  }
+  const user = defaultUser.value.trim()
+  if (!/^[A-Za-z_][A-Za-z0-9_-]{0,31}$/.test(user)) {
+    message.warning('用户名格式非法（字母/数字/下划线/连字符，1–32 位）')
+    return
+  }
+  if (isRunning.value) {
+    message.warning(`请先停止 ${props.distroName}，再设置默认用户`)
+    return
+  }
+  const ok = await confirmDangerous({
+    title: '设置默认用户',
+    content: `将执行 wsl --manage ${props.distroName} --set-default-user ${user}。\n\n新会话生效；请确认该用户在发行版内已存在。`,
+  })
+  if (!ok) return
+  userBusy.value = true
+  try {
+    const entry = await tasks.startSetDefaultUser(props.distroName, user)
+    if (!entry) {
+      userBusy.value = false
+      message.error(errorLine(tasks.lastError, '启动设置默认用户失败'))
+      return
+    }
+    watchTask(entry.taskId, {
+      onSuccess: async (text) => {
+        userBusy.value = false
+        defaultUser.value = ''
+        await loadDetail()
+        message.success(text)
+      },
+      onFailed: (err) => {
+        userBusy.value = false
+        message.error(err)
+      },
+      onCanceled: () => {
+        userBusy.value = false
+        message.info('设置默认用户已取消')
+      },
+    })
+  } catch (e) {
+    userBusy.value = false
+    message.error(errorLine(e, '设置默认用户失败'))
   }
 }
 
@@ -469,14 +741,27 @@ async function startEdit() {
 }
 
 async function saveMeta() {
+  const tags = editTags.value
+    .split(/[,，]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+  if (tags.length > 20) {
+    message.warning('标签最多 20 个；请先删减')
+    return
+  }
+  if (tags.some((t) => t.length > 64)) {
+    message.warning('单个标签最多 64 个字符；请先缩短')
+    return
+  }
+  if (editQuickActions.value.length > 20) {
+    message.warning('快捷动作最多 20 个；请先删减')
+    return
+  }
   try {
     await window.wslAPI.meta.set({
       name: props.distroName,
       alias: editAlias.value.trim(),
-      tags: editTags.value
-        .split(/[,，]/)
-        .map((t) => t.trim())
-        .filter(Boolean),
+      tags,
       color: editColor.value.trim(),
       icon: editIcon.value.trim(),
       note: editNote.value.trim(),
@@ -545,26 +830,128 @@ async function saveMeta() {
           </div>
         </div>
 
-        <!-- 磁盘管理（0.1.3）：宿主文件 vs 发行版内已用，稀疏磁盘一键启用 -->
-        <div v-if="distro" class="disk-line">
-          <span class="disk-text">
-            宿主磁盘文件：{{
-              distro.hostDiskBytes ? formatBytes(distro.hostDiskBytes) : '（不可用）'
-            }}
-          </span>
-          <n-button
-            size="tiny"
-            secondary
-            :loading="sparseBusy"
-            :disabled="sparseBusy"
-            @click="onSparse"
-          >
-            启用稀疏磁盘
-          </n-button>
-          <span class="hint"
-            >WSL 2.0+ · 将未使用空间归还 Windows（不删数据）·
-            与运行中「磁盘」采样对照可见膨胀程度</span
-          >
+        <!-- 存储与身份（0.1.4）：宿主 vhdx / 内部用量 / compact / resize / 默认用户 -->
+        <div v-if="distro" class="storage-card">
+          <div class="storage-head">
+            <span class="storage-title">存储与身份</span>
+            <span class="hint"
+              >WSL{{ distro.version }} · {{ isRunning ? '运行中' : '已停止' }}</span
+            >
+          </div>
+          <div class="storage-grid">
+            <div class="storage-item">
+              <span class="storage-label">宿主磁盘文件</span>
+              <span class="storage-value">
+                {{ distro.hostDiskBytes ? formatBytes(distro.hostDiskBytes) : '（不可用）' }}
+              </span>
+            </div>
+            <div class="storage-item">
+              <span class="storage-label">内部已用 / 总量</span>
+              <span class="storage-value">
+                {{
+                  metrics ? formatKbPair(metrics.diskUsedKB, metrics.diskTotalKB) : '（运行中采样）'
+                }}
+              </span>
+            </div>
+            <div class="storage-item">
+              <span class="storage-label">可回收上限估算</span>
+              <span class="storage-value">
+                {{ reclaimEstimate !== null ? formatBytes(reclaimEstimate) : '—' }}
+              </span>
+            </div>
+            <div class="storage-item">
+              <span class="storage-label">默认 UID</span>
+              <span class="storage-value">
+                {{ detail?.defaultUid !== undefined ? detail.defaultUid : '—' }}
+              </span>
+            </div>
+          </div>
+
+          <div class="storage-actions">
+            <n-button
+              size="small"
+              secondary
+              :disabled="!canCompact || anyStorageBusy"
+              :loading="compactBusy"
+              :title="canCompact ? '' : compactReason"
+              @click="onCompact"
+            >
+              压缩磁盘
+            </n-button>
+            <n-button
+              size="small"
+              secondary
+              :disabled="!canResize || anyStorageBusy || isRunning"
+              :loading="resizeBusy"
+              :title="canResize ? (isRunning ? '请先停止发行版' : '') : resizeReason"
+              @click="onResize"
+            >
+              扩容
+            </n-button>
+            <n-input
+              v-model:value="resizeSize"
+              size="small"
+              class="storage-input"
+              placeholder="50GB"
+              :disabled="!canResize || anyStorageBusy || isRunning"
+            />
+            <n-button
+              size="small"
+              secondary
+              :disabled="!canSetUser || anyStorageBusy || isRunning"
+              :loading="userBusy"
+              :title="
+                canSetUser
+                  ? isRunning
+                    ? '请先停止发行版'
+                    : ''
+                  : wslEnv.requirement('setDefaultUser')
+              "
+              @click="onSetDefaultUser"
+            >
+              设置默认用户
+            </n-button>
+            <n-input
+              v-model:value="defaultUser"
+              size="small"
+              class="storage-input"
+              placeholder="用户名"
+              :disabled="!canSetUser || anyStorageBusy || isRunning"
+            />
+            <n-button
+              size="tiny"
+              quaternary
+              :loading="sparseBusy"
+              :disabled="anyStorageBusy || !isWsl2 || !wslEnv.can('manageSparse')"
+              :title="
+                !isWsl2
+                  ? '稀疏磁盘仅支持 WSL2 发行版'
+                  : wslEnv.can('manageSparse')
+                    ? ''
+                    : wslEnv.requirement('manageSparse')
+              "
+              @click="onSparse"
+            >
+              启用稀疏磁盘
+            </n-button>
+            <n-button
+              size="tiny"
+              quaternary
+              type="warning"
+              :loading="shutdownBusy"
+              :disabled="anyStorageBusy"
+              title="wsl --shutdown：停止所有发行版与终端，未保存工作会丢失"
+              @click="onShutdownAll"
+            >
+              关闭 WSL 虚拟机
+            </n-button>
+          </div>
+          <div class="hint">
+            压缩会终止运行中的发行版；扩容/稀疏/默认用户要求 WSL 完全停止（仅发行版 Stopped
+            不够，3.0.3 实测会报“VHD 当前正在使用中”）。可点「关闭 WSL 虚拟机」执行
+            <code>wsl --shutdown</code>（会停止所有发行版，未保存工作会丢失）。 可回收上限 =
+            宿主文件 − 内部已用，实际回收量由 WSL 决定。
+          </div>
         </div>
 
         <!-- 最近任务（§12.4） -->
@@ -708,7 +1095,12 @@ async function saveMeta() {
           </n-button>
           <n-button secondary :disabled="!distro" @click="startEdit"> 编辑元数据 </n-button>
           <!-- 克隆发行版（0.1.3）：导出→导入组合流程，失败自动回滚 -->
-          <n-button secondary :disabled="!distro || cloneOpen" @click="cloneOpen = true">
+          <n-button
+            secondary
+            :disabled="!distro || cloneOpen || isRunning"
+            :title="isRunning ? '克隆要求源发行版已停止' : ''"
+            @click="cloneOpen = true"
+          >
             克隆发行版
           </n-button>
           <!-- wsl --set-version 要求已停止：运行中禁用并在点击路径拦截；converting 防双击 -->
@@ -888,21 +1280,61 @@ async function saveMeta() {
   color: var(--color-text-tertiary);
 }
 
-.disk-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+.storage-card {
   margin-top: 12px;
-  padding: 8px 12px;
-  border: 1px dashed var(--color-border-default);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.disk-text {
-  font-size: 12px;
+.storage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storage-title {
+  font-size: 12.5px;
+  font-weight: 650;
   color: var(--color-text-primary);
+}
+
+.storage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}
+
+.storage-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.storage-label {
+  color: var(--color-text-secondary);
+}
+
+.storage-value {
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, monospace);
   font-variant-numeric: tabular-nums;
+}
+
+.storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.storage-input {
+  width: 120px;
 }
 
 .mini-value {

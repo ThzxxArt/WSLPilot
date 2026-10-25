@@ -5,6 +5,119 @@
 
 > **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
 
+## [0.1.4] - 2026-10-25
+
+### Notes
+
+- **0.1.4 为 WSL 3.0 对齐版（回归收口 + 平台能力）**：先修 0.1.3 已交付但实际不可用的
+  行为，再补 WSL 3.0 的发行版存储治理与配置面；不做容器管理（留 0.2.0），不换 Electron。
+- 真机基线：**WSL 3.0.3.0 / 内核 6.18.54.1-1 / wslc 3.0.3.0 / Windows build 26300**。
+  `wsl --help` 在 3.0.3 退出码为 255 且写 stderr，能力探测按“有选项文本即解析”处理。
+- 真机发现并据此修正：`wsl --import` 后发行版显示 Stopped，但 VHD 仍被 WSL 占用；
+  `--resize` / `--set-default-user` / `--set-sparse` 会报 `WSL_E_DISTRO_NOT_STOPPED`
+  （“VHD 当前正在使用中”），`--terminate` 不能释放，必须在 Windows 侧执行
+  `wsl --shutdown`。应用不自动 shutdown，只在详情页提供显式确认按钮与可行动错误文案。
+
+### Removed
+
+- **失效的 WSL 更新回滚**：`wsl --update --rollback` 在 WSL 3.0 已移除，2.7.3+ 也会失败。
+  删除 `app:wslUpdateRollback` 通道、preload API、handler、service、argv builder、提权 op
+  与界面入口；高级菜单改为「查看 WSL 版本历史 / 手动安装旧版」（外链 GitHub Releases）。
+- `SplitPane.vue` 递归分屏容器（被扁平 pane host 取代，避免分屏时重建 xterm）。
+
+### Fixed
+
+- **终端保活**：路由层仅对 `TerminalView` 启用 `KeepAlive`；分屏改为「扁平 pane host +
+  计算矩形 + 独立分隔条」，以 ptyId 为稳定 key。切路由再回、分屏/关闭面板不再销毁已有
+  xterm 实例与 scrollback。
+- **并发互斥**：抽出 `KeyedLock`，TaskRunner 与直接操作共用同一把 key 锁；
+  所有 `install`（含按名安装）与 `wsl --update`/`--set-default-version` 共用全局锁；
+  `distros:start|terminate|setDefault|shutdown`、`app:wslSetDefaultVersion` 在运行中任务
+  存在时拒绝并列出任务；`wsl --shutdown` 在拿到全局锁后再次检查，避免 check-then-act 杀掉刚入队的任务；
+  shutdown 窗口内直接操作（start/terminate/setDefault/withLock）同样被拒绝，只有 shutdown 自身可执行。
+- **导出/压缩停机语义**：`--export`/`--compact` 运行中发行版必须显式 `terminateFirst`；
+  删除“导出过程中可以继续使用该发行版”的错误文案；克隆运行中源发行版直接拒绝。
+  注销前自动备份会显式先终止发行版（否则安全网本身必然失败）。导出结束若输出为空，
+  按 `IO_ERROR` 回滚并删除空文件，不再把空归档当成功。
+- **纯中文 UTF-16LE 无 BOM 解码**：编码探测增加 streaming 严格 UTF-8 判据，128 字节
+  探测窗口截断多字节字符时不再误判为 UTF-16LE。
+- **INI 最小编辑**：只替换 `=` 右侧值，保留行内注释、键写法与等号旁空白；重复段/键取
+  **第一处**（与 WSL configfile.cpp 的 first-wins 一致）；`#` 是唯一行内注释符；
+  双引号 + `\\`/`\"`/`\n`/`\t`/`\b` 转义可逆（Windows 路径不再被 WSL 当非法转义）；
+  支持 WSL 的反斜杠+换行续接，编辑后收敛为单行，不留下孤立续接片段。
+- **容量语法**：`--vhd-size`/`--resize` 与 `.wslconfig` size 字段统一为 WSL
+  `ParseMemorySize` 语法（整数 + `B|K|KB|M|MB|G|GB|T|TB`，大小写敏感、无小数）；
+  `8G`/裸字节可保存，`1.5GB`/`8gb` 在执行前拒绝。
+- **resize 只增**：读取 VHDX 元数据中的**虚拟容量**做硬门禁；目标 ≤ 当前值直接拒绝，
+  不再依赖无保护作用的 `--allow-unsafe`（WSL 目标更小时会实际缩容）。
+- **单一契约**：`meta:set` 复用 `distros.jsonc` 的 distroMetaSchema；动作 id / 快捷动作在
+  配置读入与执行边界同一校验（兼容 legacy `git:pull`，上限统一 100）；network.jsonc
+  v1→v2 迁移修复重复/空规则 id；v2 读取时修复空/非法 id、保留重复并交给网络页
+  「一键修复」（修复动作纳入写队列）；distros.jsonc v1→v2 迁移截断超长/超量标签与
+  快捷动作，避免收紧 schema 时被 sanitize 静默丢弃。
+- **提权载荷**：helper 输入从可被同用户改写的 `request.json` 改为命令行 base64；
+  helper 脚本本身传 SHA-256，提权进程先校验字节再从内存执行，UAC 期间替换临时脚本
+  只会校验失败；`wsl.install` 的 `noLaunch` 随结构化参数传入，老 WSL 的 plain
+  重试在提权路径同样生效。
+- **安装高级选项**：`.wslconfig` 的 `general.distributionInstallPath` /
+  `wsl2.defaultVhdSize` 作为安装向导占位默认值；WSL1 时禁用并清空磁盘大小/固定磁盘；
+  折叠高级选项不再静默丢弃已填值，校验错误自动展开并显示。
+- **退出链**：`app.exit(0)` 改为 flush 后 `app.quit()`，electron-updater 的
+  `autoInstallOnAppQuit` 不再被跳过；`Logger.flush()` 等待日志队列落盘。
+- **配置版本**：非整数 `$schemaVersion` 归一为整数，避免每次启动重复迁移。
+- **对话框**：导出/导入/迁移/克隆的浏览按钮与备份页第 4 步任务记录丢失场景全部有
+  失败提示或退出按钮，不再“点了没反应/无按钮死路”。
+- **备份向导**：第 2 步禁用「下一步」时显示具体原因；运行中未勾选先停止、导入重名
+  （大小写不敏感）在进入下一步前即提示；迁移同样要求先确认终止运行中发行版；查找发行版
+  统一 trim 名称；WSL1 禁选 vhd；tar.gz 在能力不足时不再预选，
+  `runExport` 在终止终端前做能力门禁；导入不再用导出 flag 误拦截（导入 argv 无
+  `--format`）；运行中导出的等价命令预览包含前置 `wsl --terminate`。
+- **存储卡**：压缩失败/取消后刷新 distros（compact 可能已先终止运行中发行版）；
+  存储任务独立 watcher + 互斥 busy，快速终态不会卡住；稀疏操作补确认、WSL2/能力/停止校验。
+- **设置/安装**：WSL 环境卡「刷新」同时刷新共享能力 store，向导不再只能重启恢复；
+  预发布更新按 `updatePreRelease` 能力门禁；默认备份格式 tar.gz 也按 `exportFormats`
+  能力置灰/降级；克隆文案/按钮与“必须已停止”的服务语义一致。
+- `normalizeState` 先匹配 `uninstalling`，不再把卸载中显示成安装中。
+
+### Added
+
+- **WSL 能力矩阵**（`WslCapabilities`）：`wsl --help` 主探测 + 版本表兜底 + `wslc version`；
+  版本兜底直接从 `WSL_FEATURE_META` 推导，避免 UI 文案与能力表漂移；新增
+  `WSL_FEATURE_UNSUPPORTED` 与渲染层 `wsl-env` store；设置 → WSL 展示能力清单。
+- **存储与身份**：`distros:compact` / `distros:resize` / `distros:setDefaultUser`；
+  详情页新增存储卡（宿主 vhdx、内部用量、可回收上限估算、压缩、扩容、默认用户、稀疏、
+  停止全部 WSL），危险动作确认 + 等价命令 + 能力门禁。
+- **安装高级选项**：`wsl --install` 支持 `--location` / `--version` / `--vhd-size` /
+  `--fixed-vhd` / `--web-download` / `--enable-wsl1`；安装向导新增高级选项与命令预览。
+- **安装完成判定基线只取一次**：在第一次 spawn 前记录目标是否已注册，`--no-launch`
+  降级重试复用同一基线；避免第一次尝试注册出的目标被误判为“装前已存在”，
+  从而关闭注册信号、让 plain 首启会话永久挂住。命令正常退出但目标仍不在名单时
+  报 `TASK_FAILED`，不再假报安装完成。
+- **tar.gz 备份**：导出格式 `tar.gz`（WSL 2.4.4+），命名/轮转/列表/扩展名/导入全链路；
+  3.0.3 真机验证 `wsl --import` 可直接识别 tar.gz。
+- **配置面**：`.wslconfig` 新增 `[general]` 与高价值键（kernel/kernelCommandLine/safeMode/
+  localhostForwarding/guiApplications/nestedVirtualization/vmIdleTimeout/dnsProxy/
+  defaultVhdSize/gpuSupport/maxCrashDumpCount/instanceIdleTimeout/distributionInstallPath/
+  bestEffortDnsParsing/ignoredPorts/hostAddressLoopback）；`networkingMode` 支持
+  `none`/`consomme`；`autoMemoryReclaim` 读写规范化 `dropCache`；未知 enum 允许保存并提示。
+  `wsl.conf` 补 `[gpu]`、`[time]`、`[boot] protectBinfmt`、`[automount] ldconfig/cgroups`。
+- **发布校验**：`scripts/verify-release.mjs` 校验版本/tag/CHANGELOG/产物/签名/publisherName；
+  未签名必须显式 `--allow-unsigned`。
+
+### Verification
+
+- 单测 1,252 条全通过（新增能力探测、KeyedLock、TaskRunner 锁、VHDX 虚拟容量、存储任务、
+  导出停机、WSL size 语法、INI first-wins/转义/续接、迁移、tar.gz 等用例）；组件 374 条、
+  E2E 4 条、视觉回归 2 条通过；typecheck / lint / format:check 全绿。
+- 真机验证：WSL 3.0.3 上 tar.gz 导入/导出、compact、能力探测（help 全 flag）、VHDX
+  虚拟容量读取通过；resize/default-user/sparse 的“VHD in use”路径已按官方提示映射
+  （需 Windows 侧 shutdown）。
+- Windows 0.1.4 安装包已用 Windows Node 重建并复制到 `apps/desktop/release`；
+  `verify-release --allow-unsigned --require-artifacts --tag v0.1.4` 在 Windows 上通过
+  （setup sha512 一致，签名 NotSigned 显式放行，publisherName 未配置）。
+- 未覆盖：2.7.14 / inbox / Windows 10 真机不足；resize/default-user/sparse 的 shutdown 后
+  成功路径未在本会话执行。发布前必须按 `docs/testing.md` 复验并补 `publisherName`。
+
 ## [0.1.3] - 2026-10-14
 
 ### Notes

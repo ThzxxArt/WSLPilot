@@ -25,6 +25,7 @@ import {
   type IoExportRequest,
   type IoImportRequest,
   type IoMoveRequest,
+  type WslCapabilities,
 } from '@wslpilot/shared'
 import { expandEnv, getRawCommand, runWsl, spawnWsl, type Logger } from '@wslpilot/kit'
 import type { WslService } from './wsl-service'
@@ -47,7 +48,10 @@ export interface IoSettingsReader {
 
 export interface IoServiceDeps {
   logger: Logger
-  wsl: Pick<WslService, 'list' | 'terminate'>
+  wsl: Pick<WslService, 'list' | 'terminate'> & {
+    /** 能力门禁（生产注入；测试 mock 可省略） */
+    getCapabilities?: () => Promise<WslCapabilities | null>
+  }
   registry: Pick<RegistryService, 'detail'>
   configService: IoSettingsReader
   spawnFn?: SpawnWslFn
@@ -148,6 +152,23 @@ export function createIoService(deps: IoServiceDeps): IoService {
     return configService.loadSync('settings').backup
   }
 
+  /**
+   * tar.gz 是 0.1.4 新能力：渲染层禁用不等于执行边界安全。
+   * 必须在**终止运行中发行版之前**判定，否则会先杀掉用户终端再报“不支持”。
+   * 能力探测失败（undefined）时按未知处理：继续执行，由 wsl 自己给出真实错误。
+   */
+  async function assertFormatSupported(format: BackupFormat): Promise<void> {
+    if (format !== 'tar.gz' || !deps.wsl.getCapabilities) return
+    const caps = await deps.wsl.getCapabilities().catch(() => null)
+    if (caps && !caps.flags.exportFormats) {
+      throw createAppError('WSL_FEATURE_UNSUPPORTED', {
+        message: '当前 WSL 不支持 tar.gz 导出（--format tar.gz）',
+        detail: `需要 WSL 2.4.4+（当前 ${caps.wslVersion || '未知'}）`,
+        suggestion: '请在「设置 → WSL」更新 WSL，或改用 tar 备份',
+      })
+    }
+  }
+
   async function dirSizeBytes(dir: string): Promise<number> {
     let total = 0
     let walked = 0
@@ -240,8 +261,10 @@ export function createIoService(deps: IoServiceDeps): IoService {
 
   async function runExport(req: IoExportRequest, ctl: TaskControl): Promise<BackupFileInfo> {
     const name = assertSafeDistroName(req.name)
-    const format: BackupFormat = req.format === 'vhd' ? 'vhd' : 'tar'
+    const format: BackupFormat =
+      req.format === 'vhd' ? 'vhd' : req.format === 'tar.gz' ? 'tar.gz' : 'tar'
     ctl.throwIfCanceled()
+    await assertFormatSupported(format)
 
     const target = await findDistro(name)
     if (!target) {
@@ -252,6 +275,23 @@ export function createIoService(deps: IoServiceDeps): IoService {
         message: 'vhd 格式仅支持 WSL2 发行版',
         suggestion: '请改用 tar 格式，或先把发行版转换为 WSL2',
       })
+    }
+    /**
+     * WSL 的 `--export` 会终止运行中的发行版（连同其中的终端与未保存进程）。
+     * 0.1.3 的界面文案写成“可以继续使用”，是把数据风险说反了；
+     * 0.1.4 起必须由用户显式传入 terminateFirst，主进程才允许继续。
+     */
+    if (target.state === 'Running') {
+      if (!req.terminateFirst) {
+        throw createAppError('DISTRO_RUNNING', {
+          message: `发行版 ${name} 正在运行，导出会终止它`,
+          suggestion:
+            '请先停止该发行版，或勾选「导出前先停止该发行版（会关闭其中的终端与进程）」后重试',
+        })
+      }
+      ctl.log(`导出会终止运行中的发行版，先执行 wsl --terminate ${name}`)
+      await wsl.terminate(name)
+      ctl.report(2, '已终止发行版，准备导出')
     }
 
     const outPath = assertSafeIoPath(req.path, '导出路径')
@@ -323,12 +363,13 @@ export function createIoService(deps: IoServiceDeps): IoService {
       }
       // spawnTask 成功 = 任务成功（成功优先语义，取消信号不再改判 — 核验修复）
       const st = await fs.stat(finalPath).catch(() => null)
-      if (!st) {
+      if (!st || st.size === 0) {
         await rollbackPartial()
         throw createAppError('IO_ERROR', {
-          message: '导出结束但未找到输出文件',
+          message: st ? '导出结束但输出文件为空' : '导出结束但未找到输出文件',
           detail: finalPath,
           rawCommand: getRawCommand('wsl.exe', args),
+          suggestion: '请查看日志中的 wsl --export 输出；不要使用空归档恢复发行版',
         })
       }
 
@@ -364,10 +405,12 @@ export function createIoService(deps: IoServiceDeps): IoService {
 
   async function runImport(req: IoImportRequest, ctl: TaskControl): Promise<void> {
     const name = assertSafeDistroName(req.name)
-    const format: BackupFormat = req.format === 'vhd' ? 'vhd' : 'tar'
+    const format: BackupFormat =
+      req.format === 'vhd' ? 'vhd' : req.format === 'tar.gz' ? 'tar.gz' : 'tar'
     const inPlace = req.inPlace === true
     ctl.throwIfCanceled()
-
+    // 导入 argv 不带 --format（WSL 按归档类型自动识别），不能用导出 flag 预拦截：
+    // 那会把一条根本不需要 --format 的导入挡在门外。旧版是否支持 gz 由 wsl 自己报错。
     const existing = await findDistro(name)
     if (existing) {
       throw createAppError('TASK_FAILED', {
@@ -381,7 +424,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
     if (!srcStat || !srcStat.isFile()) {
       throw createAppError('IO_ERROR', {
         message: `找不到导入文件：${archivePath}`,
-        suggestion: '请选择已导出的 .tar / .vhdx 备份文件',
+        suggestion: '请选择已导出的 .tar / .tar.gz / .vhdx 备份文件',
       })
     }
     if (format === 'vhd' && !/\.(vhdx?|vhd)$/i.test(archivePath)) {
@@ -667,6 +710,13 @@ export function createIoService(deps: IoServiceDeps): IoService {
     if (!source) {
       throw createAppError('DISTRO_NOT_FOUND', { message: `找不到发行版 ${name}，无法克隆` })
     }
+    // 克隆内部走 --export，会终止源发行版：要求先停止，不静默杀用户会话
+    if (source.state === 'Running') {
+      throw createAppError('DISTRO_RUNNING', {
+        message: `发行版 ${name} 正在运行，无法克隆`,
+        suggestion: '请先停止源发行版后重试（克隆会导出完整文件系统）',
+      })
+    }
     const existing = await findDistro(newName)
     if (existing) {
       throw createAppError('TASK_FAILED', {
@@ -759,7 +809,7 @@ export function createIoService(deps: IoServiceDeps): IoService {
           path: full,
           sizeBytes: st.size,
           modifiedAt: st.mtime.toISOString(),
-          format: /\.vhdx$/i.test(e.name) ? 'vhd' : 'tar',
+          format: /\.vhdx$/i.test(e.name) ? 'vhd' : /\.tar\.gz$/i.test(e.name) ? 'tar.gz' : 'tar',
         })
       } catch {
         /* 单条失败忽略 */

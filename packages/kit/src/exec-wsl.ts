@@ -17,12 +17,29 @@ export interface WslExecOptions {
 export type WslStreamEncoding = 'utf16le' | 'utf8'
 
 /**
+ * 是否为严格合法的 UTF-8（拒绝孤立 continuation / 非法多字节序列）。
+ * 用 streaming 模式容忍**样本尾部被截断**的多字节序列：调用方常只取前 128 字节探测，
+ * 纯中文 UTF-8 样本很可能正好截断在字符中间；若把“截断”当“非法 UTF-8”，
+ * 会把合法 UTF-8 误判成 UTF-16LE，整段输出变乱码（0.1.4 真机回归）。
+ */
+function isStrictUtf8(buf: Buffer): boolean {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buf, { stream: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * wsl.exe 输出编码探测（唯一事实源，一次性解码与流式解码共用）：
  * - wsl 内建命令（--list/--version 等）输出 UTF-16LE
  * - `-e <cmd>` 透传 Linux 程序 stdout 时是 UTF-8（现代 Windows 11 / WSL）
  * - 环境变量 WSL_UTF8=1 时内建命令也会改为 UTF-8
  * 识别策略：BOM（FF FE → UTF-16LE；EF BB BF → UTF-8）优先；
- * 否则看 UTF-16LE 文本的 ASCII 区段奇数位是否大量为 0x00；都不满足按 UTF-8。
+ * 否则先看 UTF-16LE 文本的 ASCII 区段奇数位是否大量为 0x00；
+ * 再看严格 UTF-8 是否失败（纯 CJK UTF-16LE 没有 NUL，必须靠结构判据）；
+ * 都不满足按 UTF-8。
  */
 export function detectWslEncoding(sample: Buffer): WslStreamEncoding {
   if (sample.length >= 2 && sample[0] === 0xff && sample[1] === 0xfe) return 'utf16le'
@@ -33,7 +50,10 @@ export function detectWslEncoding(sample: Buffer): WslStreamEncoding {
   let nulAtOdd = 0
   for (let i = 1; i < end; i += 2) if (sample[i] === 0x00) nulAtOdd++
   const utf16Like = end >= 4 && nulAtOdd >= Math.floor(end / 2) * 0.3
-  return utf16Like ? 'utf16le' : 'utf8'
+  if (utf16Like) return 'utf16le'
+  // 零 NUL 的纯 CJK UTF-16LE：字节不是合法 UTF-8；偶数长度才可能是 UTF-16
+  if (end >= 4 && sample.length % 2 === 0 && !isStrictUtf8(sample)) return 'utf16le'
+  return 'utf8'
 }
 
 /**
@@ -137,6 +157,20 @@ export function createLineStreamDecoder(onLine: (line: string) => void): {
  * 输出编码按 decodeWslOutput 自适应（UTF-16LE / UTF-8），一律参数数组传入，禁止字符串拼接。
  */
 export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise<WslExecResult> {
+  return runExecutable('wsl.exe', args, opts)
+}
+
+/** 执行 wslc.exe（WSL 容器 CLI，0.1.4 仅用于能力探测） */
+export async function runWslc(args: string[], opts: WslExecOptions = {}): Promise<WslExecResult> {
+  return runExecutable('wslc.exe', args, opts)
+}
+
+/** 通用可执行文件执行（wsl.exe / wslc.exe 共用编码与错误映射） */
+async function runExecutable(
+  program: string,
+  args: string[],
+  opts: WslExecOptions = {},
+): Promise<WslExecResult> {
   const decode = (b?: Buffer | string | null): string => {
     if (!b) return ''
     if (opts.encoding === 'utf8') return Buffer.isBuffer(b) ? b.toString('utf8') : String(b)
@@ -148,7 +182,7 @@ export async function runWsl(args: string[], opts: WslExecOptions = {}): Promise
   }
 
   try {
-    const { stdout, stderr } = await execFileAsync('wsl.exe', args, {
+    const { stdout, stderr } = await execFileAsync(program, args, {
       encoding: 'buffer',
       windowsHide: true,
       timeout: opts.timeoutMs ?? 30_000,

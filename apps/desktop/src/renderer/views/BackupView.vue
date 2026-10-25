@@ -16,6 +16,7 @@ import { ProgressRing, EmptyState } from '@wslpilot/ui'
 import { useDistrosStore } from '../stores/distros'
 import { useSettingsStore } from '../stores/settings'
 import { useTasksStore } from '../stores/tasks'
+import { useWslEnvStore } from '../stores/wsl-env'
 import {
   useTaskProgress,
   taskStatusLabel,
@@ -52,6 +53,7 @@ import {
 const distros = useDistrosStore()
 const settings = useSettingsStore()
 const tasks = useTasksStore()
+const wslEnv = useWslEnvStore()
 const message = useMessage()
 
 const mode = ref<WizardMode>('export')
@@ -112,6 +114,9 @@ const {
   cancel: cancelTask,
 } = useTaskProgress(activeTaskId)
 
+/** 任务记录被 trim 淘汰 / 应用重启后丢失：必须给退出出口，不能停在无按钮的第 4 步 */
+const taskLost = computed(() => !!activeTaskId.value && !task.value)
+
 const elapsedMs = ref(0)
 let elapsedTimer: number | undefined
 
@@ -161,15 +166,18 @@ const stepLabels = computed(() => {
 
 const canNext = computed(() => {
   if (step.value === 1) {
-    if (mode.value === 'export') return !!exportForm.value.name
-    if (mode.value === 'move') return !!moveForm.value.name
-    // 导入：名称非空且不与现有发行版重名（重名在第 2 步也会被 validateCurrent 拦）
+    if (mode.value === 'export') return !!exportForm.value.name.trim()
+    if (mode.value === 'move') return !!moveForm.value.name.trim()
+    // 导入：名称非空且不与现有发行版重名（WSL 名称大小写不敏感，必须同语义）
     const n = importForm.value.name.trim()
-    return !!n && !distros.items.some((d) => d.name === n)
+    return !!n && !distros.items.some((d) => d.name.toLowerCase() === n.toLowerCase())
   }
   if (step.value === 2) return validateCurrent() === null
   return true
 })
+
+/** step 2 的禁用原因：不能只禁用「下一步」而让用户看不到为什么 */
+const stepError = computed(() => (step.value === 2 ? validateCurrent() : null))
 
 const needAck = computed(() => mode.value === 'move' && settings.confirmDestructive)
 
@@ -182,7 +190,21 @@ function normalizePath(p: string): string {
 }
 
 function validateCurrent(): string | null {
-  if (mode.value === 'export') return validateExportForm(exportForm.value)
+  if (mode.value === 'export') {
+    const exportErr = validateExportForm(exportForm.value)
+    if (exportErr) return exportErr
+    const selected = distros.items.find((d) => d.name === exportForm.value.name.trim())
+    if (exportForm.value.format === 'vhd' && selected && selected.version !== 2) {
+      return 'vhd 导出仅支持 WSL2 发行版；该发行版是 WSL1，请改用 tar / tar.gz'
+    }
+    if (exportForm.value.format === 'tar.gz' && !wslEnv.can('exportFormats')) {
+      return `${wslEnv.requirement('exportFormats')}；请改用 tar 格式`
+    }
+    if (selected?.state === 'Running' && !exportForm.value.terminateFirst) {
+      return '该发行版正在运行：导出会终止它，请勾选「先停止该发行版」或先去停止它'
+    }
+    return null
+  }
   if (mode.value === 'import') {
     // 重名硬拦截：否则 wsl --import 会在长任务里才报同名冲突（review M-11）
     return validateImportForm(
@@ -194,7 +216,7 @@ function validateCurrent(): string | null {
   if (moveErr) return moveErr
   // 目标 = 当前位置：MoveWizard 内已提示，这里硬拦截「下一步/开始」
   //（basePath 不可得时跳过，不误拦 — review 0.1.2 根治）
-  const selected = distros.items.find((d) => d.name === moveForm.value.name)
+  const selected = distros.items.find((d) => d.name === moveForm.value.name.trim())
   const base = selected?.basePath ?? ''
   if (
     base &&
@@ -203,13 +225,16 @@ function validateCurrent(): string | null {
   ) {
     return '目标位置与发行版当前位置相同，请选择新的目录'
   }
+  if (selected?.state === 'Running' && !moveForm.value.terminateFirst) {
+    return '该发行版正在运行：迁移需要先终止它，请勾选「终止后继续迁移」或先去停止它'
+  }
   return null
 }
 
 const summaryRows = computed(() => {
   if (mode.value === 'export') return exportSummary(exportForm.value)
   if (mode.value === 'import') return importSummary(importForm.value)
-  const selected = distros.items.find((d) => d.name === moveForm.value.name)
+  const selected = distros.items.find((d) => d.name === moveForm.value.name.trim())
   return moveSummary(moveForm.value, {
     willTerminate: selected?.state === 'Running',
     autoBackup: settings.backupAutoBeforeDestructive,
@@ -242,6 +267,22 @@ function setMode(m: WizardMode) {
 }
 
 function next() {
+  if (step.value === 1) {
+    if (mode.value === 'export') {
+      const selected = distros.items.find((d) => d.name === exportForm.value.name.trim())
+      if (selected?.state === 'Running' && !exportForm.value.terminateFirst) {
+        message.warning('该发行版正在运行：请勾选「先停止该发行版」后再继续')
+        return
+      }
+    }
+    if (mode.value === 'import') {
+      const n = importForm.value.name.trim().toLowerCase()
+      if (n && distros.items.some((d) => d.name.toLowerCase() === n)) {
+        message.warning('已存在同名发行版（WSL 名称不区分大小写），请换一个名称')
+        return
+      }
+    }
+  }
   if (step.value === 2) {
     const err = validateCurrent()
     if (err) {
@@ -345,6 +386,8 @@ async function refreshBackups() {
 }
 
 onMounted(() => {
+  // 能力门禁与默认格式同源：否则旧 WSL 会把 tar.gz 预选进表单，直到长任务才失败
+  void wslEnv.load()
   // 默认格式跟随设置（§12.7 备份默认值）——导入同样跟随，
   // 否则「默认格式」设置只对导出半生效（review 幽灵配置根治）
   exportForm.value = { ...DEFAULT_EXPORT_FORM, format: settings.backupFormat }
@@ -379,6 +422,21 @@ onMounted(() => {
     step.value = 4
   }
 })
+
+// 能力到达后若 tar.gz 不受支持，主动把“设置里的默认格式”降级为 tar，
+// 避免 disabled 的 radio 仍处于选中态、用户以为会按 tar.gz 导出。
+watch(
+  () => wslEnv.capabilities,
+  (caps) => {
+    if (!caps || caps.flags.exportFormats) return
+    if (exportForm.value.format === 'tar.gz') {
+      exportForm.value = { ...exportForm.value, format: 'tar' }
+    }
+    if (importForm.value.format === 'tar.gz') {
+      importForm.value = { ...importForm.value, format: 'tar' }
+    }
+  },
+)
 
 /** 日志抽屉只渲染尾部：全量 join 2000 行会在每次进度事件时重排（review 0.1.2 根治） */
 const LOG_TAIL_LIMIT = 500
@@ -501,25 +559,37 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
             <span>{{ percentLabel }}</span>
             <span>{{ formatElapsed(elapsedMs) }}</span>
           </div>
-          <div v-if="task?.error" class="progress-error">
+          <div v-if="taskLost" class="progress-error">
+            任务记录已滚动清理（应用重启或任务列表淘汰），当前无法再查看进度；请重新开始。
+          </div>
+          <div v-else-if="task?.error" class="progress-error">
             {{ task.error }}
           </div>
           <div class="progress-actions">
-            <n-button v-if="isRunning" secondary type="error" @click="cancel"> 取消任务 </n-button>
-            <n-button secondary @click="logOpen = true">
-              查看日志（{{ task?.logs.length ?? 0 }} 行）
-            </n-button>
-            <template v-if="isDone">
-              <n-button type="primary" @click="reset"> 再来一次 </n-button>
-              <n-button v-if="task?.status === 'success'" secondary @click="openResultDir">
-                打开所在目录
+            <template v-if="taskLost">
+              <n-button type="primary" @click="reset">重新开始</n-button>
+              <n-button secondary @click="reset">返回向导</n-button>
+            </template>
+            <template v-else>
+              <n-button v-if="isRunning" secondary type="error" @click="cancel">
+                取消任务
               </n-button>
+              <n-button secondary @click="logOpen = true">
+                查看日志（{{ task?.logs.length ?? 0 }} 行）
+              </n-button>
+              <template v-if="isDone">
+                <n-button type="primary" @click="reset"> 再来一次 </n-button>
+                <n-button v-if="task?.status === 'success'" secondary @click="openResultDir">
+                  打开所在目录
+                </n-button>
+              </template>
             </template>
           </div>
         </div>
       </div>
 
       <!-- 底部导航 -->
+      <p v-if="step === 2 && stepError" class="step-error" role="alert">{{ stepError }}</p>
       <footer v-if="step < 4" class="wizard-footer">
         <n-button v-if="step > 1" secondary @click="back"> 上一步 </n-button>
         <span class="spacer" />
@@ -804,6 +874,15 @@ const typeLabel = computed(() => taskTypeLabel(task.value?.type ?? mode.value))
   gap: 10px;
   border-top: 1px solid var(--color-border-subtle);
   padding-top: 16px;
+}
+
+.step-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md, 12px);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 12.5px;
 }
 
 .spacer {

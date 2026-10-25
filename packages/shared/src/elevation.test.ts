@@ -117,6 +117,12 @@ describe('提权操作白名单（M7 §14.3）', () => {
     expect(install.args).toEqual(['--install', '--no-launch'])
     const installNamed = buildElevatedInvocation({ op: 'wsl.install', params: { name: 'Ubuntu' } })
     expect(installNamed.args).toEqual(['--install', '-d', 'Ubuntu', '--no-launch'])
+    // 老 WSL plain 重试：elevation 也必须能显式关闭 --no-launch，否则重试无效
+    const installPlain = buildElevatedInvocation({
+      op: 'wsl.install',
+      params: { name: 'Ubuntu', noLaunch: false },
+    })
+    expect(installPlain.args).toEqual(['--install', '-d', 'Ubuntu'])
 
     const setVersion = buildElevatedInvocation({
       op: 'wsl.setVersion',
@@ -130,12 +136,11 @@ describe('提权操作白名单（M7 §14.3）', () => {
       { op: 'usbipd.bind', params: { busId: '1-2' } },
       { op: 'usbipd.unbind', params: { busId: '2-3' } },
     ])
-    expect(payload.v).toBe(1)
+    expect(payload.v).toBe(2)
     expect(payload.ops).toHaveLength(2)
     expect(payload.ops[0]).toEqual({
       op: 'usbipd.bind',
-      program: 'usbipd.exe',
-      args: ['bind', '--busid', '1-2'],
+      params: { busId: '1-2' },
     })
     expect(() => buildElevationHelperPayload([])).toThrow(/不能为空/)
   })
@@ -176,7 +181,7 @@ describe('提权操作白名单（M7 §14.3）', () => {
 
   // ── 0.1.3：WSL 本体生命周期 / 磁盘管理 op ──
 
-  it('wsl.update / wsl.updateRollback：argv 与 commands 同源，参数严格校验', () => {
+  it('wsl.update / compact / resize / setDefaultUser：argv 与 commands 同源，参数严格校验', () => {
     const upd = buildElevatedInvocation({ op: 'wsl.update', params: {} })
     expect(upd.program).toBe('wsl.exe')
     expect(upd.args).toEqual(['--update'])
@@ -184,14 +189,32 @@ describe('提权操作白名单（M7 §14.3）', () => {
     const pre = buildElevatedInvocation({ op: 'wsl.update', params: { preRelease: true } })
     expect(pre.args).toEqual(['--update', '--pre-release'])
 
-    const rb = buildElevatedInvocation({ op: 'wsl.updateRollback', params: {} })
-    expect(rb.args).toEqual(['--update', '--rollback'])
+    expect(buildElevatedInvocation({ op: 'wsl.compact', params: { name: 'Ubuntu' } }).args).toEqual(
+      ['--manage', 'Ubuntu', '--compact'],
+    )
+
+    expect(
+      buildElevatedInvocation({ op: 'wsl.resize', params: { name: 'Ubuntu', size: '50GB' } }).args,
+    ).toEqual(['--manage', 'Ubuntu', '--resize', '50GB'])
+    expect(() =>
+      validateElevationRequest({ op: 'wsl.resize', params: { name: 'Ubuntu', size: 'big' } }),
+    ).toThrow()
+
+    expect(
+      buildElevatedInvocation({
+        op: 'wsl.setDefaultUser',
+        params: { name: 'Ubuntu', user: 'dev' },
+      }).args,
+    ).toEqual(['--manage', 'Ubuntu', '--set-default-user', 'dev'])
+    expect(() =>
+      validateElevationRequest({
+        op: 'wsl.setDefaultUser',
+        params: { name: 'Ubuntu', user: 'bad user' },
+      }),
+    ).toThrow()
 
     // 多余键拒绝（.strict 白名单）
     expect(() => validateElevationRequest({ op: 'wsl.update', params: { evil: 1 } })).toThrow()
-    expect(() =>
-      validateElevationRequest({ op: 'wsl.updateRollback', params: { evil: 1 } }),
-    ).toThrow()
   })
 
   it('wsl.setDefaultVersion：仅接受 1/2；wsl.setSparse：发行版名 + 布尔', () => {
@@ -217,7 +240,9 @@ describe('提权操作白名单（M7 §14.3）', () => {
   it('0.1.3 新 op 的展示名与程序映射完备（提权日志/白名单）', () => {
     const cases = [
       { op: 'wsl.update', params: { preRelease: true } },
-      { op: 'wsl.updateRollback', params: {} },
+      { op: 'wsl.compact', params: { name: 'U' } },
+      { op: 'wsl.resize', params: { name: 'U', size: '50GB' } },
+      { op: 'wsl.setDefaultUser', params: { name: 'U', user: 'dev' } },
       { op: 'wsl.setDefaultVersion', params: { version: 2 } },
       { op: 'wsl.setSparse', params: { name: 'U', sparse: true } },
     ] as const

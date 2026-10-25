@@ -238,4 +238,13 @@ describe('logger', () => {
     })
     await expect(fs.stat(newestFile)).resolves.toBeTruthy()
   })
+
+  it('flush 等待队列落盘（退出前不丢最后一条日志）', async () => {
+    const log = createLogger(dir, 'info')
+    log.info('last-line-before-quit', { ok: true })
+    await log.flush!()
+    const text = await fs.readFile(join(dir, 'logs', `app-${localDayKey()}.log`), 'utf8')
+    expect(text).toContain('last-line-before-quit')
+    expect(text).toContain('"ok":true')
+  })
 })

@@ -38,11 +38,23 @@ describe('useWslConfig（0.1.3 .wslconfig 编辑状态机）', () => {
     expect(conf.isDirty.value).toBe(true)
     const text = conf.effectiveText()
     expect(text).toContain('# 注释')
-    expect(text).toContain('memory = 16GB')
+    expect(text).toContain('memory=16GB')
 
     // 改回原值 → 不脏（行级等价）
     conf.setField('wsl2', 'memory', '8GB')
     expect(conf.isDirty.value).toBe(false)
+  })
+
+  it('加载 dropcache/NAT 不因规范化被标记为 dirty（0.1.4 回归）', async () => {
+    const { api } = makeApi(
+      '[wsl2]\nnetworkingMode=NAT\n[experimental]\nautoMemoryReclaim=dropcache\n',
+    )
+    const conf = useWslConfig({ api })
+    await conf.load()
+    expect(conf.model.value.wsl2.networkingMode).toBe('nat')
+    expect(conf.model.value.experimental.autoMemoryReclaim).toBe('dropCache')
+    expect(conf.isDirty.value).toBe(false)
+    expect(conf.pendingChanges()).toEqual([])
   })
 
   it('clearField：显式删除键（removeKeys 语义），变更清单可见', async () => {
@@ -60,9 +72,9 @@ describe('useWslConfig（0.1.3 .wslconfig 编辑状态机）', () => {
     const { api } = makeApi()
     const conf = useWslConfig({ api })
     await conf.load()
-    conf.setField('wsl2', 'memory', '8')
+    conf.setField('wsl2', 'memory', '1.5GB')
     const field = WSL_CONFIG_FIELDS.find((f) => f.key === 'memory')!
-    expect(conf.fieldError(field)).toMatch(/MB\/GB/)
+    expect(conf.fieldError(field)).toMatch(/整数/)
     expect(conf.hasFieldErrors.value).toBe(true)
     conf.setField('wsl2', 'memory', '8GB')
     expect(conf.hasFieldErrors.value).toBe(false)

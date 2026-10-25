@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
+import { NSelect } from 'naive-ui'
 import type { WslAction } from '@wslpilot/shared'
 import {
   appError,
@@ -357,6 +358,65 @@ describe('InstallDistroModal 安装面', () => {
     await flushPromises()
     return w
   }
+
+  it('高级选项把 .wslconfig 默认安装目录/磁盘大小显示为占位提示', async () => {
+    wslAPI.wslconfig.read.mockResolvedValueOnce({
+      path: 'C:\\Users\\me\\.wslconfig',
+      exists: true,
+      content: '[general]\ndistributionInstallPath=D:\\WSL\n[wsl2]\ndefaultVhdSize=50GB\n',
+    })
+    await mountInstall()
+    const inputs = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>('.install-modal input'),
+    )
+    expect(inputs.some((i) => i.placeholder.includes('D:\\WSL'))).toBe(true)
+    expect(inputs.some((i) => i.placeholder.includes('50GB'))).toBe(true)
+  })
+
+  it('WSL1 时清空并禁用虚拟磁盘选项（不把无效 argv 送进安装）', async () => {
+    const w = await mountInstall()
+    const vhdInput = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>('.install-modal input'),
+    ).find((i) => /50GB|1TB|vhd/i.test(i.placeholder))
+    expect(vhdInput).toBeTruthy()
+    vhdInput!.value = '50GB'
+    vhdInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    const versionSelect = w
+      .findAllComponents(NSelect)
+      .find((s) =>
+        (s.props('options') as Array<{ value: unknown }> | undefined)?.some((o) => o.value === 1),
+      )
+    expect(versionSelect).toBeTruthy()
+    versionSelect!.vm.$emit('update:value', 1)
+    await flushPromises()
+    expect(vhdInput!.value).toBe('')
+    expect(vhdInput!.disabled).toBe(true)
+
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.install).toHaveBeenCalledWith(
+      expect.not.objectContaining({ vhdSize: expect.anything() }),
+    )
+    expect(bodyText()).not.toContain('WSL 1 不支持虚拟磁盘大小/固定大小磁盘')
+  })
+
+  it('非法 vhd-size 在启动长任务前拦住并展示错误（折叠高级选项也校验）', async () => {
+    await mountInstall()
+    const vhdInput = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>('.install-modal input'),
+    ).find((i) => /50GB|1TB|vhd/i.test(i.placeholder))
+    expect(vhdInput).toBeTruthy()
+    vhdInput!.value = '1.5GB'
+    vhdInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    findBodyButton('开始安装')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.install).not.toHaveBeenCalled()
+    expect(bodyText()).toContain('磁盘大小格式')
+  })
 
   it('双击「开始安装」只发起一次（starting in-flight 锁 — review 0.1.2 根治）', async () => {
     let release!: (v: { taskId: string }) => void

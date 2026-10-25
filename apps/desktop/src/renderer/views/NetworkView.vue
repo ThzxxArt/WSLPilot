@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref } from 'vue'
-import { useMessage, useDialog, useNotification, NButton } from 'naive-ui'
+import { useMessage, useDialog, useNotification, NAlert, NButton } from 'naive-ui'
 import type { PortForwardRule, ProxyConfig } from '@wslpilot/shared'
 import { canApplyRule, ruleSummary } from '@wslpilot/shared'
 import MirrorModeCard from '../features/network/MirrorModeCard.vue'
@@ -27,6 +27,19 @@ const editorShow = ref(false)
 const editing = ref<PortForwardRule | null>(null)
 const editorSaving = ref(false)
 const proxyApplying = ref(false)
+
+/** 重复规则 id（0.1.4）：network.jsonc 会因 id 唯一性校验永远保存失败，必须给修复出口 */
+const duplicateRuleIds = computed(() => network.duplicateRuleIds)
+
+async function onRepairRuleIds() {
+  try {
+    const changed = await network.repairRuleIds()
+    if (changed) message.success('重复规则 id 已修复并保存（保留第一条，后续加 -2/-3 后缀）')
+    else message.info('没有重复的规则 id')
+  } catch (e) {
+    message.error(errorLine(e, '修复规则 id 失败'))
+  }
+}
 
 /** 系统转发状态轻量轮询（仅页面可见时 12s）：外部手工改 netsh 也能及时反映 */
 let statusPollTimer: number | undefined
@@ -308,6 +321,14 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
     <!-- WSL 全局配置（.wslconfig）编辑面板（0.1.3）；保存后刷新镜像模式状态 -->
     <WslConfigPanel @saved="() => void network.loadStatus()" />
 
+    <n-alert v-if="duplicateRuleIds.length > 0" type="warning" class="dup-alert">
+      检测到重复的转发规则 id：{{ duplicateRuleIds.join('、') }}。重复 id 会让按 id
+      执行的白名单不可达，并导致 network.jsonc 保存失败。
+      <n-button size="tiny" type="primary" secondary @click="onRepairRuleIds">
+        一键修复（保留第一条）
+      </n-button>
+    </n-alert>
+
     <PortForwardTable
       :rules="network.rules"
       :status="network.status"
@@ -466,5 +487,9 @@ const systemCount = computed(() => network.status?.portProxy.length ?? 0)
   margin: 0;
   font-size: 12.5px;
   color: var(--color-text-tertiary);
+}
+
+.dup-alert {
+  align-items: center;
 }
 </style>

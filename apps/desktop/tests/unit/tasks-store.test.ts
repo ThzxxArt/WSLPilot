@@ -234,7 +234,7 @@ describe('useTasksStore', () => {
     expect(entry?.taskId).toBe('ins-1')
     expect(entry?.type).toBe('install')
     const entry2 = await s.startInstall()
-    expect(wslAPI.distros.install).toHaveBeenCalledWith(undefined)
+    expect(wslAPI.distros.install).toHaveBeenCalledWith({})
     void entry2
   })
 

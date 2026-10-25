@@ -7,6 +7,7 @@ import {
   type TaskType,
 } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
+import { KeyedLock } from './keyed-lock'
 
 /** 任务内控制面 — 由 IoService 等执行体使用 */
 export interface TaskControl {
@@ -64,8 +65,28 @@ export interface TaskRunner {
   cancel(taskId: string): boolean
   get(taskId: string): TaskRecord | null
   list(): TaskRecord[]
+  /** 运行中（含排队）任务 */
+  running(): TaskRecord[]
+  /** 与指定发行版相关（大小写不敏感）的运行中任务 */
+  runningForDistro(name: string): TaskRecord[]
+  /**
+   * 与任务共用同一把 key 锁执行直接操作（0.1.4）。
+   * 调用方必须先检查 runningForDistro/global 任务，避免把长任务中断在半路。
+   * `allowDuringShutdown` 仅供 shutdown 自身使用；其他直接操作在关机窗口必须拒绝。
+   */
+  withLock<T>(
+    key: string,
+    fn: () => Promise<T>,
+    opts?: { allowDuringShutdown?: boolean },
+  ): Promise<T>
   /** 等待任务进入终态（测试与编排用） */
   waitFor(taskId: string): Promise<TaskRecord>
+  /**
+   * shutdown 前关闭新任务入口（0.1.4 TOCTOU）：
+   * 置位后 `start` 拒绝；handler 在真正 `wsl --shutdown` 前调用，结束后必须复位。
+   */
+  beginShutdown(): void
+  endShutdown(): void
   /** 取消全部任务并清空锁（退出时调用） */
   dispose(): void
 }
@@ -94,9 +115,11 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
   const started = new Set<string>()
   const cancelFns = new Map<string, Set<() => void>>()
   const waiters = new Map<string, Set<(rec: TaskRecord) => void>>()
-  /** lockKey → 队尾 promise */
-  const locks = new Map<string, Promise<void>>()
+  /** lockKey → 队尾 promise（与直接操作共用 KeyedLock 实现） */
+  const locks = new KeyedLock()
   let disposed = false
+  /** shutdown 执行窗口：阻止新任务在 check 与 wsl --shutdown 之间插入 */
+  let shuttingDown = false
 
   function emitProgress(rec: TaskRecord, logLine?: string): void {
     const p: TaskProgress = {
@@ -246,19 +269,20 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
       void job()
       return
     }
-    const prev = locks.get(lockKey) ?? Promise.resolve()
     // execute 吞掉所有异常 → 链不中断；前序失败不影响后继
-    const next = prev.then(job, job)
-    locks.set(
-      lockKey,
-      next.catch(() => {}),
-    )
+    void locks.runExclusive(lockKey, job)
   }
 
   return {
     start(opts): TaskHandle {
       if (disposed) {
         throw createAppError('TASK_FAILED', { message: '任务调度器已关闭' })
+      }
+      if (shuttingDown) {
+        throw createAppError('TASK_FAILED', {
+          message: '正在关闭 WSL，已拒绝新任务',
+          suggestion: '等待 wsl --shutdown 完成后再重试',
+        })
       }
       const taskId = randomUUID()
       const rec: TaskRecord = {
@@ -310,6 +334,37 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
       return [...tasks.values()]
     },
 
+    running() {
+      return [...tasks.values()].filter((t) => t.status === 'running')
+    },
+
+    runningForDistro(name: string) {
+      const lower = String(name ?? '').toLowerCase()
+      if (!lower) return []
+      return [...tasks.values()].filter(
+        (t) => t.status === 'running' && (t.distro ?? '').toLowerCase() === lower,
+      )
+    },
+
+    withLock<T>(
+      key: string,
+      fn: () => Promise<T>,
+      opts?: { allowDuringShutdown?: boolean },
+    ): Promise<T> {
+      if (disposed) {
+        return Promise.reject(createAppError('TASK_FAILED', { message: '任务调度器已关闭' }))
+      }
+      if (shuttingDown && !opts?.allowDuringShutdown) {
+        return Promise.reject(
+          createAppError('TASK_FAILED', {
+            message: '正在关闭 WSL，已拒绝新的直接操作',
+            suggestion: '等待 wsl --shutdown 完成后再重试',
+          }),
+        )
+      }
+      return locks.runExclusive(key, fn)
+    },
+
     waitFor(taskId) {
       const rec = tasks.get(taskId)
       if (!rec)
@@ -323,6 +378,14 @@ export function createTaskRunner(events: TaskRunnerEvents): TaskRunner {
         }
         set.add(resolve)
       })
+    },
+
+    beginShutdown() {
+      shuttingDown = true
+    },
+
+    endShutdown() {
+      shuttingDown = false
     },
 
     dispose() {

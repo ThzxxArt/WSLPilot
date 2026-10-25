@@ -301,6 +301,21 @@ describe('TaskRunner', () => {
     expect(rec.logs.at(-1)).toBe('l2099')
   })
 
+  it('beginShutdown 关闭新任务入口，endShutdown 恢复（0.1.4 TOCTOU）', async () => {
+    const { runner } = makeRunner()
+    runner.beginShutdown()
+    expect(() => runner.start({ type: 'export', message: 'x', run: async () => {} })).toThrow(
+      /正在关闭 WSL/,
+    )
+    await expect(runner.withLock('ubuntu', async () => 1)).rejects.toThrow(/正在关闭 WSL/)
+    await expect(
+      runner.withLock('ubuntu', async () => 1, { allowDuringShutdown: true }),
+    ).resolves.toBe(1)
+    runner.endShutdown()
+    const h = runner.start({ type: 'export', message: 'ok', run: async () => {} })
+    await expect(runner.waitFor(h.taskId)).resolves.toMatchObject({ status: 'success' })
+  })
+
   it('dispose cancels running tasks', async () => {
     const { runner } = makeRunner()
     const handle = runner.start({

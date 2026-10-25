@@ -46,6 +46,31 @@ export default defineConfig({
         functions: 85,
         branches: 85,
         statements: 85,
+        // 0.1.4：per-glob 地板（每个高风险目录单独兜底，防止用易测文件拉高总体）
+        'apps/desktop/src/main/services/**': {
+          lines: 92,
+          statements: 92,
+          branches: 85,
+          functions: 90,
+        },
+        'apps/desktop/src/main/ipc/handlers/**': {
+          lines: 88,
+          statements: 88,
+          branches: 78,
+          functions: 95,
+        },
+        'apps/desktop/src/renderer/stores/**': {
+          lines: 87,
+          statements: 87,
+          branches: 84,
+          functions: 78,
+        },
+        'apps/desktop/src/renderer/composables/**': {
+          lines: 93,
+          statements: 93,
+          branches: 88,
+          functions: 92,
+        },
       },
     },
   },

@@ -11,6 +11,8 @@ export interface AppError {
 export type ErrorCode =
   | 'WSL_NOT_INSTALLED'
   | 'WSL_NOT_FOUND'
+  | 'WSL_FEATURE_UNSUPPORTED'
+  | 'INVALID_ARGUMENT'
   | 'DISTRO_RUNNING'
   | 'DISTRO_NOT_RUNNING'
   | 'DISTRO_NOT_FOUND'
@@ -77,6 +79,16 @@ export const ERROR_CATALOG: Record<
   WSL_NOT_FOUND: {
     message: '找不到 wsl.exe',
     suggestion: '请检查 PATH 环境变量中是否包含 WSL 安装路径',
+    recoverable: true,
+  },
+  WSL_FEATURE_UNSUPPORTED: {
+    message: '当前 WSL 版本不支持该功能',
+    suggestion: '请先在「设置 → WSL」更新 WSL，或改用当前版本支持的方式',
+    recoverable: true,
+  },
+  INVALID_ARGUMENT: {
+    message: '参数不合法',
+    suggestion: '请检查输入后重试',
     recoverable: true,
   },
   DISTRO_RUNNING: {

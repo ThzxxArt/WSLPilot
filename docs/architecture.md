@@ -66,12 +66,14 @@ Renderer ── wslconf:read/write ──▶ WslConfService（cat / root tee + s
 - **命令面板**：`shared/fuzzy.ts` 模糊打分 + `renderer/features/command/palette.ts` 前缀/分组/最近使用；
   最近使用持久化到 `ui-state.recentCommands`。
 
-## WSL 本体生命周期与全局配置（0.1.3）
+## WSL 本体生命周期、能力矩阵与全局配置（0.1.4）
 
 ```
-Renderer ── app:wslEnv ────────────────▶ WslService.getEnv（--version + --status 全量解析，非抛出）
-         ── app:wslUpdate / rollback ───▶ TaskRunner(wsl:global 锁) ▶ wsl --update [--pre-release|--rollback]
+Renderer ── app:wslEnv ────────────────▶ WslService.getEnv（--version + --status + 能力探测，非抛出）
+         ── app:wslUpdate ─────────────▶ TaskRunner(wsl:global 锁) ▶ wsl --update [--pre-release]
          ── app:wslSetDefaultVersion ───▶ wsl --set-default-version（权限不足自动转提权助手）
+         ── distros:compact/resize/setDefaultUser ─▶ wsl --manage（同发行版锁 + 能力门禁；
+            resize 先读 VHDX 虚拟容量，目标 ≤ 当前值拒绝，避免 WSL 实际缩容）
          ── distros:setSparse ──────────▶ wsl --manage <name> --set-sparse <true|false>（同发行版锁）
          ── io:clone ───────────────────▶ IoService.runClone（导出临时归档 → 导入新名 → 清理；失败回滚）
          ── distros:unregister ─────────▶ 任务化（可选注销前备份与注销同锁执行）
@@ -79,13 +81,16 @@ Renderer ── app:wslEnv ────────────────▶ W
          ── clipboard:read/write ───────▶ Electron clipboard（终端复制/粘贴可靠通道）
 ```
 
-- **`wsl:global` 串行锁**：安装 WSL 本体 / `wsl --update` / `--rollback` 共用，本体级操作绝不并发。
+- **`wsl:global` 串行锁**：安装 WSL 本体 / `wsl --update` / 默认版本共用；直接
+  `start/terminate/setDefault/shutdown` 与同发行版长任务共用 `KeyedLock`，运行中互斥。
+- **能力矩阵**：`wsl --help` 主探测（3.0.3 退出码 255 且写 stderr 也要解析）、版本表兜底、
+  `wslc version`；`WSL_FEATURE_UNSUPPORTED` 统一提示“需要 WSL x.y（当前 z）”。
 - **环境体检**：`wsl --status` 的默认发行版 / 默认版本 / 内核与 `--version` 合并为 `WslEnvInfo`；
   未安装时 **不抛错**（`installed:false` + 原始输出），由环境卡/横幅渲染「一键安装 WSL」。
 - **`.wslconfig` 编辑器**：`shared/wslconfig.ts` 行级最小编辑（与 `wsl.conf` 共用 INI 机制），
   镜像模式读取（`parseWslConfigMode`）与表单/差异预览同源；写盘为宿主文件操作，生效需 `wsl --shutdown`。
 
-## 终端分屏（0.1.3）
+## 终端分屏与保活（0.1.4）
 
 ```
 TerminalStore（Pinia）
@@ -95,8 +100,11 @@ TerminalStore（Pinia）
   └─ paneMemory / activeId / activeTabId 活动指针与「每标签最近活动面板」
 ```
 
-- 渲染：`SplitPane.vue` 递归渲染面板树 + 拖拽分隔条（比例夹取 15%–85%）；`XtermPane`
-  继续承担 fit/尺寸必达同步/ConPTY 对策；`v-show` 保活，切标签/分屏不丢现场。
+- 渲染：`TerminalView` 把分屏树拍平成**绝对定位的 pane host 列表**（`layoutRects`）
+  - 独立分隔条（`layoutDividers`），XtermPane 以 ptyId 为稳定 key。分屏/关闭只改几何，
+    已有 xterm 实例与 scrollback 不被销毁；`SplitPane.vue` 已删除。
+- 保活：路由层 `<KeepAlive :include="['TerminalView']">`，切路由不卸载终端页；
+  `onActivated` 重新 fit 并处理 query 意图。
 - 布局持久化到 `ui-state.terminalLayout`（防抖 500ms）；窗口重载后 `recover()` 按存活会话
   恢复分屏（死面板剪枝、单子 split 折叠、深度超限整树拒绝退化为独立标签）。
 - 上限双保险：单标签 ≤4 面板 + 全局 `MAX_PTY_SESSIONS`；拆分继承源面板的发行版/Shell/启动目录。
@@ -139,6 +147,7 @@ Renderer ── app:exportDiagnostics/openLogsDir ─▶ DiagnosticsService（zi
 - **ElevationHelper**（§14.3）：主进程保持非提权；`netsh` / `usbipd bind|unbind` / `wsl --move|install|set-version`
   在直接执行被拒时改由独立提权进程执行。请求是**结构化载荷**（op 白名单 + 参数数组，`shared/elevation`
   唯一映射 op→program/argv）；PowerShell Helper 脚本二次校验 op/program（纵深防御），参数数组 splat 调用。
+  载荷走命令行 base64；Helper 脚本先校验调用方 SHA-256 再从内存执行，避免 UAC 期间临时脚本被替换。
   批量操作合并为一次 UAC 会话；用户取消 → `PERMISSION_DENIED` + 等价命令行。
 - **自动更新**（§17）：electron-updater（`publish: github` 生成 app-update.yml）。`autoDownload=false`
   （由用户在「设置 → 关于」决定下载）、`autoInstallOnAppQuit=true`；状态经 `update:changed` 推送。

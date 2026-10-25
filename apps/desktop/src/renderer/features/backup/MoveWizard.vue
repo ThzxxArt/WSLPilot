@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { NButton, NCheckbox, NInput, NSelect, NAlert } from 'naive-ui'
 import type { DistroView } from '@wslpilot/shared'
 import type { MoveForm } from './forms'
@@ -12,6 +12,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ 'update:form': [MoveForm] }>()
+const browseError = ref('')
 
 const distroOptions = computed(() =>
   props.distros.map((d) => ({
@@ -64,8 +65,12 @@ const pathError = computed(() => {
 })
 
 async function browse() {
-  const picked = await window.wslAPI.app.pickDirectory(currentBasePath.value || undefined)
-  if (picked) emit('update:form', { ...props.form, path: picked })
+  try {
+    const picked = await window.wslAPI.app.pickDirectory(currentBasePath.value || undefined)
+    if (picked) emit('update:form', { ...props.form, path: picked })
+  } catch (e) {
+    browseError.value = e instanceof Error ? e.message : '选择迁移目录失败'
+  }
 }
 </script>
 
@@ -110,6 +115,7 @@ async function browse() {
           <code>wsl --manage --move</code> 支持。
         </div>
         <n-alert v-if="pathError" type="error">{{ pathError }}</n-alert>
+        <n-alert v-if="browseError" type="error">{{ browseError }}</n-alert>
       </div>
 
       <n-alert v-if="autoBackup" type="info">

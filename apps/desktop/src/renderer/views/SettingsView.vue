@@ -19,6 +19,7 @@ import {
 } from 'naive-ui'
 import { useSettingsStore } from '../stores/settings'
 import { useUpdateStore } from '../stores/update'
+import { useWslEnvStore } from '../stores/wsl-env'
 import { errorLine } from '../composables/useAppError'
 import { HOTKEY_TABLE } from '../composables/useHotkeys'
 import {
@@ -33,9 +34,32 @@ import WslEnvironmentCard from '../features/wsl/WslEnvironmentCard.vue'
 
 const settings = useSettingsStore()
 const update = useUpdateStore()
+const wslEnv = useWslEnvStore()
 const message = useMessage()
 const dialog = useDialog()
 const router = useRouter()
+
+/** 默认备份格式：tar.gz 只在能力探测确认后可选（避免把必然失败的默认值存进配置） */
+const backupFormatOptions = computed(() => [
+  { label: 'tar 归档', value: 'tar' },
+  {
+    label: wslEnv.can('exportFormats') ? 'tar.gz 压缩归档' : 'tar.gz 压缩归档（需要 WSL 2.4.4+）',
+    value: 'tar.gz',
+    disabled: wslEnv.capabilities !== null && !wslEnv.can('exportFormats'),
+  },
+  { label: 'vhd 虚拟磁盘', value: 'vhd' },
+])
+
+watch(
+  () => [settings.backupFormat, wslEnv.capabilities] as const,
+  () => {
+    if (settings.backupFormat === 'tar.gz' && wslEnv.capabilities && !wslEnv.can('exportFormats')) {
+      void settings.setBackupFormat('tar')
+      message.warning('当前 WSL 不支持 tar.gz，默认备份格式已改为 tar')
+    }
+  },
+  { immediate: true },
+)
 
 // ── M7：签名状态（未签名时给 SmartScreen 说明）──
 const signature = ref<SignatureStatus | null>(null)
@@ -44,6 +68,7 @@ const diagnosticsBusy = ref(false)
 const diagnosticsResult = ref('')
 
 onMounted(() => {
+  void wslEnv.load()
   signatureLoading.value = true
   void window.wslAPI.app
     .signatureStatus()
@@ -587,17 +612,14 @@ async function exportDiagnostics() {
       <div class="setting-line">
         <div>
           <div class="label">默认格式</div>
-          <div class="hint">tar 通用；vhd 仅 WSL2 但导入更快</div>
+          <div class="hint">tar 通用；tar.gz 更小（WSL 2.4.4+）；vhd 仅 WSL2 但导入更快</div>
         </div>
         <n-select
           :value="settings.backupFormat"
           size="small"
           style="width: 200px"
-          :options="[
-            { label: 'tar 归档', value: 'tar' },
-            { label: 'vhd 虚拟磁盘', value: 'vhd' },
-          ]"
-          @update:value="(v: 'tar' | 'vhd') => settings.setBackupFormat(v)"
+          :options="backupFormatOptions"
+          @update:value="(v: 'tar' | 'tar.gz' | 'vhd') => settings.setBackupFormat(v)"
         />
       </div>
       <div class="setting-line">

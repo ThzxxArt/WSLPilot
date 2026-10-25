@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { assertSafeRuleId, MAX_PORT_FORWARD_RULES } from './network'
 import { assertSafeDistroName } from './errors'
+import { assertSafeActionId } from './actions'
 import { DEFAULT_BACKUP_KEEP, DEFAULT_POLL_INTERVAL_MS } from './constants'
 
 /** settings.jsonc schema — v2 */
@@ -33,7 +34,7 @@ export const terminalSettingsSchema = z.object({
 
 export const backupSettingsSchema = z.object({
   defaultDir: z.string().default('%USERPROFILE%\\WSL-Backups'),
-  format: z.enum(['tar', 'vhd']).default('tar'),
+  format: z.enum(['tar', 'tar.gz', 'vhd']).default('tar'),
   keepRecent: z.number().int().min(1).max(50).default(DEFAULT_BACKUP_KEEP),
   autoBackupBeforeDestructive: z.boolean().default(true),
 })
@@ -62,6 +63,7 @@ export const distroMetaSchema = z.object({
   // 之后所有按名调用 wsl.exe 的入口都会带着脏名字 — review 0.1.2 根治）
   name: z
     .string()
+    .trim()
     .min(1)
     .superRefine((s, ctx) => {
       try {
@@ -74,23 +76,56 @@ export const distroMetaSchema = z.object({
       }
     }),
   alias: z.string().default(''),
-  tags: z.array(z.string()).default([]),
+  tags: z.array(z.string().max(64)).max(20).default([]),
   color: z.string().default(''),
   icon: z.string().default(''),
   note: z.string().default(''),
   startupCwd: z.string().default('~'),
   pinned: z.boolean().default(false),
-  quickActions: z.array(z.string()).default([]),
+  quickActions: z
+    .array(
+      z
+        .string()
+        .trim()
+        // 与 wslActionSchema.id 同一个 100 上限；否则 65–100 字符的动作可创建/运行却无法置顶
+        .max(100)
+        .superRefine((s, ctx) => {
+          try {
+            assertSafeActionId(s)
+          } catch (e) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: e instanceof Error ? e.message : '动作 id 非法',
+            })
+          }
+        }),
+    )
+    .max(20)
+    .default([]),
 })
 
 export const distrosFileSchema = z.object({
-  $schemaVersion: z.number().int().default(1),
+  $schemaVersion: z.number().int().default(2),
   distros: z.array(distroMetaSchema).default([]),
 })
 
 /** actions.jsonc */
 export const wslActionSchema = z.object({
-  id: z.string().min(1),
+  id: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .superRefine((s, ctx) => {
+      try {
+        assertSafeActionId(s)
+      } catch (e) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: e instanceof Error ? e.message : '动作 id 非法',
+        })
+      }
+    }),
   label: z.string().min(1),
   description: z.string().optional(),
   icon: z.string().optional(),
@@ -110,7 +145,7 @@ export const actionsFileSchema = z.object({
 
 /** network.jsonc */
 export const networkFileSchema = z.object({
-  $schemaVersion: z.number().int().default(1),
+  $schemaVersion: z.number().int().default(2),
   portForwarding: z
     .array(
       z.object({
@@ -248,9 +283,9 @@ export const CONFIG_SCHEMAS = {
  */
 export const SCHEMA_VERSIONS = {
   settings: 2,
-  distros: 1,
+  distros: 2,
   actions: 1,
-  network: 1,
+  network: 2,
   uiState: 1,
   state: 1,
 } as const satisfies Record<keyof typeof CONFIG_SCHEMAS, number>

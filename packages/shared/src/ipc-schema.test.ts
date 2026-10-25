@@ -21,6 +21,40 @@ describe('ipc-schema', () => {
     expect(() => nameSchema.parse('a/../b')).toThrow()
   })
 
+  it('0.1.4 新通道：compact/resize/setDefaultUser 正反用例', () => {
+    expect(parseIpcArgs(CH.distrosCompact, [{ name: 'Ubuntu', terminateFirst: true }])).toEqual({
+      name: 'Ubuntu',
+      terminateFirst: true,
+    })
+    expect(parseIpcArgs(CH.distrosCompact, [{ name: 'Ubuntu' }])).toEqual({
+      name: 'Ubuntu',
+      terminateFirst: false,
+    })
+    expect(() => parseIpcArgs(CH.distrosCompact, [{ terminateFirst: true }])).toThrow()
+    expect(() =>
+      parseIpcArgs(CH.distrosCompact, [{ name: 'Ubuntu', terminateFirst: 'yes' }]),
+    ).toThrow()
+
+    for (const size of ['50GB', '50G', '50', '1TB']) {
+      expect(parseIpcArgs(CH.distrosResize, [{ name: 'Ubuntu', size }])).toEqual({
+        name: 'Ubuntu',
+        size,
+      })
+    }
+    for (const size of ['1.5GB', '50gb', '50 GB', '']) {
+      expect(() => parseIpcArgs(CH.distrosResize, [{ name: 'Ubuntu', size }])).toThrow()
+    }
+
+    expect(parseIpcArgs(CH.distrosSetDefaultUser, [{ name: 'Ubuntu', user: 'dev_user' }])).toEqual({
+      name: 'Ubuntu',
+      user: 'dev_user',
+    })
+    for (const user of ['a/b', 'a\\b', 'a\u0000b', '1abc']) {
+      expect(() => parseIpcArgs(CH.distrosSetDefaultUser, [{ name: 'Ubuntu', user }])).toThrow()
+    }
+    expect(() => parseIpcArgs(CH.distrosSetDefaultUser, [{ user: 'dev' }])).toThrow()
+  })
+
   it('parses configKey', () => {
     expect(parseIpcArgs(CH.configGet, ['settings'])).toBe('settings')
     expect(() => parseIpcArgs(CH.configGet, ['evil'])).toThrow()
@@ -137,7 +171,12 @@ describe('ipc-schema · M4 备份迁移通道', () => {
   it('io:export validates name / path / format', () => {
     expect(
       parseIpcArgs(CH.ioExport, [{ name: 'Ubuntu', path: 'C:\\b\\u.tar', format: 'tar' }]),
-    ).toEqual({ name: 'Ubuntu', path: 'C:\\b\\u.tar', format: 'tar' })
+    ).toEqual({
+      name: 'Ubuntu',
+      path: 'C:\\b\\u.tar',
+      format: 'tar',
+      terminateFirst: false,
+    })
     expect(() => parseIpcArgs(CH.ioExport, [{ name: '', path: 'C:\\x', format: 'tar' }])).toThrow()
     expect(() => parseIpcArgs(CH.ioExport, [{ name: 'U', path: '', format: 'tar' }])).toThrow()
     expect(() =>
@@ -387,7 +426,12 @@ describe('ipc-schema · 补漏通道（review 假信心根治 M2）', () => {
     expect(() => parseIpcArgs(CH.distrosInstall, [{ name: '' }])).toThrow()
     expect(() => parseIpcArgs(CH.distrosInstall, [{ name: 'a/b' }])).toThrow()
     // 非 strict：多余键忽略，但必须 strip（只断言 not.toThrow 是形状盲假信心 — review 根治）
-    expect(parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).toEqual({ name: 'U' })
+    expect(parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).toEqual({
+      name: 'U',
+      enableWsl1: false,
+      fixedVhd: false,
+      webDownload: false,
+    })
     expect(() => parseIpcArgs(CH.distrosInstall, [{ extra: 1, name: 'U' }])).not.toThrow()
   })
 
@@ -455,7 +499,10 @@ describe('ipc-schema · 补漏通道（review 假信心根治 M2）', () => {
         { ...base, quickActions: Array.from({ length: 21 }, (_, i) => `q${i}`) },
       ]),
     ).toThrow()
-    expect(() => parseIpcArgs(CH.metaSet, [{ ...base, quickActions: ['a'.repeat(65)] }])).toThrow()
+    expect(() => parseIpcArgs(CH.metaSet, [{ ...base, quickActions: ['a'.repeat(101)] }])).toThrow()
+    expect(() =>
+      parseIpcArgs(CH.metaSet, [{ ...base, quickActions: ['a'.repeat(100)] }]),
+    ).not.toThrow()
   })
 
   it('configSet 的 patch 序列化后超 256KB 拒绝、循环引用拒绝', () => {

@@ -18,18 +18,83 @@ export interface IniLine {
   /** 去引号后的值 */
   value?: string
   quoted?: boolean
+  /** 值后的行内注释（含前导空白）；最小编辑时原样保留 */
+  inlineComment?: string
 }
 
 const SECTION_RE = /^\s*\[([^\]]+)]\s*(?:[#;].*)?$/
 const ENTRY_RE = /^\s*([^=:#;\s][^=:#;]*?)\s*=\s*(.*?)\s*$/
-const COMMENT_RE = /^\s*[#;]/
+const COMMENT_RE = /^\s*#/
+
+/**
+ * 去引号并反转 WSL 配置解析器的转义（`\\` `\"` `\n` `\t` `\b`）。
+ * Microsoft WSL 的 configfile.cpp 只把双引号视为引号；单引号是普通字符。
+ * 因此这里**不再剥单引号**，否则 UI 会显示一个 WSL 实际看到带引号的值。
+ * 未知转义保持字面（WSL 会告警，但读取不能丢用户数据）。
+ */
+function decodeIniEscapes(body: string): string {
+  return body.replace(/\\(["\\ntb])/g, (_m, ch: string) => {
+    if (ch === 'n') return '\n'
+    if (ch === 't') return '\t'
+    if (ch === 'b') return '\b'
+    return ch
+  })
+}
+
+function unquoteIni(raw: string): { value: string; quoted: boolean } {
+  if (raw.length >= 2 && raw[0] === '"' && raw[raw.length - 1] === '"') {
+    return { value: decodeIniEscapes(raw.slice(1, -1)), quoted: true }
+  }
+  return { value: decodeIniEscapes(raw), quoted: false }
+}
+
+/**
+ * 拆分「值本体 + 行内注释」。
+ * - 引号值：找到匹配的收尾双引号，其后全部是注释/空白
+ * - 裸值：`空白 + #` 之后视为注释（WSL configfile.cpp 只认 `#`；
+ *   `;` 在 WSL 里是普通字符，不能当注释吞掉值）
+ */
+function splitValueAndComment(afterEq: string): { rawValue: string; comment: string } {
+  const leading = /^\s*/.exec(afterEq)?.[0] ?? ''
+  const body = afterEq.slice(leading.length)
+  if (body.startsWith('"')) {
+    let escaped = false
+    for (let i = 1; i < body.length; i++) {
+      const ch = body[i]!
+      if (ch === '\\' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (ch === '"' && !escaped) {
+        return { rawValue: body.slice(0, i + 1), comment: body.slice(i + 1) }
+      }
+      escaped = false
+    }
+    // 引号未闭合：按裸值处理（不静默吞整行）
+  }
+  // WSL 的 configfile.cpp 在引号外遇到任意 `#` 就结束值（不要求前面有空白）。
+  const hash = body.indexOf('#')
+  if (hash >= 0) {
+    let commentStart = hash
+    while (commentStart > 0 && /\s/.test(body[commentStart - 1]!)) commentStart--
+    return { rawValue: body.slice(0, commentStart), comment: body.slice(commentStart) }
+  }
+  return { rawValue: body, comment: '' }
+}
 
 /** 解析 INI 文本为行模型（保留原文，供最小编辑定位） */
+/** 行尾未转义的反斜杠 = WSL configfile.cpp 的行续接（`\\` 是字面反斜杠）。 */
+function hasLineContinuation(raw: string): boolean {
+  const m = /\\+$/.exec(raw)
+  return m ? m[0].length % 2 === 1 : false
+}
+
 export function parseIniLines(text: string): IniLine[] {
   const lines = text.split(/\r?\n/)
   let section: string | undefined
   const out: IniLine[] = []
-  for (const raw of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    let raw = lines[i]!
     if (raw.trim() === '') {
       out.push({ type: 'blank', raw })
       continue
@@ -44,23 +109,27 @@ export function parseIniLines(text: string): IniLine[] {
       out.push({ type: 'comment', raw, section })
       continue
     }
+    // WSL：反斜杠 + 换行是续接，逻辑上属于同一条 value。先拼成一个逻辑行，
+    // 再交给 ENTRY_RE；写回时会自然收敛为单行，不会留下孤立的续接物理行。
+    // 行内注释里的行尾反斜杠不是续接（注释吞到换行），不能把下一行并进值。
+    while (hasLineContinuation(raw) && i + 1 < lines.length) {
+      const provisional = ENTRY_RE.exec(raw)
+      if (!provisional || splitValueAndComment(provisional[2] ?? '').comment) break
+      raw = raw.slice(0, -1) + lines[++i]!
+    }
     const entry = ENTRY_RE.exec(raw)
     if (entry) {
       const key = entry[1]!.trim()
-      const rawValueRaw = entry[2] ?? ''
-      const quoted =
-        (rawValueRaw.startsWith('"') && rawValueRaw.endsWith('"') && rawValueRaw.length >= 2) ||
-        (rawValueRaw.startsWith("'") && rawValueRaw.endsWith("'") && rawValueRaw.length >= 2)
-      // 行内注释：非引号值的「空白 + # 或 ;」之后视为注释（0.1.3 补齐 —— 旧镜像读取
-      // parseWslConfigMode 依赖 # 与 ; 两种行内注释；引号值内的 # / ; 是字面量，不截断）
-      const rawValue = quoted ? rawValueRaw : rawValueRaw.replace(/\s+[#;].*$/, '').trimEnd()
+      const { rawValue, comment } = splitValueAndComment(entry[2] ?? '')
+      const unquoted = unquoteIni(rawValue.trim())
       out.push({
         type: 'entry',
         raw,
         section,
         key,
-        value: quoted ? rawValue.slice(1, -1) : rawValue,
-        quoted,
+        value: unquoted.value,
+        quoted: unquoted.quoted,
+        inlineComment: comment,
       })
       continue
     }
@@ -76,6 +145,8 @@ function sameIniToken(a: string | undefined, b: string): boolean {
 }
 
 export function getIniValue(text: string, section: string, key: string): string | undefined {
+  // WSL configfile.cpp 的 ConfigKey::Parse 对重复键只接受**第一处**，后续重复项告警忽略。
+  // 读取必须与 WSL 生效值同语义；此前“last wins”会让 UI 显示一个 WSL 根本不用的值。
   const line = parseIniLines(text).find(
     (l) => l.type === 'entry' && sameIniToken(l.section, section) && sameIniToken(l.key, key),
   )
@@ -85,11 +156,22 @@ export function getIniValue(text: string, section: string, key: string): string 
 function formatIniValue(value: string | boolean | number): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   if (typeof value === 'number') return String(value)
-  // 含空白/引号/# 时加引号（wsl.conf 惯例：options = "metadata,..."）
-  return /[\s"'#;]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value
+  // WSL 的 configfile.cpp 只识别双引号；反斜杠在引号内外都会被当作转义起始，
+  // 因此含空白/#/引号/反斜杠的值必须加双引号，并把 `\` 与 `"` 转义。
+  if (!/[\s"'#;\\]/.test(value)) return value
+  return `"${value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+    // eslint-disable-next-line no-control-regex -- 退格是 WSL 的 \b 转义
+    .replace(/\u0008/g, '\\b')}"`
 }
 
-/** section 头所在行号范围 [start, end)（含尾部空白行之前的最后一条内容） */
+/**
+ * section 头所在行号范围 [start, end)：重复段取**第一处**。
+ * WSL 对重复键取第一处生效，编辑/插入都应落在生效段。
+ */
 function sectionRange(
   lines: IniLine[],
   section: string,
@@ -106,9 +188,18 @@ function sectionRange(
   return { headerIdx, bodyStart: headerIdx + 1, bodyEnd }
 }
 
+/** 只替换 `=` 右侧的值片段：保留键写法、等号旁空白、行内注释 */
+function replaceEntryValue(line: IniLine, rendered: string): string {
+  const eq = line.raw.indexOf('=')
+  if (eq < 0) return line.raw
+  const after = line.raw.slice(eq + 1)
+  const leading = /^\s*/.exec(after)?.[0] ?? ''
+  return `${line.raw.slice(0, eq + 1)}${leading}${rendered}${line.inlineComment ?? ''}`
+}
+
 /**
  * 最小编辑设置键值：
- * - 键已存在 → 只替换该行的值
+ * - 键已存在 → 只替换该行的值（保留行内注释）
  * - 键不存在 → 在该 section 内容末尾插入
  * - section 不存在 → 文末追加 `[section]` + 键值
  * 其余行（含注释）原样保留。
@@ -121,17 +212,20 @@ export function setIniValue(
 ): string {
   const lines = parseIniLines(text)
   const rendered = formatIniValue(value)
-  const range = sectionRange(lines, section)
 
+  // 生效键 = 文件中第一处同名 section/key（WSL first-wins）；必须改这一处，
+  // 否则改后面的重复项对 WSL 完全没有效果。
+  const effectiveIdx = lines.findIndex(
+    (l) => l.type === 'entry' && sameIniToken(l.section, section) && sameIniToken(l.key, key),
+  )
+  if (effectiveIdx >= 0) {
+    const l = lines[effectiveIdx]!
+    lines[effectiveIdx] = { ...l, raw: replaceEntryValue(l, rendered), value: String(value) }
+    return lines.map((x) => x.raw).join('\n')
+  }
+
+  const range = sectionRange(lines, section)
   if (range) {
-    for (let i = range.bodyStart; i < range.bodyEnd; i++) {
-      const l = lines[i]!
-      if (l.type === 'entry' && sameIniToken(l.key, key)) {
-        // 保留原键名写法（大小写不敏感匹配，最小编辑不重写用户的大小写）
-        lines[i] = { ...l, raw: `${l.key} = ${rendered}`, value: String(value), quoted: false }
-        return lines.map((x) => x.raw).join('\n')
-      }
-    }
     // 在 section 内容末尾插入（跳过尾部空行，保持视觉紧凑）
     let insertAt = range.bodyEnd
     while (insertAt > range.bodyStart && lines[insertAt - 1]!.type === 'blank') insertAt--
@@ -153,15 +247,18 @@ export function setIniValue(
   return [...base, ...addition].join('\n')
 }
 
-/** 最小编辑删除键（含其整行）；键不存在则原样返回 */
+/**
+ * 最小编辑删除键（含其整行）。
+ * 重复键/重复段：删除**全部**同名键——只删最后一处会让更早的旧值“复活”，
+ * 与用户看到的“清除”语义不符。
+ */
 export function removeIniKey(text: string, section: string, key: string): string {
   const lines = parseIniLines(text)
-  const idx = lines.findIndex(
-    (l) => l.type === 'entry' && sameIniToken(l.section, section) && sameIniToken(l.key, key),
+  const kept = lines.filter(
+    (l) => !(l.type === 'entry' && sameIniToken(l.section, section) && sameIniToken(l.key, key)),
   )
-  if (idx < 0) return text
-  lines.splice(idx, 1)
-  return lines.map((x) => x.raw).join('\n')
+  if (kept.length === lines.length) return text
+  return kept.map((x) => x.raw).join('\n')
 }
 
 // ─────────────────────── wsl.conf 表单模型 ───────────────────────
@@ -172,6 +269,8 @@ export interface WslConfModel {
     root?: string
     options?: string
     mountFsTab?: boolean
+    ldconfig?: boolean
+    cgroups?: string
   }
   network: {
     generateHosts?: boolean
@@ -189,6 +288,14 @@ export interface WslConfModel {
     systemd?: boolean
     command?: string
     initTimeout?: number
+    protectBinfmt?: boolean
+  }
+  gpu: {
+    enabled?: boolean
+    appendLibPath?: boolean
+  }
+  time: {
+    useWindowsTimezone?: boolean
   }
 }
 
@@ -199,6 +306,8 @@ export function emptyWslConfModel(): WslConfModel {
     interop: {},
     user: {},
     boot: {},
+    gpu: {},
+    time: {},
   }
 }
 
@@ -309,6 +418,49 @@ export const WSL_CONF_FIELDS: WslConfField[] = [
     hint: 'boot.initTimeout',
     placeholder: '10000',
   },
+  {
+    section: 'boot',
+    key: 'protectBinfmt',
+    type: 'boolean',
+    label: '保护 binfmt 注册',
+    hint: 'boot.protectBinfmt — 防止 systemd 覆盖 WSL 的 binfmt 单元（默认 true）',
+  },
+  {
+    section: 'automount',
+    key: 'ldconfig',
+    type: 'boolean',
+    label: '运行 ldconfig',
+    hint: 'automount.ldconfig — 把 Windows 提供的 GPU 库加入动态链接搜索路径（WSL2）',
+  },
+  {
+    section: 'automount',
+    key: 'cgroups',
+    type: 'string',
+    label: 'cgroup 版本',
+    hint: 'automount.cgroups — v1 或 v2（默认 v2）',
+    placeholder: 'v2',
+  },
+  {
+    section: 'gpu',
+    key: 'enabled',
+    type: 'boolean',
+    label: '允许 GPU 加速',
+    hint: 'gpu.enabled — 允许 Linux 应用通过半虚拟化访问 Windows GPU',
+  },
+  {
+    section: 'gpu',
+    key: 'appendLibPath',
+    type: 'boolean',
+    label: '追加 GPU 库路径',
+    hint: 'gpu.appendLibPath — 把 /usr/lib/wsl/lib 加入 $PATH',
+  },
+  {
+    section: 'time',
+    key: 'useWindowsTimezone',
+    type: 'boolean',
+    label: '跟随 Windows 时区',
+    hint: 'time.useWindowsTimezone — 使用并同步 Windows 设置的时区（默认 true）',
+  },
 ] as const
 
 /** 文本值 → 表单类型值；无法识别返回 undefined（视为未设置）。模块内实现，行为经 parseWslConf 观测 */
@@ -346,11 +498,12 @@ export function parseWslConf(text: string): WslConfModel {
 export function collectUnknownKeys(
   text: string,
 ): Array<{ section: string; key: string; value: string }> {
-  const known = new Set(WSL_CONF_FIELDS.map((f) => `${f.section}.${f.key}`))
+  // INI 段/键大小写不敏感：已知键比较必须归一，否则 Hostname 会被误列为“其他设置”
+  const known = new Set(WSL_CONF_FIELDS.map((f) => `${f.section}.${f.key}`.toLowerCase()))
   const out: Array<{ section: string; key: string; value: string }> = []
   for (const l of parseIniLines(text)) {
     if (l.type !== 'entry' || !l.section || !l.key) continue
-    if (known.has(`${l.section}.${l.key}`)) continue
+    if (known.has(`${l.section}.${l.key}`.toLowerCase())) continue
     out.push({ section: l.section, key: l.key, value: l.value ?? '' })
   }
   return out

@@ -385,6 +385,26 @@ describe('detectWslEncoding（编码探测唯一事实源）', () => {
   it('短样本（<4 字节）不武断判 utf16le', () => {
     expect(detectWslEncoding(Buffer.from([0x61, 0x00]))).toBe('utf8')
   })
+
+  it('纯中文 UTF-16LE 无 BOM（零 NUL）→ utf16le，不被当 UTF-8 乱码', () => {
+    const buf = Buffer.from('无法访问指定的发行版', 'utf16le')
+    expect(detectWslEncoding(buf)).toBe('utf16le')
+    expect(decodeWslOutput(buf)).toBe('无法访问指定的发行版')
+  })
+
+  it('纯中文 UTF-8 → utf8（不得误判为 UTF-16LE）', () => {
+    const buf = Buffer.from('无法访问指定的发行版', 'utf8')
+    expect(detectWslEncoding(buf)).toBe('utf8')
+    expect(decodeWslOutput(buf)).toBe('无法访问指定的发行版')
+  })
+
+  it('长中文 UTF-8 在 128B 探测窗口中间截断 → 仍判 utf8（streaming 判据）', () => {
+    const text = '无法访问指定的发行版，请检查名称或先启动它。'.repeat(20)
+    const buf = Buffer.from(text, 'utf8')
+    expect(buf.length).toBeGreaterThan(128)
+    expect(detectWslEncoding(buf.subarray(0, 128))).toBe('utf8')
+    expect(decodeWslOutput(buf)).toBe(text)
+  })
 })
 
 describe('parseDistroList 边界（review M4 回归）', () => {

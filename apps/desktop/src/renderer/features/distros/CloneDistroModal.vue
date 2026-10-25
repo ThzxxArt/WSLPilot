@@ -55,16 +55,29 @@ const nameError = computed(() => {
 })
 
 const pathError = computed(() => (form.installPath.trim() ? '' : '请选择安装位置（目录）'))
+const sourceRunning = computed(
+  () => props.distros.find((d) => d.name === props.source)?.state === 'Running',
+)
+const runError = computed(() => (sourceRunning.value ? '源发行版正在运行，请先停止后再克隆' : ''))
 
-const canSubmit = computed(() => !!form.newName.trim() && !nameError.value && !pathError.value)
+const canSubmit = computed(
+  () => !!form.newName.trim() && !nameError.value && !pathError.value && !sourceRunning.value,
+)
 
 async function browse() {
-  const picked = await window.wslAPI.app.pickDirectory(form.installPath || props.defaultDir)
-  if (picked) form.installPath = picked
+  try {
+    const picked = await window.wslAPI.app.pickDirectory(form.installPath || props.defaultDir)
+    if (picked) form.installPath = picked
+  } catch (e) {
+    message.error(errorLine(e, '选择安装目录失败'))
+  }
 }
 
 async function submit() {
-  if (starting.value || !canSubmit.value) return
+  if (starting.value || !canSubmit.value) {
+    if (sourceRunning.value) message.warning(runError.value)
+    return
+  }
   starting.value = true
   try {
     const entry = await tasks.startClone({
@@ -120,9 +133,10 @@ async function submit() {
 
       <p class="hint">
         克隆流程：导出源发行版为临时归档 → 以新名称导入到目标位置 → 自动清理临时文件。
-        导出期间源发行版可继续使用；失败时自动回滚不完整的导入。
+        导出会停止源发行版，因此要求它已停止；失败时自动回滚不完整的导入。
       </p>
 
+      <p v-if="runError" class="error" role="alert">{{ runError }}</p>
       <div class="actions">
         <n-button secondary :disabled="starting" @click="emit('update:show', false)">
           取消

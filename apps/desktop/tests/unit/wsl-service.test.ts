@@ -38,6 +38,8 @@ describe('normalizeState', () => {
     expect(normalizeState('正在运行')).toBe('Running')
     expect(normalizeState('已停止')).toBe('Stopped')
     expect(normalizeState('Installing')).toBe('Installing')
+    expect(normalizeState('Uninstalling')).toBe('Uninstalling')
+    expect(normalizeState('正在卸载')).toBe('Uninstalling')
     expect(normalizeState('')).toBe('Unknown')
     expect(normalizeState('weird')).toBe('Unknown')
   })
@@ -391,6 +393,17 @@ describe('WslService', () => {
     })
 
     it('install 走流式任务并支持省略名称（--no-launch 装完即退 — review 根治）', async () => {
+      // 命名安装：基线名单没有目标，命令退出后名单出现目标（正常装完）
+      let listCalls = 0
+      ;(runWsl as any).mockImplementation(async (args: string[]) => {
+        if (args[0] === '--list') {
+          listCalls++
+          return listCalls === 1
+            ? ok('适用于 Linux 的 Windows 子系统分发版:')
+            : ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu (默认)')
+        }
+        return ok('')
+      })
       // 异步 onExit：对齐真实 spawn 的事件序（同步触发会掩盖 kill/exit 交错 — review m1）
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
         queueMicrotask(() => o.onExit(0))
@@ -405,6 +418,13 @@ describe('WslService', () => {
       ])
       await svc.install(undefined, ctl as never)
       expect((spawnWsl as any).mock.calls[1][0]).toEqual(['--install', '--no-launch'])
+    })
+
+    it('install：固定大小磁盘缺少大小 → 参数错误，且在跑命令前拒绝', async () => {
+      await expect(svc.install(undefined, ctl as never, { fixedVhd: true })).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+      })
+      expect(spawnWsl).not.toHaveBeenCalled()
     })
 
     it('install 完成判定：进程挂住不退但发行版已注册 → 任务结算成功（review「永远进行中」根治）', async () => {
@@ -431,7 +451,7 @@ describe('WslService', () => {
       // 默认 5s 超时在 CI 负载下会假超时 —— 显式放宽到 15s，防抖动不放松断言
     }, 15_000)
 
-    it('install 前缀碰撞：只有 Ubuntu-22.04 在列时不判 Ubuntu 已装，直到进程真正退出', async () => {
+    it('install 前缀碰撞：只有 Ubuntu-22.04 在列时不判 Ubuntu 已装，最终以未注册失败（不假成功）', async () => {
       ;(spawnWsl as any).mockImplementation((_a: string[], o: { onExit: (c: number) => void }) => {
         // 进程挂住一轮轮询（4s）后模拟真实退出：期间前缀相似项不得触发结算
         setTimeout(() => o.onExit(0), 4200)
@@ -446,11 +466,13 @@ describe('WslService', () => {
       })
       const logs: string[] = []
       const ctl2 = { ...ctl, report: vi.fn(), log: (l: string) => logs.push(l) }
-      await svc.install('Ubuntu', ctl2 as never)
-      // 全程不得出现「已注册」假结算
+      await expect(svc.install('Ubuntu', ctl2 as never)).rejects.toMatchObject({
+        message: '安装命令结束但未检测到发行版 Ubuntu',
+      })
+      // 全程不得出现「已注册」假结算，也不得报 100% 完成
       expect(logs.some((l) => l.includes('已注册'))).toBe(false)
       const reports = (ctl2.report.mock as { calls: unknown[][] }).calls
-      expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
+      expect(reports.some((c) => c[0] === 100)).toBe(false)
       // review 0.1.2：依赖真实 4s 轮询 + 4.2s 模拟退出（服务内固定时钟，测试不可注入），
       // 显式 15s 超时防 CI 抖动；结算语义断言保持不放宽
     }, 15_000)
@@ -499,6 +521,34 @@ describe('WslService', () => {
       const reports = (ctl.report.mock as { calls: unknown[][] }).calls
       expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
     })
+
+    it('install fallback 复用装前基线：第一次尝试注册的目标不关闭注册信号', async () => {
+      let listCalls = 0
+      ;(runWsl as any).mockImplementation(async (args: string[]) => {
+        if (args[0] === '--list') {
+          listCalls++
+          return listCalls === 1
+            ? ok('适用于 Linux 的 Windows 子系统分发版:')
+            : ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu (默认)')
+        }
+        return ok('')
+      })
+      ;(spawnWsl as any).mockImplementation(
+        (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+          const n = (spawnWsl as any).mock.calls.length
+          if (n === 1) {
+            o.onLine('Invalid command line option: --no-launch')
+            queueMicrotask(() => o.onExit(1))
+          }
+          // 第二次（plain）故意挂住，模拟首启会话；只有注册信号能结算
+          return { kill: vi.fn() }
+        },
+      )
+      const started = Date.now()
+      await svc.install('Ubuntu', ctl as never)
+      expect(Date.now() - started).toBeLessThan(6000)
+      expect(listCalls).toBeGreaterThanOrEqual(2)
+    }, 10_000)
 
     it('install 进度诚实：null 起手（不假 0%）+ 输出百分比如实上报（review 根治）', async () => {
       ;(spawnWsl as any).mockImplementation(
@@ -606,8 +656,18 @@ describe('parseWslStatus（0.1.3 环境体检）', () => {
   })
 })
 
-describe('WslService 0.1.3（getEnv / update / rollback / setDefaultVersion / setSparse）', () => {
-  const svc = createWslService(logger())
+describe('WslService 0.1.3（getEnv / update / setDefaultVersion / setSparse）', () => {
+  const caps = {
+    source: 'help',
+    wslVersion: '3.0.3.0',
+    windowsBuild: 26300,
+    wslcVersion: '3.0.3.0',
+    inbox: false,
+    flags: { manageSparse: true },
+  }
+  const svc = createWslService(logger(), { capabilities: async () => caps as never })
+  const listTable = 'NAME STATE VERSION\n  Ubuntu  Stopped  2'
+  const mockList = () => (runWsl as any).mockResolvedValueOnce(ok(listTable))
   const ctl = {
     taskId: 't',
     type: 'update' as const,
@@ -682,26 +742,6 @@ describe('WslService 0.1.3（getEnv / update / rollback / setDefaultVersion / se
     expect(final[1]).not.toContain('→')
   })
 
-  it('updateRollback：argv 与提权委托', async () => {
-    ;(spawnWsl as any).mockImplementation(
-      (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
-        o.onLine('The requested operation requires elevation')
-        o.onExit(1)
-        return { kill: vi.fn() }
-      },
-    )
-    const runOne = vi.fn(async () => ({
-      op: 'wsl.updateRollback' as const,
-      ok: true,
-      code: 0,
-      stdout: '',
-      stderr: '',
-    }))
-    const svc2 = createWslService(logger(), { elevation: { runOne } as never })
-    await svc2.updateRollback(ctl as never)
-    expect(runOne).toHaveBeenCalledWith({ op: 'wsl.updateRollback', params: {} })
-  })
-
   it('setDefaultVersion：直接成功；权限不足转提权；其他失败映射 TASK_FAILED', async () => {
     ;(runWsl as any).mockResolvedValueOnce(ok(''))
     await expect(svc.setDefaultVersion(2)).resolves.toBeUndefined()
@@ -732,6 +772,7 @@ describe('WslService 0.1.3（getEnv / update / rollback / setDefaultVersion / se
       queueMicrotask(() => o.onExit(0))
       return { kill: vi.fn() }
     })
+    mockList()
     await svc.setSparse('Ubuntu', true, ctl as never)
     expect((spawnWsl as any).mock.calls[0][0]).toEqual([
       '--manage',
@@ -750,11 +791,12 @@ describe('WslService 0.1.3（getEnv / update / rollback / setDefaultVersion / se
         return { kill: vi.fn() }
       },
     )
+    mockList()
     await expect(svc.setSparse('Ubuntu', true, ctl as never)).rejects.toMatchObject({
-      message: '当前 WSL 不支持稀疏磁盘操作',
+      code: 'WSL_FEATURE_UNSUPPORTED',
+      message: '当前 WSL 不支持 稀疏磁盘操作',
       suggestion: expect.stringContaining('设置 → WSL'),
     })
-
     // 权限不足 → 提权助手（结构化参数）
     ;(spawnWsl as any).mockImplementation(
       (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
@@ -770,11 +812,148 @@ describe('WslService 0.1.3（getEnv / update / rollback / setDefaultVersion / se
       stdout: '',
       stderr: '',
     }))
-    const svc2 = createWslService(logger(), { elevation: { runOne } as never })
+    const svc2 = createWslService(logger(), {
+      elevation: { runOne } as never,
+      capabilities: async () => caps as never,
+    })
+    mockList()
     await svc2.setSparse('Ubuntu', false, ctl as never)
     expect(runOne).toHaveBeenCalledWith({
       op: 'wsl.setSparse',
       params: { name: 'Ubuntu', sparse: false },
     })
+  })
+})
+
+describe('WslService 0.1.4（compact / resize / setDefaultUser）', () => {
+  const ctl = {
+    taskId: 't',
+    type: 'manage' as const,
+    report: vi.fn(),
+    log: vi.fn(),
+    isCanceled: () => false,
+    throwIfCanceled: () => {},
+    onCancel: vi.fn(),
+  }
+  const baseFlags = {
+    compact: true,
+    resize: true,
+    setDefaultUser: true,
+    installLocation: true,
+    vhdSize: true,
+    fixedVhd: true,
+    webDownload: true,
+    exportFormats: true,
+    importFromFile: true,
+    updatePreRelease: true,
+    manageSparse: true,
+  }
+  const caps = {
+    source: 'help' as const,
+    wslVersion: '3.0.3.0',
+    windowsBuild: 26300,
+    wslcVersion: '3.0.3.0',
+    inbox: false,
+    flags: baseFlags,
+  }
+  const runningList = 'NAME  STATE  VERSION\r\n* Ubuntu  Running  2'
+  const stoppedList = 'NAME  STATE  VERSION\r\n  Ubuntu  Stopped  2'
+
+  function makeSvc(over: Partial<typeof caps> = {}) {
+    return createWslService(logger(), {
+      capabilities: async () => ({ ...caps, ...over }),
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine?: (l: string) => void; onExit: (c: number) => void }) => {
+        queueMicrotask(() => o.onExit(0))
+        return { kill: vi.fn() }
+      },
+    )
+  })
+
+  it('compact：运行中未确认 → DISTRO_RUNNING；确认后先 terminate 再 compact', async () => {
+    const svc = makeSvc()
+    ;(runWsl as any).mockResolvedValueOnce(ok(runningList))
+    await expect(svc.compact('Ubuntu', false, ctl as never)).rejects.toMatchObject({
+      code: 'DISTRO_RUNNING',
+    })
+
+    ;(runWsl as any)
+      .mockResolvedValueOnce(ok(runningList)) // requireDistro
+      .mockResolvedValueOnce(ok('')) // terminate
+    await svc.compact('Ubuntu', true, ctl as never)
+    expect((runWsl as any).mock.calls.at(-1)![0]).toEqual(['--terminate', 'Ubuntu'])
+    expect((spawnWsl as any).mock.calls.at(-1)![0]).toEqual(['--manage', 'Ubuntu', '--compact'])
+    expect(ctl.report).toHaveBeenCalledWith(100, expect.stringContaining('压缩完成'))
+  })
+
+  it('resize：运行中拒绝；停止时 argv 正确', async () => {
+    const svc = makeSvc()
+    ;(runWsl as any).mockResolvedValueOnce(ok(runningList))
+    await expect(svc.resize('Ubuntu', '50GB', ctl as never)).rejects.toMatchObject({
+      code: 'DISTRO_RUNNING',
+    })
+
+    ;(runWsl as any).mockResolvedValueOnce(ok(stoppedList))
+    await svc.resize('Ubuntu', '50GB', ctl as never)
+    expect((spawnWsl as any).mock.calls.at(-1)![0]).toEqual([
+      '--manage',
+      'Ubuntu',
+      '--resize',
+      '50GB',
+    ])
+  })
+
+  it('setDefaultUser：运行中拒绝；停止时 argv 正确', async () => {
+    const svc = makeSvc()
+    ;(runWsl as any).mockResolvedValueOnce(ok(runningList))
+    await expect(svc.setDefaultUser('Ubuntu', 'dev', ctl as never)).rejects.toMatchObject({
+      code: 'DISTRO_RUNNING',
+    })
+
+    ;(runWsl as any).mockResolvedValueOnce(ok(stoppedList))
+    await svc.setDefaultUser('Ubuntu', 'dev', ctl as never)
+    expect((spawnWsl as any).mock.calls.at(-1)![0]).toEqual([
+      '--manage',
+      'Ubuntu',
+      '--set-default-user',
+      'dev',
+    ])
+  })
+
+  it('能力不支持时在跑命令前抛 WSL_FEATURE_UNSUPPORTED', async () => {
+    const svc = makeSvc({ flags: { ...baseFlags, compact: false } })
+    ;(runWsl as any).mockResolvedValueOnce(ok(stoppedList))
+    await expect(svc.compact('Ubuntu', false, ctl as never)).rejects.toMatchObject({
+      code: 'WSL_FEATURE_UNSUPPORTED',
+    })
+    expect(spawnWsl).not.toHaveBeenCalled()
+  })
+
+  it('WSL1 发行版拒绝 compact/resize', async () => {
+    const svc = makeSvc()
+    ;(runWsl as any).mockResolvedValueOnce(ok('NAME  STATE  VERSION\r\n  Ubuntu  Stopped  1'))
+    await expect(svc.compact('Ubuntu', false, ctl as never)).rejects.toMatchObject({
+      code: 'WSL_FEATURE_UNSUPPORTED',
+    })
+  })
+
+  it('VHD 仍被 WSL 占用：映射为可行动的 wsl --shutdown 提示（真机 3.0.3 行为）', async () => {
+    const svc = makeSvc()
+    ;(runWsl as any).mockResolvedValueOnce(ok(stoppedList))
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
+        o.onLine('无法完成该操作，因为 VHD 当前正在使用中。')
+        o.onLine('错误代码： Wsl/Service/WSL_E_DISTRO_NOT_STOPPED')
+        queueMicrotask(() => o.onExit(1))
+        return { kill: vi.fn() }
+      },
+    )
+    await expect(svc.resize('Ubuntu', '50GB', ctl as never)).rejects.toThrow(/wsl --shutdown/)
+    expect(ctl.report).not.toHaveBeenCalledWith(100, expect.stringContaining('扩容命令已完成'))
   })
 })

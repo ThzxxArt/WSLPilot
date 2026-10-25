@@ -9,6 +9,7 @@ import {
   type DirEntry,
   type DistroMeta,
   type DistroView,
+  type DistroInstallOptions,
   type FileFilter,
   type FsReadResult,
   type IoCloneRequest,
@@ -83,8 +84,11 @@ const api = {
       ipcRenderer.invoke(CH.registryDetail, name),
     /** 可安装发行版清单（含友好名 — 0.1.3） */
     listOnline: (): Promise<OnlineDistro[]> => ipcRenderer.invoke(CH.distrosListOnline),
-    install: (name?: string): Promise<TaskHandle> =>
-      ipcRenderer.invoke(CH.distrosInstall, name ? { name } : {}),
+    install: (opts?: string | DistroInstallOptions): Promise<TaskHandle> => {
+      // 兼容旧调用方 `install(name)`；新 UI 传完整高级选项
+      const payload = typeof opts === 'string' ? { name: opts } : (opts ?? {})
+      return ipcRenderer.invoke(CH.distrosInstall, payload)
+    },
     setVersion: (name: string, version: 1 | 2): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.distrosSetVersion, { name, version }),
     /**
@@ -99,6 +103,15 @@ const api = {
     /** 稀疏磁盘（0.1.3）：`wsl --manage <name> --set-sparse <true|false>`（WSL 2.0+） */
     setSparse: (name: string, sparse: boolean): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.distrosSetSparse, { name, sparse }),
+    /** 压缩虚拟磁盘（0.1.4；会终止运行中发行版，terminateFirst 需显式确认） */
+    compact: (name: string, terminateFirst: boolean): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosCompact, { name, terminateFirst }),
+    /** 扩容虚拟磁盘（0.1.4；只增不减） */
+    resize: (name: string, size: string): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosResize, { name, size }),
+    /** 设置默认用户（0.1.4；新会话生效） */
+    setDefaultUser: (name: string, user: string): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.distrosSetDefaultUser, { name, user }),
   },
 
   meta: {
@@ -314,8 +327,6 @@ const api = {
     /** 更新 WSL（0.1.3）：长任务（流式日志 + 可取消 + 提权降级） */
     wslUpdate: (opts?: { preRelease?: boolean }): Promise<TaskHandle> =>
       ipcRenderer.invoke(CH.appWslUpdate, { preRelease: opts?.preRelease === true }),
-    /** 回滚最近一次 WSL 更新（0.1.3）：危险操作，调用方负责确认 */
-    wslUpdateRollback: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.appWslUpdateRollback),
     /** 设置默认 WSL 版本（0.1.3）：仅影响新导入的发行版 */
     wslSetDefaultVersion: (version: 1 | 2): Promise<void> =>
       ipcRenderer.invoke(CH.appWslSetDefaultVersion, { version }),
@@ -342,6 +353,7 @@ export type {
   DiagnosticsExportResult,
   DistroView,
   DistroMeta,
+  DistroInstallOptions,
   Metrics,
   NetworkStatus,
   OnlineDistro,

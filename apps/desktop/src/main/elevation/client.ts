@@ -2,13 +2,15 @@
  * 提权客户端（ElevationHelper 客户端）— 设计书 §14.3。
  *
  * 主进程保持**非提权**；需要管理员权限的操作按需拉起独立辅助进程：
- *   Start-Process powershell -Verb RunAs -Wait  →  helper.ps1 读取结构化请求文件
+ *   Start-Process powershell -Verb RunAs -Wait  →  校验 helper.ps1 哈希后从内存执行，
+ *   载荷从命令行 base64 读取（不落 request.json）
  *
  * - 请求只含 op + 参数数组（`buildElevationHelperPayload` 唯一映射），不接受任意命令行
  * - 批量请求合并为**一次** UAC 提权会话（§14.3「合并提权会话减少 UAC 弹窗」）
  * - 用户取消 UAC → `canceled: true`（非错误，调用方给可执行的降级提示）
  */
 import { promises as fs, mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -89,34 +91,44 @@ export function createElevationClient(
     logger.info('elevation requested', { ops: requests.map((r) => r.op), labels })
 
     const dir = makeWorkspace(tempRoot)
-    const requestPath = join(dir, 'request.json')
+    // UAC 期间临时文件可被同用户改写：载荷改走进程命令行（创建后不可变），
+    // 不再写 request.json（v2 的 TOCTOU 缺口真正关闭）。
+    const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
     const resultPath = join(dir, 'result.json')
     const scriptPath = join(dir, 'helper.ps1')
 
     try {
       // UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的 .ps1 按系统 ANSI 码页解码，
       // 脚本内的非 ASCII 内容会静默变乱码（错误文案一旦中文化就会写坏执行逻辑）
-      await fsLike.writeFile(scriptPath, `\ufeff${buildElevationHelperScript()}`)
-      await fsLike.writeFile(requestPath, JSON.stringify(payload))
+      const scriptContent = `\ufeff${buildElevationHelperScript()}`
+      const scriptHash = createHash('sha256').update(scriptContent, 'utf8').digest('hex')
+      await fsLike.writeFile(scriptPath, scriptContent)
       await fsLike.writeFile(resultPath, '')
 
       // 外层启动器：拉起提权的 helper 进程并等待完成。
-      // 两类引号语义不同（review 回验修复）：
-      // - -FilePath 是参数值（不做命令行解析）：只用 PS 单引号定界，**不得**内嵌双引号
-      //   （否则 FileName 变成字面 `"powershell.exe"`，Start-Process 找不到文件）
-      // - -ArgumentList 元素会被拼成命令行再由子进程解析：值必须自带双引号（psArg），
-      //   否则含空格路径（C:\Users\John Doe\…）被拦腰拆开
+      // 关键安全边界（0.1.4 v3）：临时目录对同用户可写，不能直接 `-File helper.ps1`。
+      // 提权进程先读取脚本字节并校验调用方传入的 SHA-256，再从内存执行；UAC 期间
+      // 替换 scriptPath 只会让校验失败，不会执行攻击者脚本。脚本路径仍只作为
+      // 只读输入，payload/result 通过不可变命令行传入。
+      const verifyAndRun = [
+        `$p=${psQuote(scriptPath)}`,
+        `$b=[System.IO.File]::ReadAllBytes($p)`,
+        `$h=[System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($b)).Replace('-','')`,
+        `if($h -ne ${psQuote(scriptHash)}){Write-Output 'WSLPilot elevation helper integrity check failed'; exit 1}`,
+        `$s=[System.Text.Encoding]::UTF8.GetString($b)`,
+        `if($s.Length -gt 0 -and $s[0] -eq [char]0xFEFF){$s=$s.Substring(1)}`,
+        `$sb=[ScriptBlock]::Create($s)`,
+        `& $sb -PayloadBase64 ${psQuote(payloadBase64)} -ResultFile ${psQuote(resultPath)}`,
+      ].join('; ')
+      // -ArgumentList 元素会被拼成命令行再由子进程解析：值必须自带双引号（psArg），
+      // 否则含空格路径（C:\Users\John Doe\…）被拦腰拆开。
       const argList = [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy',
         'Bypass',
-        '-File',
-        scriptPath,
-        '-RequestFile',
-        requestPath,
-        '-ResultFile',
-        resultPath,
+        '-Command',
+        verifyAndRun,
       ]
         .map(psArg)
         .join(',')

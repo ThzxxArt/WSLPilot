@@ -137,7 +137,15 @@ npm run test:watch     # 监听模式
 
 配置位置：`vitest.config.ts` → `test.coverage.thresholds`。
 
-**当前基线（0.1.3）**：单测 1186 条，Lines 95.07% / Branches 88.08% / Functions 94.84%。
+**当前基线（0.1.4）**：单测 1,252 条，Lines 94.96% / Branches 87.47% / Functions 94.39%。组件 374 条，Lines 88.50% / Branches 83.48% / Functions 64.48%。
+除总体 85% 外，0.1.4 增加 per-glob 地板（按目录单独兜底，防止用易测文件拉高总体）：
+
+| 分母                      | Lines  | Statements | Branches | Functions |
+| ------------------------- | ------ | ---------- | -------- | --------- |
+| `main/services/**`        | **92** | **92**     | **85**   | **90**    |
+| `main/ipc/handlers/**`    | **88** | **88**     | **78**   | **95**    |
+| `renderer/stores/**`      | **87** | **87**     | **84**   | **78**    |
+| `renderer/composables/**` | **93** | **93**     | **88**   | **92**    |
 
 ### 组件门禁（`vitest.component.config.ts`，per-glob 两档）
 
@@ -146,13 +154,13 @@ UI 层加入分母后全量 functions 不达 70%，故按 vitest `thresholds` �
 
 | 分母                                   | Lines  | Statements | Branches | Functions |
 | -------------------------------------- | ------ | ---------- | -------- | --------- |
-| `packages/ui/src/**`（实测）           | 98.99% | 98.99%     | 90.58%   | 92.86%    |
+| `packages/ui/src/**`（实测）           | 98.99% | 98.99%     | 90.48%   | 92.86%    |
 | ↑ 门禁地板                             | **96** | **96**     | **88**   | **90**    |
-| `apps/desktop/src/renderer/**`（实测） | 89.72% | 89.72%     | 84.30%   | 63.53%    |
+| `apps/desktop/src/renderer/**`（实测） | 87.68% | 87.68%     | 82.99%   | 63.22%    |
 | ↑ 门禁地板                             | **87** | **87**     | **82**   | **61**    |
 
-（实测取自 `npm run test:component` 全量 365 用例（0.1.3 新增分屏/环境卡/.wslconfig/克隆等用例后重测）；
-renderer 地板随 0.1.3 新代码与用例补齐重新校准；0.1.2 的 88/83/59 地板对应旧实测。）
+（0.1.4 全量 374 用例；两档地板保持 0.1.3 校准值并通过。0.1.4 新增的终端保活、
+存储卡、能力门禁、tar.gz 向导、备份步骤错误提示等已纳入 renderer 分母。）
 
 **承诺：UI 测试将持续补齐、地板随之上调。** 每补一轮组件测试，把对应 glob 的地板
 更新为「新实测 −2pp」；renderer functions 61% 是过渡期防线，不是终点。
@@ -197,6 +205,7 @@ renderer 地板随 0.1.3 新代码与用例补齐重新校准；0.1.2 的 88/83/
     **smoke:product（main 模块图 + preload 模块图硬校验）**
 - 覆盖率报告以 artifact 形式保留 14 天
 - `e2e`：Windows runner，`npm run test:e2e` 实跑 smoke + 视觉回归（`smoke.e2e.ts` 与 `visual.e2e.ts`）
+- `package-windows`（0.1.4）：Windows runner 真实打包 + `node scripts/verify-release.mjs --allow-unsigned --require-artifacts`（版本 / CHANGELOG / sha512 / 签名 / publisherName），上传安装包 artifact
 
 ## 新增功能的测试要求
 
@@ -205,19 +214,27 @@ renderer 地板随 0.1.3 新代码与用例补齐重新校准；0.1.2 的 88/83/
 3. UI 改动 → typecheck + 组件测试通过（新 `.vue` 进组件分母，须补挂载/交互/错误态三件套）
 4. 破坏性行为 → E2E 或手动测试清单
 
-## 0.1.3 手动验证清单（E2E 无法自动化的真机项）
+## 0.1.4 手动验证清单（E2E 无法自动化的真机项）
 
 以下依赖真实 WSL / Windows 环境，无法在 CI 自动覆盖；发布前在本机逐项人工验证（勾选）：
 
 - [ ] 未安装 WSL 环境：设置 → WSL 环境卡「一键安装 WSL」→ UAC → 完成（或提示重启）
-- [ ] `wsl --update` 更新：设置 → WSL「更新 WSL」→ 版本行刷新 / 无更新时版本不变（如实展示）
-- [ ] 预发布通道更新与「回滚最近一次更新」（确认框 → 执行 → 环境卡刷新）
+- [ ] `wsl --update` 更新：设置 → WSL「更新 / 修复 WSL」→ 版本行刷新 / 无更新时版本不变（如实展示）
+- [ ] 预发布通道更新与「查看 WSL 版本历史」（不再有 `--rollback` 入口）
 - [ ] 默认版本下拉切换 WSL1/WSL2（仅影响新导入；`wsl --status` 默认版本行随之变化）
-- [ ] 稀疏磁盘：详情页「启用稀疏磁盘」→ 宿主 vhdx 体积变化（WSL 2.0+）
-- [ ] 克隆发行版：新名称校验 / 克隆成功后新发行版可启动 / 临时目录无残留
-- [ ] 注销前自动备份勾选：注销后备份目录出现新备份
+- [ ] 能力矩阵：3.0.3 上 compact/resize/default-user/安装落点/tar.gz 全亮；旧版对应项置灰并显示最低版本
+- [ ] 存储卡：compact 后宿主文件变化；resize 在 `wsl --shutdown` 后成功；“VHD in use”时错误文案给出 shutdown 指引
+- [ ] 默认用户：设置后新会话生效；运行中 / VHD 占用时拒绝且提示可行动
+- [ ] 安装高级选项：自定义位置 / vhd-size / 固定磁盘 / WSL1 安装可用；不支持时置灰
+- [ ] tar.gz 导出 / 导入：导出文件可被 `wsl --import` 直接识别（3.0.3 已实测）
+- [ ] 导出运行中发行版：未勾选确认时拦在向导；勾选后先 terminate 再导出
+- [ ] 终端保活：切到网络页再回终端，vim/htop 现场与 scrollback 不变；分屏前后两面板历史不变
 - [ ] 终端分屏（真机 WSL）：左右/上下分屏、拖拽比例、Ctrl+Shift+5/6、右键菜单分屏/关闭面板；
       窗口重载后分屏布局恢复
-- [ ] 终端快捷键：Ctrl+Shift+C/V/F（含大段粘贴不丢字）、Ctrl+Tab 循环标签
+- [ ] 克隆发行版：新名称校验 / 克隆成功后新发行版可启动 / 临时目录无残留
+- [ ] 注销前自动备份勾选：注销后备份目录出现新备份
 - [ ] WebGL 渲染下 xterm 正常输出与滚动；无 GPU 环境自动回退不崩
 - [ ] `.wslconfig`：表单保存 → 「立即重启 WSL」→ 内存/处理器限额生效；镜像模式状态卡随保存刷新
+- [ ] `.wslconfig` 新字段：`[general]` / `none` / `consomme` / `dropCache` 可读可存；未知 enum 不阻塞
+- [ ] `wsl.conf` 新字段：`[gpu]` / `[time]` / `protectBinfmt` / `ldconfig` / `cgroups` 可编辑保存
+- [ ] 重复 `network.jsonc` 规则 id：迁移后自动修复；手工制造重复时网络页「一键修复」可保存

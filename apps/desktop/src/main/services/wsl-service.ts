@@ -1,4 +1,5 @@
 import type {
+  DistroInstallOptions,
   DistroMeta,
   DistroRuntime,
   DistroView,
@@ -6,14 +7,18 @@ import type {
   ElevationRequest,
   Metrics,
   OnlineDistro,
+  WslCapabilities,
   WslEnvInfo,
   WslState,
 } from '@wslpilot/shared'
 import {
+  buildCompactArgs,
+  buildInstallArgs,
+  buildResizeArgs,
+  buildSetDefaultUserArgs,
   buildSetDefaultVersionArgs,
   buildSetSparseArgs,
   buildUpdateArgs,
-  buildUpdateRollbackArgs,
   createAppError,
   assertSafeDistroName,
   isElevationError,
@@ -24,15 +29,17 @@ import {
 import { runWsl, parseDistroList, getRawCommand, type Logger } from '@wslpilot/kit'
 import type { TaskControl } from './task-runner'
 import { spawnWslTask } from './spawn-task'
+import { probeWslCapabilities } from './wsl-capabilities'
 
 /** wsl 状态字符串 → 规范化 WslState */
 export function normalizeState(raw: string): WslState {
   const s = raw.trim().toLowerCase()
   if (!s) return 'Unknown'
+  // 先匹配 uninstalling：`includes('installing')` 会把它误判成 Installing（0.1.4 修复）
+  if (s.includes('uninstalling') || s.includes('卸载')) return 'Uninstalling'
+  if (s.includes('installing') || s.includes('安装')) return 'Installing'
   if (s.includes('running') || s.includes('运行')) return 'Running'
   if (s.includes('stopped') || s.includes('停止')) return 'Stopped'
-  if (s.includes('installing') || s.includes('安装')) return 'Installing'
-  if (s.includes('uninstalling') || s.includes('卸载')) return 'Uninstalling'
   if (s.includes('converting') || s.includes('转换')) return 'Converting'
   return 'Unknown'
 }
@@ -118,19 +125,27 @@ export interface WslService {
   getEnv(): Promise<WslEnvInfo>
   /** `wsl --list --online`：可安装发行版清单（含友好名 — 0.1.3） */
   listOnline(): Promise<OnlineDistro[]>
-  /** `wsl --install [-d name]`：流式日志 + 可取消 */
-  install(name: string | undefined, ctl: TaskControl): Promise<void>
+  /** 能力矩阵（0.1.4）：help 主探测 + 版本兜底；未安装返回 null */
+  getCapabilities(): Promise<WslCapabilities | null>
+  /** `wsl --install`：流式日志 + 可取消（0.1.4 支持落点/版本/磁盘大小） */
+  install(name: string | undefined, ctl: TaskControl, opts?: DistroInstallOptions): Promise<void>
   /**
    * `wsl --update [--pre-release]`（0.1.3）：流式任务，完成后按「前后版本对比 + 输出文本」
    * 如实报告三种结果（版本已变 / 无变化 / 需要重启），绝不伪造「有新版本」。
    */
   update(ctl: TaskControl, opts?: { preRelease?: boolean }): Promise<void>
-  /** `wsl --update --rollback`（0.1.3）：回滚最近一次 WSL 更新 */
-  updateRollback(ctl: TaskControl): Promise<void>
   /** `wsl --set-default-version <1|2>`（0.1.3）：仅影响新导入的发行版 */
   setDefaultVersion(version: 1 | 2): Promise<void>
   /** `wsl --manage <name> --set-sparse <true|false>`（0.1.3，WSL 2.0+） */
   setSparse(name: string, sparse: boolean, ctl: TaskControl): Promise<void>
+  /** `wsl --manage <name> --compact`（0.1.4，WSL 2.9.8+） */
+  compact(name: string, terminateFirst: boolean, ctl: TaskControl): Promise<void>
+  /** `wsl --manage <name> --resize <size>`（0.1.4，WSL 2.5.1+，只扩容） */
+  resize(name: string, size: string, ctl: TaskControl): Promise<void>
+  /** `wsl --manage <name> --set-default-user <user>`（0.1.4，WSL 2.4.4+） */
+  setDefaultUser(name: string, user: string, ctl: TaskControl): Promise<void>
+  /** 能力缓存失效（update/install 后调用） */
+  invalidateCapabilities(): void
   /** `wsl --unregister`：危险操作，调用方负责确认 */
   unregister(name: string): Promise<void>
   /** `wsl --set-version`：长任务（1↔2 转换） */
@@ -149,9 +164,11 @@ async function readWslVersionSafe(): Promise<string> {
   try {
     const r = await runWsl(['--version'])
     if (r.code !== 0) return ''
+    // wsl --version 在不同版本可能写 stdout 或 stderr（3.0.3 的 --help 已实测写 stderr）
+    const text = `${r.stdout}\n${r.stderr}`
     return (
-      /WSL\s+version[:：]\s*([\d.]+)/i.exec(r.stdout)?.[1] ??
-      /版本[:：]\s*([\d.]+)/.exec(r.stdout)?.[1] ??
+      /WSL\s+version[:：]\s*([\d.]+)/i.exec(text)?.[1] ??
+      /版本[:：]\s*([\d.]+)/.exec(text)?.[1] ??
       ''
     )
   } catch {
@@ -178,16 +195,48 @@ async function runOk(
 export interface WslServiceOptions {
   /** 提权助手（M7）：install / setVersion 权限不足时改由独立提权进程执行（§14.3） */
   elevation?: { runOne(req: ElevationRequest): Promise<ElevationOpResult> }
+  /** 能力探测注入（测试用；默认走 probeWslCapabilities） */
+  capabilities?: () => Promise<WslCapabilities | null>
 }
 
 export function createWslService(logger: Logger, opts: WslServiceOptions = {}): WslService {
+  /** 能力缓存（60s）：help/version/wslc 探测是三条进程调用，轮询 UI 不得打爆 */
+  let capabilitiesCache: { at: number; value: WslCapabilities | null } | null = null
+  const CAP_CACHE_MS = 60_000
+
+  async function getCapabilities(): Promise<WslCapabilities | null> {
+    const now = Date.now()
+    if (capabilitiesCache && now - capabilitiesCache.at < CAP_CACHE_MS) {
+      return capabilitiesCache.value
+    }
+    const value = await (
+      opts.capabilities ? opts.capabilities() : probeWslCapabilities(logger)
+    ).catch((e: unknown) => {
+      logger.warn('wsl capability probe failed', { error: String(e) })
+      return null
+    })
+    capabilitiesCache = { at: now, value }
+    return value
+  }
+
+  function invalidateCapabilities(): void {
+    capabilitiesCache = null
+  }
+
   /**
    * 流式执行 + 权限不足时提权降级（M7）。
    * `wsl --install` / `--set-version` 需要管理员权限：直接执行被拒时改由提权助手执行。
    */
   async function spawnOrElevate(
     args: string[],
-    op: 'wsl.install' | 'wsl.setVersion' | 'wsl.update' | 'wsl.updateRollback' | 'wsl.setSparse',
+    op:
+      | 'wsl.install'
+      | 'wsl.setVersion'
+      | 'wsl.update'
+      | 'wsl.setSparse'
+      | 'wsl.compact'
+      | 'wsl.resize'
+      | 'wsl.setDefaultUser',
     params: Record<string, string | number | boolean>,
     ctl: TaskControl,
   ): Promise<void> {
@@ -244,6 +293,73 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       version: (p.version === 1 ? 1 : 2) as 1 | 2,
       isDefault: p.isDefault,
     }))
+  }
+
+  async function findDistro(name: string): Promise<DistroRuntime | null> {
+    const items = await list()
+    return items.find((d) => d.name.toLowerCase() === name.toLowerCase()) ?? null
+  }
+
+  async function requireDistro(name: string): Promise<DistroRuntime> {
+    const hit = await findDistro(name)
+    if (!hit) {
+      throw createAppError('DISTRO_NOT_FOUND', {
+        message: `找不到发行版 ${name}`,
+        suggestion: '请刷新发行版列表后重试',
+      })
+    }
+    return hit
+  }
+
+  function requireWsl2(target: DistroRuntime, feature: string): void {
+    if (target.version !== 2) {
+      throw createAppError('WSL_FEATURE_UNSUPPORTED', {
+        message: `${feature}仅支持 WSL2 发行版`,
+        detail: `${target.name} 当前为 WSL${target.version}`,
+        suggestion: '请先把发行版转换为 WSL2，或改用 tar 备份',
+      })
+    }
+  }
+
+  function requireCapability(
+    caps: WslCapabilities | null,
+    flag: keyof WslCapabilities['flags'],
+    cmd: string,
+    minVersion: string,
+  ): void {
+    if (!caps || caps.flags[flag]) return
+    throw createAppError('WSL_FEATURE_UNSUPPORTED', {
+      message: `当前 WSL 不支持 ${cmd}`,
+      detail: `需要 WSL ${minVersion}+（当前 ${caps.wslVersion || '未知'}）`,
+      suggestion: '请先在「设置 → WSL」更新 WSL 后重试',
+    })
+  }
+
+  /** 把 WSL 的 “unknown/invalid option” 映射成能力错误，而不是笼统 TASK_FAILED */
+  function mapUnsupported(e: unknown, args: string[], feature: string): never {
+    const detail =
+      e && typeof e === 'object' && 'detail' in e
+        ? String((e as { detail?: string }).detail ?? '')
+        : ''
+    if (
+      /WSL_E_DISTRO_NOT_STOPPED|VHD.*(?:使用中|currently in use)|DISTRO_NOT_STOPPED/i.test(detail)
+    ) {
+      throw createAppError('TASK_FAILED', {
+        message: `${feature}失败：WSL 虚拟机仍占用该虚拟磁盘。请先在 Windows 终端执行 wsl --shutdown（会停止所有发行版）后重试`,
+        detail,
+        rawCommand: getRawCommand('wsl.exe', args),
+        suggestion: 'wsl --shutdown 会停止所有发行版与终端；请先保存工作',
+      })
+    }
+    if (/unknown|invalid|not recognized|无法识别|无效|不支持/i.test(detail)) {
+      throw createAppError('WSL_FEATURE_UNSUPPORTED', {
+        message: `当前 WSL 不支持 ${feature}`,
+        detail,
+        rawCommand: getRawCommand('wsl.exe', args),
+        suggestion: '请先在「设置 → WSL」更新 WSL 后重试',
+      })
+    }
+    throw e
   }
 
   return {
@@ -371,14 +487,18 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
           defaultDistro: '',
           defaultVersion: null,
           statusRaw: rawOf(),
+          capabilities: null,
         }
       }
-      const text = `${ver.stdout}\n${status.stdout}`
+      const text = [ver.stdout, ver.stderr, status.stdout, status.stderr]
+        .map((t) => (t ?? '').trim())
+        .filter(Boolean)
+        .join('\n')
       const wslVersion =
         /WSL\s+version[:：]\s*([\d.]+)/i.exec(text)?.[1] ??
         /版本[:：]\s*([\d.]+)/.exec(text)?.[1] ??
         ''
-      const parsed = parseWslStatus(status.stdout)
+      const parsed = parseWslStatus(`${status.stdout}\n${status.stderr}`)
       // 内核版本：优先 --status；旧版 wsl 的 --status 可能不含，回退到组合文本（--version 通常携带）
       const kernelFallback =
         /Kernel\s+version[:：]\s*([^\r\n]+)/i.exec(text)?.[1]?.trim() ??
@@ -391,8 +511,12 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
         defaultDistro: parsed.defaultDistro,
         defaultVersion: parsed.defaultVersion,
         statusRaw: text.trim(),
+        capabilities: await getCapabilities(),
       }
     },
+
+    getCapabilities,
+    invalidateCapabilities,
 
     /**
      * 采样单个发行版资源指标。
@@ -525,9 +649,45 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
         .filter((d) => d.name !== '')
     },
 
-    async install(name: string | undefined, ctl: TaskControl): Promise<void> {
-      const target = name ? assertName(name) : ''
-      const params: Record<string, string | number> = target ? { name: target } : {}
+    async install(
+      name: string | undefined,
+      ctl: TaskControl,
+      opts: DistroInstallOptions = {},
+    ): Promise<void> {
+      const o = opts
+      const target = name ? assertName(name) : o.name ? assertName(o.name) : ''
+      if (o.fixedVhd && !o.vhdSize?.trim()) {
+        throw createAppError('INVALID_ARGUMENT', {
+          message: '固定大小磁盘必须同时指定磁盘大小',
+          suggestion: '请填写如 50GB / 1TB 的磁盘大小，或关闭“固定大小磁盘”',
+        })
+      }
+      // 能力门禁：旧版 WSL 不认识这些参数，不能先跑再报“无效命令行”
+      const caps = await getCapabilities()
+      const need: Array<[boolean, keyof WslCapabilities['flags'], string]> = [
+        [!!o.location, 'installLocation', '--location'],
+        [!!o.vhdSize, 'vhdSize', '--vhd-size'],
+        [o.fixedVhd === true, 'fixedVhd', '--fixed-vhd'],
+        [o.webDownload === true, 'webDownload', '--web-download'],
+      ]
+      for (const [used, flag, cmd] of need) {
+        if (used && caps && !caps.flags[flag]) {
+          throw createAppError('WSL_FEATURE_UNSUPPORTED', {
+            message: `当前 WSL 不支持 ${cmd}（安装高级选项）`,
+            detail: caps.wslVersion ? `当前 WSL ${caps.wslVersion}` : '未检测到独立 WSL 版本',
+            suggestion: '请先在「设置 → WSL」更新 WSL，或去掉该高级选项后重试',
+          })
+        }
+      }
+      const params: Record<string, string | number | boolean> = {}
+      if (target) params.name = target
+      if (o.location) params.location = o.location
+      if (o.version) params.version = o.version
+      if (o.enableWsl1 || o.version === 1) params.enableWsl1 = true
+      if (o.vhdSize) params.vhdSize = o.vhdSize
+      if (o.fixedVhd) params.fixedVhd = true
+      if (o.webDownload) params.webDownload = true
+
       // 进度诚实（review 假 0% 根治）：起手报 null（不确定态），wsl 输出带百分比时如实上报；
       // 绝不挂一个恒 0% 的假进度
       ctl.report(null, target ? `正在安装 ${target}` : '正在安装 WSL')
@@ -565,10 +725,15 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
           return false
         }
       }
-      const runWithCompletion = async (args: string[]): Promise<void> => {
+      // 安装前基线只取一次（在第一次 spawn 之前）。两次尝试各自重读会把第一次
+      // 尝试注册出的目标误判为“装前已存在”，导致 fallback 永久等待首启会话。
+      const preExistingBase = target ? await isTargetRegistered() : false
+      const runWithCompletion = async (args: string[], noLaunch: boolean): Promise<void> => {
         let finished = false
         let err: unknown = null
-        const p = spawnOrElevate(args, 'wsl.install', params, hooked).then(
+        // Helper 也按 params 重建 argv：必须把 noLaunch 带过去，否则 elevation 降级
+        // 会重新硬编码 --no-launch，使老 WSL 的 plain 重试永远无效。
+        const p = spawnOrElevate(args, 'wsl.install', { ...params, noLaunch }, hooked).then(
           () => {
             finished = true
           },
@@ -577,9 +742,7 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
             err = e
           },
         )
-        // 安装前基线：记录目标是否已注册（决定注册信号是否启用）
-        const preExisting = target ? await isTargetRegistered() : false
-        if (target && !preExisting) {
+        if (target && !preExistingBase) {
           while (!finished) {
             // 与进程退出竞速：退出即刻返回（不空等一个轮询周期）
             await Promise.race([p, new Promise((r) => setTimeout(r, 4000))])
@@ -593,12 +756,21 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
         }
         await p
         if (err) throw err
+        // 正常退出 ≠ 已注册：命名安装若命令成功但名单里没有目标，不能报完成（假绿）。
+        // 需要重启 Windows 时注册可能延后，交给重启提示，不在此时判失败。
+        if (target && !preExistingBase && !needRestart && !(await isTargetRegistered())) {
+          throw createAppError('TASK_FAILED', {
+            message: `安装命令结束但未检测到发行版 ${target}`,
+            suggestion: '请刷新发行版列表确认；若持续失败请查看日志中的 wsl --install 输出',
+          })
+        }
       }
 
-      const argsNoLaunch = ['--install', ...(target ? ['-d', target] : []), '--no-launch']
-      const argsPlain = ['--install', ...(target ? ['-d', target] : [])]
+      const base: DistroInstallOptions = { ...o, name: target || undefined }
+      const argsNoLaunch = buildInstallArgs({ ...base, noLaunch: true })
+      const argsPlain = buildInstallArgs({ ...base, noLaunch: false })
       try {
-        await runWithCompletion(argsNoLaunch)
+        await runWithCompletion(argsNoLaunch, true)
       } catch (e) {
         const detail = `${e instanceof Error ? e.message : String(e)} ${(e as { detail?: string })?.detail ?? ''}`
         if (
@@ -607,11 +779,13 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
           throw e
         }
         ctl.log('当前 WSL 不识别 --no-launch，改用标准安装（完成以注册为准）…')
-        await runWithCompletion(argsPlain)
+        await runWithCompletion(argsPlain, false)
       }
+      invalidateCapabilities()
       if (needRestart) {
         ctl.log('安装程序提示需要重启 Windows —— 请重启后再使用 WSL')
-        ctl.report(100, '安装完成 · 需要重启 Windows 后生效')
+        // 需要重启时注册可能尚未完成，不能说“安装完成”；只报命令完成与后续动作。
+        ctl.report(100, '安装命令完成 · 需要重启 Windows 后确认发行版')
       } else {
         ctl.report(100, '安装完成')
       }
@@ -636,6 +810,7 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       }
       ctl.report(null, preRelease ? '正在通过预发布通道更新 WSL' : '正在更新 WSL')
       await spawnOrElevate(args, 'wsl.update', { preRelease }, hooked)
+      invalidateCapabilities()
       const after = await readWslVersionSafe()
       if (before && after && before !== after) {
         ctl.log(`版本变化：${before} → ${after}`)
@@ -660,18 +835,14 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       }
     },
 
-    /** `wsl --update --rollback`（0.1.3）：回滚最近一次 WSL 更新 */
-    async updateRollback(ctl: TaskControl): Promise<void> {
-      ctl.report(null, '正在回滚 WSL 更新')
-      await spawnOrElevate(buildUpdateRollbackArgs(), 'wsl.updateRollback', {}, ctl)
-      ctl.report(100, 'WSL 更新回滚完成')
-    },
-
     /** `wsl --set-default-version <1|2>`（0.1.3）：仅影响新导入的发行版 */
     async setDefaultVersion(version: 1 | 2): Promise<void> {
       const args = buildSetDefaultVersionArgs(version)
       const r = await runWsl(args)
-      if (r.code === 0) return
+      if (r.code === 0) {
+        invalidateCapabilities()
+        return
+      }
       const text = `${r.stderr}\n${r.stdout}`
       if (isElevationError(text) && opts.elevation) {
         logger.info('wsl --set-default-version requires elevation, delegating')
@@ -679,7 +850,10 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
           op: 'wsl.setDefaultVersion',
           params: { version },
         })
-        if (res.ok) return
+        if (res.ok) {
+          invalidateCapabilities()
+          return
+        }
         throw createAppError('PERMISSION_DENIED', {
           message: `设置默认 WSL 版本失败：提权执行失败`,
           detail: `${res.stderr}\n${res.stdout}`.trim(),
@@ -694,30 +868,106 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       })
     },
 
+    /**
+     * `wsl --manage <name> --compact`（0.1.4，WSL 2.9.8+）。
+     * WSL 的 compact 会终止运行中的发行版：必须由用户显式 `terminateFirst`。
+     */
+    async compact(name: string, terminateFirst: boolean, ctl: TaskControl): Promise<void> {
+      const safe = assertName(name)
+      const target = await requireDistro(safe)
+      requireWsl2(target, '压缩磁盘')
+      const caps = await getCapabilities()
+      requireCapability(caps, 'compact', '压缩磁盘（--compact）', '2.9.8')
+      if (target.state === 'Running') {
+        if (!terminateFirst) {
+          throw createAppError('DISTRO_RUNNING', {
+            message: `发行版 ${target.name} 正在运行，压缩磁盘会终止它`,
+            suggestion:
+              '请在详情页重新点击「压缩磁盘」并确认先停止；应用会自动执行 wsl --terminate',
+          })
+        }
+        ctl.log(`压缩磁盘会终止运行中的发行版，先执行 wsl --terminate ${target.name}`)
+        await runOk(['--terminate', target.name], 'DISTRO_NOT_FOUND')
+      }
+      const args = buildCompactArgs(target.name)
+      ctl.report(null, `正在压缩 ${target.name} 的虚拟磁盘`)
+      try {
+        await spawnOrElevate(args, 'wsl.compact', { name: target.name }, ctl)
+      } catch (e) {
+        mapUnsupported(e, args, '压缩磁盘（--compact）')
+      }
+      ctl.report(100, `压缩完成：${target.name}（刷新列表查看宿主磁盘大小）`)
+    },
+
+    /**
+     * `wsl --manage <name> --resize <size>`（0.1.4，WSL 2.5.1+）。
+     * 这里绝不传 `--allow-unsafe`，但 WSL 本身在小目标时会缩容：
+     * IPC handler 必须先按 VHDX 虚拟容量做“目标 > 当前值”门禁；运行中直接拒绝。
+     */
+    async resize(name: string, size: string, ctl: TaskControl): Promise<void> {
+      const safe = assertName(name)
+      const target = await requireDistro(safe)
+      requireWsl2(target, '扩容磁盘')
+      const caps = await getCapabilities()
+      requireCapability(caps, 'resize', '扩容磁盘（--resize）', '2.5.1')
+      if (target.state === 'Running') {
+        throw createAppError('DISTRO_RUNNING', {
+          message: `发行版 ${target.name} 正在运行，无法调整磁盘大小`,
+          suggestion: '请先停止该发行版后重试（扩容要求文件系统处于离线状态）',
+        })
+      }
+      const args = buildResizeArgs(target.name, size)
+      ctl.report(null, `正在把 ${target.name} 的磁盘扩容到 ${size}`)
+      try {
+        await spawnOrElevate(args, 'wsl.resize', { name: target.name, size }, ctl)
+      } catch (e) {
+        mapUnsupported(e, args, '扩容磁盘（--resize）')
+      }
+      ctl.report(100, `扩容命令已完成：${target.name} → ${size}（以发行版内 df 为准）`)
+    },
+
+    /** `wsl --manage <name> --set-default-user <user>`（0.1.4，WSL 2.4.4+） */
+    async setDefaultUser(name: string, user: string, ctl: TaskControl): Promise<void> {
+      const safe = assertName(name)
+      const target = await requireDistro(safe)
+      const caps = await getCapabilities()
+      requireCapability(caps, 'setDefaultUser', '设置默认用户', '2.4.4')
+      if (target.state === 'Running') {
+        throw createAppError('DISTRO_RUNNING', {
+          message: `发行版 ${target.name} 正在运行，无法修改默认用户`,
+          suggestion: '请先停止该发行版后重试；设置完成后新会话生效',
+        })
+      }
+      const args = buildSetDefaultUserArgs(target.name, user)
+      ctl.report(null, `正在把 ${target.name} 的默认用户设为 ${user}`)
+      try {
+        await spawnOrElevate(args, 'wsl.setDefaultUser', { name: target.name, user }, ctl)
+      } catch (e) {
+        mapUnsupported(e, args, '设置默认用户')
+      }
+      ctl.report(100, `已设置默认用户：${target.name} → ${user}（新会话生效）`)
+    },
+
     /** `wsl --manage <name> --set-sparse <true|false>`（0.1.3，WSL 2.0+） */
     async setSparse(name: string, sparse: boolean, ctl: TaskControl): Promise<void> {
       const safe = assertName(name)
-      const args = buildSetSparseArgs(safe, sparse)
+      const target = await requireDistro(safe)
+      requireWsl2(target, '稀疏磁盘操作')
+      const caps = await getCapabilities()
+      requireCapability(caps, 'manageSparse', '稀疏磁盘操作（--set-sparse）', '2.0')
+      if (target.state === 'Running') {
+        throw createAppError('DISTRO_RUNNING', {
+          message: `发行版 ${target.name} 正在运行，无法修改稀疏磁盘`,
+          suggestion:
+            '请先停止该发行版；若停止后仍报 VHD 被占用，请在「存储与身份」卡执行「关闭 WSL 虚拟机」',
+        })
+      }
+      const args = buildSetSparseArgs(target.name, sparse)
       ctl.report(null, sparse ? `正在启用 ${safe} 的稀疏磁盘` : `正在关闭 ${safe} 的稀疏磁盘`)
       try {
         await spawnOrElevate(args, 'wsl.setSparse', { name: safe, sparse }, ctl)
       } catch (e) {
-        const detail =
-          e && typeof e === 'object' && 'detail' in e
-            ? String((e as { detail?: string }).detail ?? '')
-            : ''
-        if (
-          /set-sparse|--manage/i.test(detail) &&
-          /unknown|invalid|not recognized|无法识别|无效/i.test(detail)
-        ) {
-          throw createAppError('TASK_FAILED', {
-            message: '当前 WSL 不支持稀疏磁盘操作',
-            detail,
-            rawCommand: getRawCommand('wsl.exe', args),
-            suggestion: '请先在「设置 → WSL」把 WSL 更新到 2.0 及以上后重试',
-          })
-        }
-        throw e
+        mapUnsupported(e, args, '稀疏磁盘操作')
       }
       ctl.report(100, sparse ? `已启用稀疏磁盘：${safe}` : `已关闭稀疏磁盘：${safe}`)
     },

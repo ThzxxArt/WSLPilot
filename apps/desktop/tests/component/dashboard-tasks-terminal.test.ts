@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { reactive, defineComponent, h, onMounted, onUnmounted } from 'vue'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
 import {
@@ -433,6 +433,68 @@ describe('InstallDistroModal', () => {
     expect(document.body.querySelector('.install-modal .n-progress')).toBeNull()
     expect(findBodyButton('关闭')).toBeTruthy()
     expect(findBodyButton('重新开始')).toBeTruthy()
+  })
+})
+
+describe('TerminalView 扁平 pane 保活（0.1.4）', () => {
+  it('分屏只增加新 host，已有 XtermPane 实例不重建；关闭只卸载被关面板', async () => {
+    const terminal = useTerminalStore()
+    const { makeLeaf } = await import('../../src/renderer/features/terminal/panes')
+    terminal.tabs = [
+      { id: 'tab-keep', title: 'Ubuntu', layout: makeLeaf('p1'), createdAt: Date.now() },
+    ]
+    terminal.panes = {
+      p1: {
+        ptyId: 'p1',
+        distro: 'Ubuntu',
+        shell: '/bin/bash',
+        createdAt: Date.now(),
+        alive: true,
+      },
+    }
+    terminal.activeTabId = 'tab-keep'
+    terminal.activeId = 'p1'
+
+    let mounts = 0
+    let unmounts = 0
+    const XtermStub = defineComponent({
+      name: 'XtermPane',
+      setup() {
+        onMounted(() => mounts++)
+        onUnmounted(() => unmounts++)
+        return () =>
+          h('div', { class: 'xterm-stub' }, [
+            h('button', { class: 'fit-stub', onClick: () => {} }, 'fit'),
+          ])
+      },
+      methods: { fit() {}, focus() {}, isAtBottom: () => true },
+    })
+    const w = mount(TerminalView, {
+      attachTo: document.body,
+      global: {
+        stubs: { XtermPane: XtermStub, TerminalTabs: true, TerminalToolbar: true },
+      },
+    })
+    await flushPromises()
+    expect(w.findAll('.pane-host')).toHaveLength(1)
+    expect(mounts).toBe(1)
+
+    wslAPI.terminal.create.mockResolvedValueOnce({
+      ptyId: 'p2',
+      distro: 'Ubuntu',
+      createdAt: Date.now(),
+    } as never)
+    await terminal.splitPane('p1', 'col')
+    await flushPromises()
+    expect(w.findAll('.pane-host')).toHaveLength(2)
+    expect(mounts).toBe(2)
+    expect(unmounts).toBe(0)
+
+    await terminal.closePane('p2')
+    await flushPromises()
+    expect(w.findAll('.pane-host')).toHaveLength(1)
+    expect(mounts).toBe(2)
+    expect(unmounts).toBe(1)
   })
 })
 

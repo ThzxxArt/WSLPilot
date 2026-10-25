@@ -20,6 +20,7 @@ import {
   parseWslConfigMode,
   previewNetshCommand,
   PROXY_SCRIPT_PATH,
+  repairDuplicateRuleIds,
   resolveEffectiveProxy,
   ruleMatchesEntry,
   ruleSummary,
@@ -217,9 +218,10 @@ describe('镜像网络模式解析', () => {
     expect(parseWslConfigMode('').mode).toBe('unknown')
   })
 
-  it('行内注释（# / ; 空白前缀）与旧实现语义一致（0.1.3 单一事实源委托）', () => {
+  it('行内注释（# 空白前缀）与 WSL 语义一致；; 是值字面量', () => {
     expect(parseWslConfigMode('[wsl2]\nnetworkingMode=bridged # 备注').mode).toBe('bridged')
-    expect(parseWslConfigMode('[wsl2]\nnetworkingMode=bridged ; 备注').mode).toBe('bridged')
+    // WSL configfile.cpp 不把 ; 当注释；值变成 "bridged ; 备注" → 非法 enum → unknown
+    expect(parseWslConfigMode('[wsl2]\nnetworkingMode=bridged ; 备注').mode).toBe('unknown')
     expect(parseWslConfigMode('[wsl2]\nnetworkingMode="mirrored" # 引号值').mode).toBe('mirrored')
     // 段落名/键名大小写不敏感（旧实现 lowercase 比较的等价语义）
     expect(parseWslConfigMode('[WSL2]\nNetworkingMode=Mirrored\n').mode).toBe('mirrored')
@@ -414,5 +416,18 @@ describe('规则辅助', () => {
 
   it('ruleSummary', () => {
     expect(ruleSummary(RULE)).toBe('0.0.0.0:3000 → 127.0.0.1:3000（Ubuntu-22.04 · TCP）')
+  })
+
+  it('repairDuplicateRuleIds：重复/空/非法 id 都修复且规则不丢', () => {
+    const out = repairDuplicateRuleIds([
+      { id: 'a', n: 1 },
+      { id: 'a', n: 2 },
+      { id: '', n: 3 },
+      { id: 'a/b', n: 4 },
+    ])
+    expect(out.changed).toBe(true)
+    expect(out.rules.map((r) => r.n)).toEqual([1, 2, 3, 4])
+    expect(new Set(out.rules.map((r) => r.id)).size).toBe(4)
+    for (const r of out.rules) expect(() => assertSafeRuleId(r.id)).not.toThrow()
   })
 })

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { createConfigService, type ConfigService } from '../../src/main/services/config-service'
+import { assertSafeRuleId } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
 
 function mockLogger(): Logger {
@@ -33,6 +34,36 @@ describe('ConfigService', () => {
     const text = await fs.readFile(join(dir, 'settings.jsonc'), 'utf8')
     expect(text).toContain('WSLPilot settings.jsonc')
     expect(text).toContain('"$schemaVersion": 2')
+  })
+
+  it('network v2 读取时空/非法 id 修复并保留重复，供网络页一键修复', async () => {
+    const file = join(dir, 'network.jsonc')
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        $schemaVersion: 2,
+        portForwarding: [
+          { id: 'a', distro: 'Ubuntu', listenPort: 3000, connectPort: 3000 },
+          { id: 'a', distro: 'Ubuntu', listenPort: 3001, connectPort: 3001 },
+          { id: '', distro: 'Ubuntu', listenPort: 3002, connectPort: 3002 },
+          { id: 'a/b', distro: 'Ubuntu', listenPort: 3003, connectPort: 3003 },
+        ],
+      }),
+      'utf8',
+    )
+    const svc2 = await createConfigService(dir, mockLogger())
+    try {
+      const net = await svc2.load('network')
+      expect(net.portForwarding).toHaveLength(4)
+      // 空/非法 id 被修成可执行 id；重复 id 必须保留，UI 才能显示“一键修复”
+      expect(net.portForwarding.map((r) => r.id)).toEqual(['a', 'a', 'rule', 'rule'])
+      expect(new Set(net.portForwarding.map((r) => r.id)).size).toBe(2)
+      for (const r of net.portForwarding) {
+        expect(() => assertSafeRuleId(r.id)).not.toThrow()
+      }
+    } finally {
+      svc2.dispose()
+    }
   })
 
   it('patch merges nested fields and returns validated result', async () => {
@@ -360,7 +391,7 @@ describe('ConfigService', () => {
     await svc.patch('settings', { general: { accent: 'ocean' } })
     const s = svc.loadSync('settings') as any
     expect(s.general.accent).toBe('ocean')
-    expect(svc.loadSync('distros').$schemaVersion).toBe(1)
+    expect(svc.loadSync('distros').$schemaVersion).toBe(2)
   })
 
   it('empty patch keeps file intact and comments', async () => {

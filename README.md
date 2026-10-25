@@ -7,7 +7,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 - **技术栈**：TypeScript + Vue 3 + Electron（npm workspaces monorepo）
 - **持久化**：人类可读的 JSONC 配置文件（无数据库，可纳入 Git）
 - **设计系统**：浅色「极光」风格（四套强调色），完整动效基座，支持 `prefers-reduced-motion`
-- **当前版本**：`0.1.3`（WSL 深耕版——WSL 本体安装/更新/回滚、发行版磁盘管理与克隆、终端分屏与增强、`.wslconfig` 全局配置编辑）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
+- **当前版本**：`0.1.4`（WSL 3.0 对齐版——能力矩阵、存储治理、终端保活回归修复、`.wslconfig`/`wsl.conf` 配置面扩展、tar.gz 备份）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
 
 ---
 
@@ -37,9 +37,9 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 - 驾驶舱总览：运行状态、真实资源采样（内存 / 磁盘 / CPU `/proc/stat` 双采样差分，不推算伪造）
 - 一键启动 / 停止 / 设为默认 / 全部关机；卡片与表格双视图，搜索与标签筛选
 - 发行版详情弹窗（概览 / 配置 / 动作 / 文件四标签）：注册表详情、元数据编辑（别名 / 图标 / 品牌色 / 启动目录 / 置顶等 8 字段）、版本转换、注销（可勾选注销前自动备份）
-- **宿主磁盘可见**：详情页展示 `ext4.vhdx` 实际占用，一键**启用稀疏磁盘**回收未使用空间（WSL 2.0+）
-- **克隆发行版**：导出临时归档 → 以新名导入 → 自动清理（失败自动回滚）；**安装向导**（`wsl --list --online` 友好名 + `wsl --install`，带进度与取消）
-- **WSL 本体生命周期**（设置 → WSL / 驾驶舱引导）：环境体检（版本 / 内核 / 默认发行版 / 默认版本）、未安装时**一键安装 WSL**、`wsl --update` 更新（含预发布通道）、`wsl --update --rollback` 回滚、`wsl --set-default-version` 默认版本
+- **宿主磁盘与存储治理**：详情页展示 `ext4.vhdx` 实际占用、内部用量与可回收上限估算；支持压缩（`--compact`）、扩容（`--resize`，只增不减）、默认用户（`--set-default-user`）、稀疏磁盘与“停止全部 WSL”显式入口（WSL 版本能力自动门禁）
+- **克隆发行版**：导出临时归档 → 以新名导入 → 自动清理（失败自动回滚）；**安装向导**（`wsl --list --online` 友好名 + `wsl --install` 高级选项：安装位置 / 版本 / 磁盘大小 / 固定磁盘 / Internet 下载，带进度与取消）
+- **WSL 本体生命周期**（设置 → WSL / 驾驶舱引导）：环境体检（版本 / 内核 / 默认发行版 / 默认版本 / 能力矩阵）、未安装时**一键安装 WSL**、`wsl --update` 更新与修复（含预发布通道）、`wsl --set-default-version` 默认版本；**不再提供失效的 `--rollback`**，改为查看版本历史 / 手动安装旧版
 
 ### 内置终端
 
@@ -53,7 +53,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 
 ### 备份与迁移
 
-- 三模式向导：**导出**（tar / vhdx）/ **导入**（归档 / 就地）/ **迁移**（换盘），纯前端校验与执行边界同源
+- 三模式向导：**导出**（tar / tar.gz / vhdx；运行中发行版需显式确认先停止）/ **导入**（归档 / 就地，自动识别 tar.gz）/ **迁移**（换盘），纯前端校验与执行边界同源
 - 环形进度 + 实时日志 + 可取消 + 失败自动回滚（半截归档清理、不完整注册注销）
 - 等价命令行预览与一键复制（预览与真实执行同源构建，所见即所行）
 - 备份轮转（保留最近 N 份，命名 `%XX` 无碰撞转义）、迁移前自动备份兜底
@@ -188,6 +188,16 @@ npm run package --workspace @wslpilot/desktop -- --x64    # 指定架构打包
 ```
 
 **代码签名（可选）**：导出 `CSC_LINK`（pfx 路径或 base64）与 `CSC_KEY_PASSWORD` 后打包即自动签名；未签名构建首次运行可能出现 Windows SmartScreen 提示（「更多信息 → 仍要运行」），签名状态可在「设置 → 关于」查看。
+
+> **0.1.4 当前发布状态**：仓库默认构建**未配置证书**，安装包为未签名；`app-update.yml`
+> 没有 `publisherName`，因此即使 `verifyUpdateCodeSignature: true`，electron-updater 的
+> 发布者校验也不会真正生效。`node scripts/verify-release.mjs --allow-unsigned` 会把这一点作为
+> 警告输出；要获得发布者校验，必须配置签名证书并设置 `publisherName`。
+
+**发布校验**：`node scripts/verify-release.mjs --allow-unsigned --require-artifacts` 校验
+版本一致性、CHANGELOG、tag、安装包 sha512、Authenticode 状态与 `verifyUpdateCodeSignature`
+（同时读取 `electron-builder.yml` 与 `app-update.yml`）；CI 未配置证书时自动加
+`--allow-unsigned`，配置 `CSC_LINK` 后改为要求签名，但 `publisherName` 仍需按证书主题配置。
 
 **自动更新**：打包产物经 GitHub Releases 分发，`electron-updater` 读取 `app-update.yml`（由 electron-builder `publish` 配置生成）检查与安装；可在「设置 → 高级」关闭自动检查。
 

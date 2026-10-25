@@ -109,6 +109,81 @@ export function splitPaths(
   ]
 }
 
+/** 归一化矩形（0..1，相对终端容器） */
+export interface PaneRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** 叶子面板的绝对位置（0.1.4：扁平渲染，XtermPane 实例不再随 split 重建） */
+export interface PanePlacement extends PaneRect {
+  ptyId: string
+}
+
+/** 分割条的父矩形 + 比例（组件据此换算像素位置与拖拽） */
+export interface PaneDividerPlacement {
+  path: ('a' | 'b')[]
+  dir: PaneDir
+  ratio: number
+  parent: PaneRect
+}
+
+const FULL_RECT: PaneRect = { x: 0, y: 0, w: 1, h: 1 }
+
+/**
+ * 计算每个叶子的归一化矩形（前序，与 leafIds 顺序一致）。
+ * 纯函数：分屏树怎么变，已有 ptyId 的矩形只变 x/y/w/h，组件实例保持不变。
+ */
+export function layoutRects(node: PaneNode, rect: PaneRect = FULL_RECT): PanePlacement[] {
+  if (node.kind === 'leaf') return [{ ptyId: node.ptyId, ...rect }]
+  const ratio = clampRatio(node.ratio)
+  if (node.dir === 'row') {
+    const aw = rect.w * ratio
+    return [
+      ...layoutRects(node.a, { x: rect.x, y: rect.y, w: aw, h: rect.h }),
+      ...layoutRects(node.b, { x: rect.x + aw, y: rect.y, w: rect.w - aw, h: rect.h }),
+    ]
+  }
+  const ah = rect.h * ratio
+  return [
+    ...layoutRects(node.a, { x: rect.x, y: rect.y, w: rect.w, h: ah }),
+    ...layoutRects(node.b, { x: rect.x, y: rect.y + ah, w: rect.w, h: rect.h - ah }),
+  ]
+}
+
+/** 计算全部分割条的父矩形与比例（扁平渲染，不再递归挂组件） */
+export function layoutDividers(
+  node: PaneNode,
+  rect: PaneRect = FULL_RECT,
+  path: ('a' | 'b')[] = [],
+): PaneDividerPlacement[] {
+  if (node.kind === 'leaf') return []
+  const ratio = clampRatio(node.ratio)
+  const out: PaneDividerPlacement[] = [{ path, dir: node.dir, ratio, parent: rect }]
+  if (node.dir === 'row') {
+    const aw = rect.w * ratio
+    out.push(
+      ...layoutDividers(node.a, { x: rect.x, y: rect.y, w: aw, h: rect.h }, [...path, 'a']),
+      ...layoutDividers(node.b, { x: rect.x + aw, y: rect.y, w: rect.w - aw, h: rect.h }, [
+        ...path,
+        'b',
+      ]),
+    )
+  } else {
+    const ah = rect.h * ratio
+    out.push(
+      ...layoutDividers(node.a, { x: rect.x, y: rect.y, w: rect.w, h: ah }, [...path, 'a']),
+      ...layoutDividers(node.b, { x: rect.x, y: rect.y + ah, w: rect.w, h: rect.h - ah }, [
+        ...path,
+        'b',
+      ]),
+    )
+  }
+  return out
+}
+
 /**
  * 恢复持久化布局：丢弃不在 `aliveIds` 中的叶子并折叠单子 split。
  * 深度超限视为脏数据**整树拒绝**（返回 null，调用方退化为独立标签）；空树返回 null。

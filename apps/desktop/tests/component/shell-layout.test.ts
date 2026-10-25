@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
+import { defineComponent, h, nextTick, onMounted, onUnmounted } from 'vue'
 import {
   appError,
   createWslAPI,
@@ -473,5 +474,70 @@ describe('DefaultLayout', () => {
     settings.loadErrorAt = Date.now() + 1
     await flushPromises()
     expect(message.error).toHaveBeenCalledWith(expect.stringContaining('磁盘只读'))
+  })
+
+  it('Only TerminalView is kept alive：切路由再回不重建组件实例（0.1.4 终端保活）', async () => {
+    const mounted = vi.fn()
+    const unmounted = vi.fn()
+    const TerminalStub = defineComponent({
+      name: 'TerminalView',
+      setup() {
+        onMounted(mounted)
+        onUnmounted(unmounted)
+        return () => h('div', { class: 'terminal-stub' }, 'terminal')
+      },
+    })
+    const otherMounted = vi.fn()
+    const otherUnmounted = vi.fn()
+    const OtherStub = defineComponent({
+      name: 'DashboardView',
+      setup() {
+        onMounted(otherMounted)
+        onUnmounted(otherUnmounted)
+        return () => h('div', { class: 'other-stub' }, 'other')
+      },
+    })
+    const RouterViewStub = defineComponent({
+      name: 'RouterView',
+      setup(_, { slots }) {
+        return () =>
+          slots.default?.({
+            Component: routeMock.name === 'terminal' ? TerminalStub : OtherStub,
+          })
+      },
+    })
+    routeMock.name = 'terminal'
+    const w = mount(DefaultLayout, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          RouterView: RouterViewStub,
+          SidebarNav: true,
+          StatusBar: true,
+          TitleBar: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(mounted).toHaveBeenCalledTimes(1)
+    expect(w.find('.terminal-stub').exists()).toBe(true)
+
+    routeMock.name = 'dashboard'
+    w.findComponent(RouterViewStub).vm.$forceUpdate()
+    await nextTick()
+    await flushPromises()
+    expect(w.find('.other-stub').exists()).toBe(true)
+    expect(otherMounted).toHaveBeenCalledTimes(1)
+    expect(unmounted).not.toHaveBeenCalled()
+
+    routeMock.name = 'terminal'
+    w.findComponent(RouterViewStub).vm.$forceUpdate()
+    await nextTick()
+    await flushPromises()
+    expect(w.find('.terminal-stub').exists()).toBe(true)
+    expect(mounted).toHaveBeenCalledTimes(1)
+    expect(unmounted).not.toHaveBeenCalled()
+    // 只有 TerminalView 在 include 列表：其他路由必须正常卸载，不能被 KeepAlive 缓存
+    expect(otherUnmounted).toHaveBeenCalledTimes(1)
   })
 })

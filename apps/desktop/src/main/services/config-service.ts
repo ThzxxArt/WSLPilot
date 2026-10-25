@@ -8,6 +8,7 @@ import {
   createAppError,
   defaultConfig,
   migrateConfig,
+  repairDuplicateRuleIds,
   CONFIG_SCHEMAS,
   SCHEMA_VERSIONS,
   sanitizeWithSchema,
@@ -140,6 +141,10 @@ export async function createConfigService(
     }
 
     let data = parsed.data as Record<string, unknown>
+    // 非整数版本戳：归一为整数，避免 schema（int）每次启动都判失败并回退默认值
+    if (typeof data.$schemaVersion === 'number' && !Number.isInteger(data.$schemaVersion)) {
+      data.$schemaVersion = Math.trunc(data.$schemaVersion as number)
+    }
     const target = TARGET_VERSIONS[key]
     const currentVersion = typeof data.$schemaVersion === 'number' ? data.$schemaVersion : 1
     if (currentVersion < target) {
@@ -170,6 +175,26 @@ export async function createConfigService(
           from: currentVersion,
           to: target,
         })
+      }
+    }
+
+    // network 的 id 唯一性/可执行性是 schema 级 refine：v2 文件里的空/非法 id
+    // 会让 sanitize 丢规则（空 id 甚至不会出现在 UI）。读取时先修 id、但**保留重复**：
+    // 重复规则必须显式暴露给网络页的「一键修复」入口，否则该入口永远不可达。
+    // v1→v2 迁移会在迁移阶段去重；v2 手工重复则保留到用户修复/保存。
+    if (key === 'network' && Array.isArray(data.portForwarding)) {
+      const repaired = repairDuplicateRuleIds(
+        (data.portForwarding as unknown[]).map((r) => {
+          const obj = r && typeof r === 'object' ? (r as Record<string, unknown>) : {}
+          return { ...obj, id: String(obj.id ?? '') }
+        }),
+        { dedupe: false },
+      )
+      if (repaired.changed) {
+        logger.info('network rule ids repaired on load (duplicates preserved for UI repair)', {
+          count: repaired.rules.length,
+        })
+        data = { ...data, portForwarding: repaired.rules }
       }
     }
 

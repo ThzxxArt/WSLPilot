@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 vi.mock('electron', () => ({
   app: {
@@ -88,6 +92,38 @@ function makeCtx() {
   }
 }
 
+function makeSyntheticVhdx(virtualSize: bigint): Buffer {
+  const region = 192 * 1024
+  const meta = 2 * 1024 * 1024
+  const buf = Buffer.alloc(meta + 1024)
+  buf.write('vhdxfile', 0, 'ascii')
+  buf.write('regi', region, 'ascii')
+  buf.writeUInt32LE(2, region + 8)
+  Buffer.from('6677C22D23F600429D64115E9BFD4A08', 'hex').copy(buf, region + 16)
+  buf.writeBigUInt64LE(3n * 1024n * 1024n, region + 32)
+  Buffer.from('06A27C8B90479A4BB8FE575F050F886E', 'hex').copy(buf, region + 48)
+  buf.writeBigUInt64LE(BigInt(meta), region + 64)
+  buf.writeUInt32LE(1024 * 1024, region + 72)
+  buf.write('metadata', meta, 'ascii')
+  buf.writeUInt16LE(1, meta + 10)
+  Buffer.from('2442A52F1BCD7648B2115DBED83BF4B8', 'hex').copy(buf, meta + 32)
+  buf.writeUInt32LE(64, meta + 48)
+  buf.writeUInt32LE(8, meta + 52)
+  buf.writeBigUInt64LE(virtualSize, meta + 64)
+  return buf
+}
+
+function makeCtl() {
+  return {
+    taskId: 'tc',
+    report: vi.fn(),
+    log: vi.fn(),
+    isCanceled: () => false,
+    throwIfCanceled: vi.fn(),
+    onCancel: vi.fn(),
+  }
+}
+
 function makeDeps() {
   const pty = {
     create: vi.fn(() => ({ ptyId: 'p1', distro: 'U', shell: 'b', createdAt: 0 })),
@@ -122,6 +158,10 @@ function makeDeps() {
       setDefault: vi.fn(async () => {}),
       install: vi.fn(async () => {}),
       setVersion: vi.fn(async () => {}),
+      setSparse: vi.fn(async () => {}),
+      compact: vi.fn(async () => {}),
+      resize: vi.fn(async () => {}),
+      setDefaultUser: vi.fn(async () => {}),
       unregister: vi.fn(async () => {}),
       getVersion: vi.fn(async () => ({ raw: '', wslVersion: '2', kernelVersion: '5' })),
       // 运行状态硬门禁（review：采样 `wsl -d X -e` 会隐式启动发行版）
@@ -167,6 +207,11 @@ function makeDeps() {
       cancel: vi.fn(() => true),
       get: vi.fn(() => null),
       list: vi.fn(() => []),
+      running: vi.fn(() => []),
+      runningForDistro: vi.fn(() => []),
+      withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
+      beginShutdown: vi.fn(),
+      endShutdown: vi.fn(),
       waitFor: vi.fn(async () => ({})),
       dispose: vi.fn(),
     } as any,
@@ -297,6 +342,39 @@ describe('distros + meta IPC handlers', () => {
 
     await wrapped.get(CH.distrosSetDefault)({}, 'Ubuntu')
     expect(deps.wsl.setDefault).toHaveBeenCalledWith('Ubuntu')
+  })
+
+  it('直接 terminate/shutdown 与运行中任务互斥（0.1.4）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    deps.tasks.runningForDistro = vi.fn(() => [
+      { taskId: 't1', status: 'running', distro: 'Ubuntu', type: 'export', message: '导出' },
+    ])
+    deps.tasks.running = vi.fn(() => [
+      { taskId: 't1', status: 'running', distro: 'Ubuntu', type: 'export', message: '导出' },
+    ])
+    await expect(wrapped.get(CH.distrosTerminate)({}, 'Ubuntu')).rejects.toThrow(/运行中的任务/)
+    await expect(wrapped.get(CH.distrosShutdown)({})).rejects.toThrow(/运行中的任务/)
+    expect(deps.wsl.terminate).not.toHaveBeenCalled()
+    expect(deps.wsl.shutdown).not.toHaveBeenCalled()
+  })
+
+  it('distros:setSparse 任务化（同发行版锁）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    await wrapped.get(CH.distrosSetSparse)({}, { name: 'Ubuntu', sparse: true })
+    const opts = deps.tasks.start.mock.calls[0]![0]
+    expect(opts.type).toBe('manage')
+    expect(opts.lockKey).toBe('ubuntu')
+    await opts.run({
+      taskId: 't',
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: vi.fn(),
+      onCancel: vi.fn(),
+    })
+    expect(deps.wsl.setSparse).toHaveBeenCalledWith('Ubuntu', true, expect.anything())
   })
 
   it('distros:start rejects missing name', async () => {
@@ -459,6 +537,49 @@ describe('distros + meta IPC handlers', () => {
     ).rejects.toThrow()
   })
 
+  it('compact 任务在压缩后读取真实 vhdx 并如实报告（无效回收也不谎报成功）', async () => {
+    const ctx = makeCtx()
+    const deps = makeDeps()
+    deps.registry.detail = vi.fn(async () => ({ basePath: 'C:\\WSL\\Ubuntu' }))
+    const { wrapped } = register(ctx, deps)
+    wrapped.get(CH.distrosCompact)({}, { name: 'Ubuntu', terminateFirst: true })
+    const opts = deps.tasks.start.mock.calls[0]![0]
+    const ctl = {
+      taskId: 'tc',
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: vi.fn(),
+      onCancel: vi.fn(),
+    }
+    await opts.run(ctl)
+    expect(deps.wsl.compact).toHaveBeenCalledWith('Ubuntu', true, ctl)
+    expect(ctl.report).toHaveBeenLastCalledWith(100, expect.stringContaining('未测得回收'))
+  })
+
+  it('distros:resize 以 VHDX 虚拟容量硬门禁拒绝缩容（0.1.4 根治）', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), `wslpilot-resize-${randomUUID()}-`))
+    try {
+      await fs.writeFile(join(dir, 'ext4.vhdx'), makeSyntheticVhdx(1024n ** 4n))
+      const ctx = makeCtx()
+      const { wrapped, deps } = register(ctx)
+      deps.registry.detail = vi.fn(async () => ({ name: 'Ubuntu', basePath: dir }))
+
+      await wrapped.get(CH.distrosResize)({}, { name: 'Ubuntu', size: '1TB' })
+      const shrink = deps.tasks.start.mock.calls[0]![0]
+      await expect(shrink.run(makeCtl())).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' })
+      expect(deps.wsl.resize).not.toHaveBeenCalled()
+
+      await wrapped.get(CH.distrosResize)({}, { name: 'Ubuntu', size: '2TB' })
+      const grow = deps.tasks.start.mock.calls[1]![0]
+      const ctl = makeCtl()
+      await grow.run(ctl)
+      expect(deps.wsl.resize).toHaveBeenCalledWith('Ubuntu', '2TB', ctl)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('distros:install / setVersion / unregister 任务派发与执行（review 假信心 M3）', async () => {
     const ctx = makeCtx()
     const { wrapped, deps } = register(ctx)
@@ -481,23 +602,32 @@ describe('distros + meta IPC handlers', () => {
       onCancel: vi.fn(),
     }
 
-    // 带名安装：type/lockKey/run 全链路
+    // 带名安装：type/lockKey/run 全链路；所有 install 共用全局锁
     await wrapped.get(CH.distrosInstall)({}, { name: 'Ubuntu' })
     expect(deps.tasks.start).toHaveBeenCalledTimes(1)
     const installOpts = deps.tasks.start.mock.calls[0]![0]
     expect(installOpts.type).toBe('install')
     expect(installOpts.distro).toBe('Ubuntu')
-    expect(installOpts.lockKey).toBe('install:ubuntu')
+    expect(installOpts.lockKey).toBe('wsl:global')
     await installOpts.run(ctl)
-    expect(deps.wsl.install).toHaveBeenCalledWith('Ubuntu', ctl)
+    expect(deps.wsl.install).toHaveBeenCalledWith('Ubuntu', ctl, {
+      name: 'Ubuntu',
+      enableWsl1: false,
+      fixedVhd: false,
+      webDownload: false,
+    })
     expect(flags.install).toBe(1)
 
-    // 省略名字（安装 WSL 本体）：lockKey 走全局锁（与 WSL 更新/回滚串行 — 0.1.3）
+    // 省略名字（安装 WSL 本体）：lockKey 走全局锁（与 WSL 更新串行 — 0.1.3）
     await wrapped.get(CH.distrosInstall)({}, {})
     const bareOpts = deps.tasks.start.mock.calls[1]![0]
     expect(bareOpts.lockKey).toBe('wsl:global')
     await bareOpts.run(ctl)
-    expect(deps.wsl.install).toHaveBeenCalledWith(undefined, ctl)
+    expect(deps.wsl.install).toHaveBeenCalledWith(undefined, ctl, {
+      enableWsl1: false,
+      fixedVhd: false,
+      webDownload: false,
+    })
     expect(flags.install).toBe(2)
 
     // setVersion → convert 任务
@@ -556,7 +686,7 @@ describe('distros + meta IPC handlers', () => {
     }
     await opts.run(ctl)
     expect(exportCalls).toHaveLength(1)
-    expect(exportCalls[0]).toMatchObject({ name: 'Ubuntu', format: 'tar' })
+    expect(exportCalls[0]).toMatchObject({ name: 'Ubuntu', format: 'tar', terminateFirst: true })
     // 导出在注销之前完成（调用顺序：runExport → wsl.unregister）
     expect(deps.io.runExport).toHaveBeenCalled()
     expect(deps.wsl.unregister).toHaveBeenCalledWith('Ubuntu')
@@ -566,7 +696,7 @@ describe('distros + meta IPC handlers', () => {
     const ctx = makeCtx()
     const deps = makeDeps()
     // 其他发行版的运行中任务不阻塞本发行版注销（busy 检查只按同发行版大小写归一）
-    deps.tasks.list = vi.fn(() => [{ taskId: 't9', status: 'running', distro: 'Debian' }])
+    deps.tasks.runningForDistro = vi.fn(() => [])
     const { wrapped } = register(ctx, deps)
     wrapped.get(CH.distrosUnregister)({}, { name: 'UBUNTU', backupFirst: false })
     // 与 io 任务同一 lockKey（name.toLowerCase()）：注销绝不与同发行版任务并发
@@ -589,7 +719,9 @@ describe('distros + meta IPC handlers', () => {
     const ctx = makeCtx()
     const deps = makeDeps()
     // 运行中任务（如无锁终端动作）与请求名大小写不同，仍按小写归一命中
-    deps.tasks.list = vi.fn(() => [{ taskId: 't1', status: 'running', distro: 'Ubuntu' }])
+    deps.tasks.runningForDistro = vi.fn(() => [
+      { taskId: 't1', status: 'running', distro: 'Ubuntu', type: 'export', message: '导出' },
+    ])
     const { wrapped } = register(ctx, deps)
     await expect(
       wrapped.get(CH.distrosUnregister)({}, { name: 'ubuntu', backupFirst: false }),

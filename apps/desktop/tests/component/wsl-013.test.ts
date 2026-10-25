@@ -73,6 +73,35 @@ beforeEach(() => {
   vi.clearAllMocks()
   setActivePinia(createPinia())
   document.body.innerHTML = ''
+  // 默认环境：已安装 WSL2；单个用例可 mockResolvedValueOnce 覆盖
+  wslAPI.app.wslEnv.mockResolvedValue({
+    installed: true,
+    wslVersion: '2.3.4',
+    kernelVersion: '5.15.153',
+    defaultDistro: 'Ubuntu',
+    defaultVersion: 2,
+    statusRaw: '',
+    capabilities: {
+      source: 'help',
+      wslVersion: '3.0.3.0',
+      windowsBuild: 26300,
+      wslcVersion: '3.0.3.0',
+      inbox: false,
+      flags: {
+        compact: true,
+        resize: true,
+        setDefaultUser: true,
+        installLocation: true,
+        vhdSize: true,
+        fixedVhd: true,
+        webDownload: true,
+        exportFormats: true,
+        importFromFile: true,
+        updatePreRelease: true,
+        manageSparse: true,
+      },
+    },
+  })
 })
 
 describe('WslEnvironmentCard（0.1.3 WSL 本体生命周期）', () => {
@@ -84,24 +113,25 @@ describe('WslEnvironmentCard（0.1.3 WSL 本体生命周期）', () => {
       defaultDistro: '',
       defaultVersion: null,
       statusRaw: 'wsl.exe 缺失',
+      capabilities: null as never,
     })
     const w = mount(WslEnvironmentCard, { attachTo: document.body })
     await flushPromises()
     expect(w.text()).toContain('未检测到 WSL')
     findButton(w, '一键安装 WSL')!.element.click()
     await flushPromises()
-    expect(wslAPI.distros.install).toHaveBeenCalledWith(undefined)
+    expect(wslAPI.distros.install).toHaveBeenCalledWith({})
     expect(message.info).toHaveBeenCalledWith(expect.stringContaining('已开始安装 WSL'))
   })
 
-  it('已安装：展示环境信息；更新 / 预发布 / 回滚全链路', async () => {
+  it('已安装：展示环境信息；更新 / 预发布 / 版本历史全链路', async () => {
     const w = mount(WslEnvironmentCard, { attachTo: document.body })
     await flushPromises()
     expect(w.text()).toContain('2.3.4')
     expect(w.text()).toContain('Ubuntu')
 
     // 常规更新
-    findButton(w, '更新 WSL')!.element.click()
+    findButton(w, '更新 / 修复 WSL')!.element.click()
     await flushPromises()
     expect(wslAPI.app.wslUpdate).toHaveBeenCalledWith({ preRelease: false })
     expect(message.info).toHaveBeenCalledWith(expect.stringContaining('已开始更新 WSL'))
@@ -122,7 +152,7 @@ describe('WslEnvironmentCard（0.1.3 WSL 本体生命周期）', () => {
     await flushPromises()
     expect(wslAPI.app.wslUpdate).toHaveBeenLastCalledWith({ preRelease: true })
 
-    // 高级：回滚（dialog mock 自动确认）；同样先结束在途任务
+    // 高级：查看版本历史（0.1.4 起不再有失效的 --rollback 入口）
     useTasksStore().applyProgress({
       taskId: 'upd',
       type: 'update',
@@ -131,10 +161,12 @@ describe('WslEnvironmentCard（0.1.3 WSL 本体生命周期）', () => {
       status: 'success',
     })
     await flushPromises()
-    findBodyButton('回滚最近一次更新')!.click()
+    findBodyButton('查看 WSL 版本历史')!.click()
     await flushPromises()
-    expect(dialog.warning).toHaveBeenCalledWith(expect.objectContaining({ title: '回滚 WSL 更新' }))
-    expect(wslAPI.app.wslUpdateRollback).toHaveBeenCalled()
+    expect(wslAPI.app.openExternal).toHaveBeenCalledWith(
+      'https://github.com/microsoft/WSL/releases',
+    )
+    expect(w.text()).not.toContain('回滚最近一次更新')
   })
 
   it('默认版本下拉：变更调用 wslSetDefaultVersion 并如实提示', async () => {
@@ -153,6 +185,17 @@ describe('WslEnvironmentCard（0.1.3 WSL 本体生命周期）', () => {
     await flushPromises()
     expect(message.error).toHaveBeenCalledWith(expect.stringContaining('服务不可用'))
     expect(findButton(w, '重试')).toBeTruthy()
+  })
+
+  it('能力矩阵从 WSL_FEATURE_META 取最低版本（不支持的项给出可行动 title）', async () => {
+    const base = await wslAPI.app.wslEnv()
+    base.capabilities!.flags.compact = false
+    wslAPI.app.wslEnv.mockResolvedValueOnce(base)
+    const w = mount(WslEnvironmentCard, { attachTo: document.body })
+    await flushPromises()
+    expect(w.text()).toContain('压缩磁盘')
+    expect(w.text()).toContain('稀疏磁盘')
+    expect(w.find('[title="需要 WSL 2.9.8+"]').exists()).toBe(true)
   })
 })
 
@@ -186,7 +229,7 @@ describe('WslConfigPanel（0.1.3 .wslconfig 编辑）', () => {
     expect(document.body.textContent).toContain('1 项修改')
     findBodyButton('确认写入')!.click()
     await flushPromises()
-    expect(wslAPI.wslconfig.write).toHaveBeenCalledWith(expect.stringContaining('memory = 16GB'))
+    expect(wslAPI.wslconfig.write).toHaveBeenCalledWith(expect.stringContaining('memory=16GB'))
     const writeArg = (wslAPI.wslconfig.write.mock.calls as unknown[][])[0]![0] as string
     expect(writeArg).toContain('# 注释')
     expect(w.emitted('saved')).toHaveLength(1)
@@ -199,10 +242,10 @@ describe('WslConfigPanel（0.1.3 .wslconfig 编辑）', () => {
     const memInput = Array.from(document.body.querySelectorAll<HTMLInputElement>('input')).find(
       (i) => i.value === '8GB',
     )!
-    memInput.value = '8'
+    memInput.value = '1.5GB'
     memInput.dispatchEvent(new Event('input', { bubbles: true }))
     await flushPromises()
-    expect(w.text()).toContain('MB/GB')
+    expect(w.text()).toContain('整数')
     const saveBtn = findButton(w, '预览并保存')!
     expect(saveBtn.element.hasAttribute('disabled')).toBe(true)
     expect(document.body.textContent).not.toContain('变更预览')
@@ -358,6 +401,88 @@ describe('DistroDetailModal（0.1.3 磁盘信息与稀疏开关）', () => {
     expect(wslAPI.distros.setSparse).toHaveBeenCalledWith('Ubuntu', true)
   })
 
+  it('压缩运行中发行版必须传 terminateFirst=true（与确认框同语义）', async () => {
+    const d = distro({ name: 'Ubuntu', state: 'Running', hostDiskBytes: 123456789 })
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    useDistrosStore().items = [d]
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: {
+        stubs: {
+          WslConfPanel: true,
+          ActionsPanel: true,
+          FileBrowserPanel: true,
+          CloneDistroModal: true,
+        },
+      },
+    })
+    await flushPromises()
+    findBodyButton('压缩磁盘')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.compact).toHaveBeenCalledWith('Ubuntu', true)
+  })
+
+  it('压缩停止态发行版传 terminateFirst=false（不无条件终止）', async () => {
+    const d = distro({ name: 'Ubuntu', state: 'Stopped', hostDiskBytes: 123456789 })
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    useDistrosStore().items = [d]
+    mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: {
+        stubs: {
+          WslConfPanel: true,
+          ActionsPanel: true,
+          FileBrowserPanel: true,
+          CloneDistroModal: true,
+        },
+      },
+    })
+    await flushPromises()
+    findBodyButton('压缩磁盘')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.compact).toHaveBeenCalledWith('Ubuntu', false)
+  })
+
+  it('扩容：停止态填大小后可提交；运行态按钮禁用', async () => {
+    const stopped = distro({ name: 'Ubuntu', state: 'Stopped' })
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    useDistrosStore().items = [stopped]
+    const w = mount(DistroDetailModal, {
+      props: { show: true, distroName: 'Ubuntu' },
+      attachTo: document.body,
+      global: {
+        stubs: {
+          WslConfPanel: true,
+          ActionsPanel: true,
+          FileBrowserPanel: true,
+          CloneDistroModal: true,
+        },
+      },
+    })
+    await flushPromises()
+    const input = document.body.querySelector<HTMLInputElement>('input[placeholder="50GB"]')!
+    input.value = '50GB'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    findBodyButton('扩容')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.resize).toHaveBeenCalledWith('Ubuntu', '50GB')
+
+    // 运行态：直接点击不应发起任务
+    ;(wslAPI.distros.resize as ReturnType<typeof vi.fn>).mockClear()
+    const running = distro({ name: 'Ubuntu2', state: 'Running' })
+    useDistrosStore().items = [running]
+    await w.setProps({ show: false })
+    await flushPromises()
+    await w.setProps({ show: true, distroName: 'Ubuntu2' })
+    await flushPromises()
+    findBodyButton('扩容')!.click()
+    await flushPromises()
+    expect(wslAPI.distros.resize).not.toHaveBeenCalled()
+  })
+
   it('失败分支与元数据编辑：稀疏失败/注销失败如实提示；编辑保存走 meta:set', async () => {
     const d = distro({ name: 'Ubuntu' })
     const { useDistrosStore } = await import('../../src/renderer/stores/distros')
@@ -431,79 +556,6 @@ describe('TerminalTabs（0.1.3 新建面板 Shell/目录）', () => {
   })
 })
 
-describe('SplitPane（0.1.3 分屏容器）', () => {
-  it('叶子：作用域插槽收到 ptyId，mousedown 发出 focus', async () => {
-    const { h } = await import('vue')
-    const SplitPane = (await import('../../src/renderer/features/terminal/SplitPane.vue')).default
-    const w = mount(SplitPane, {
-      props: { node: { kind: 'leaf', ptyId: 'p1' }, activePaneId: 'p1', tabId: 't' },
-      slots: { default: (p: { ptyId: string }) => h('div', { class: 'slot' }, p.ptyId) },
-      attachTo: document.body,
-    })
-    expect(w.text()).toContain('p1')
-    expect(w.find('.pane-slot').classes()).toContain('active')
-    await w.find('.pane-slot').trigger('mousedown')
-    expect(w.emitted('focus')).toEqual([['p1']])
-  })
-
-  it('split：递归渲染两侧 + 拖拽分隔条发出 ratio（含上下方向）', async () => {
-    const { h } = await import('vue')
-    const SplitPane = (await import('../../src/renderer/features/terminal/SplitPane.vue')).default
-    const node = {
-      kind: 'split' as const,
-      dir: 'row' as const,
-      ratio: 0.5,
-      a: { kind: 'leaf' as const, ptyId: 'pa' },
-      b: { kind: 'leaf' as const, ptyId: 'pb' },
-    }
-    const w = mount(SplitPane, {
-      props: { node, activePaneId: 'pa', tabId: 't1' },
-      slots: { default: (p: { ptyId: string }) => h('div', { class: 'slot' }, p.ptyId) },
-      attachTo: document.body,
-    })
-    expect(w.text()).toContain('pa')
-    expect(w.text()).toContain('pb')
-    expect(w.findAllComponents(SplitPane)).toHaveLength(2)
-
-    // 容器 getBoundingClientRect 在 happy-dom 全 0：mock 为固定框再拖拽
-    const root = w.find('.pane-split')
-    root.element.getBoundingClientRect = () =>
-      ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100 }) as DOMRect
-    await w.find('.pane-divider').trigger('pointerdown')
-    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150, clientY: 10 }))
-    window.dispatchEvent(new MouseEvent('pointerup', {}))
-    const ratios = w.emitted('ratio') as unknown[][]
-    expect(ratios.length).toBeGreaterThanOrEqual(1)
-    expect(ratios[0]![0]).toBe('t1')
-    expect(ratios[0]![1]).toEqual([])
-    expect(ratios[0]![2]).toBeCloseTo(0.75)
-  })
-
-  it('拖拽中途卸载：window 监听被清理，不再发 ratio（无泄漏 — 0.1.3 修复）', async () => {
-    const { h } = await import('vue')
-    const SplitPane = (await import('../../src/renderer/features/terminal/SplitPane.vue')).default
-    const node = {
-      kind: 'split' as const,
-      dir: 'row' as const,
-      ratio: 0.5,
-      a: { kind: 'leaf' as const, ptyId: 'pa' },
-      b: { kind: 'leaf' as const, ptyId: 'pb' },
-    }
-    const w = mount(SplitPane, {
-      props: { node, activePaneId: 'pa', tabId: 't2' },
-      slots: { default: (p: { ptyId: string }) => h('div', {}, p.ptyId) },
-      attachTo: document.body,
-    })
-    const root = w.find('.pane-split')
-    root.element.getBoundingClientRect = () =>
-      ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100 }) as DOMRect
-    await w.find('.pane-divider').trigger('pointerdown')
-    w.unmount()
-    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 180, clientY: 10 }))
-    expect(w.emitted('ratio')).toBeUndefined()
-  })
-})
-
 describe('TerminalView（0.1.3 工具栏事件面全链路）', () => {
   it('无会话时各工具栏动作安全降级（复制/粘贴/清屏/缩放/分屏/搜索/关闭面板）', async () => {
     const TerminalView = (await import('../../src/renderer/views/TerminalView.vue')).default
@@ -534,13 +586,14 @@ describe('TerminalView（0.1.3 工具栏事件面全链路）', () => {
 
 describe('导入向导默认版本跟随（0.1.3 计划 1.3 链路）', () => {
   it('wslEnv 默认版本为 WSL1 时，导入表单初始版本跟随为 1', async () => {
-    wslAPI.app.wslEnv.mockResolvedValueOnce({
+    wslAPI.app.wslEnv.mockResolvedValue({
       installed: true,
       wslVersion: '2.6.1',
       kernelVersion: '6.6.1',
       defaultDistro: 'Ubuntu',
       defaultVersion: 1,
       statusRaw: '',
+      capabilities: null as never,
     })
     const BackupView = (await import('../../src/renderer/views/BackupView.vue')).default
     const ImportWizard = (await import('../../src/renderer/features/backup/ImportWizard.vue'))
@@ -599,6 +652,7 @@ describe('DashboardView hero「更新 WSL」入口（0.1.3 计划 1.2）', () =>
       defaultDistro: '',
       defaultVersion: null,
       statusRaw: '缺失',
+      capabilities: null as never,
     })
     const DashboardView = (await import('../../src/renderer/views/DashboardView.vue')).default
     const w = mount(DashboardView, {
@@ -623,7 +677,7 @@ describe('WslConfigPanel raw 模式不被表单残留错误阻塞（0.1.3 修复
     const memInput = Array.from(document.body.querySelectorAll<HTMLInputElement>('input')).find(
       (i) => i.value === '8GB',
     )!
-    memInput.value = '8'
+    memInput.value = '1.5GB'
     memInput.dispatchEvent(new Event('input', { bubbles: true }))
     await flushPromises()
     expect(findButton(w, '预览并保存')!.element.hasAttribute('disabled')).toBe(true)
@@ -637,6 +691,6 @@ describe('WslConfigPanel raw 模式不被表单残留错误阻塞（0.1.3 修复
     await flushPromises()
     findBodyButton('确认写入')!.click()
     await flushPromises()
-    expect(wslAPI.wslconfig.write).toHaveBeenCalledWith(expect.stringContaining('memory = 8'))
+    expect(wslAPI.wslconfig.write).toHaveBeenCalledWith(expect.stringContaining('memory=1.5GB'))
   })
 })

@@ -87,7 +87,10 @@ describe('ProgressRing', () => {
 })
 
 describe('ExportWizard', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
 
   it('step 1 lists distros and emits selected name', async () => {
     const w = mount(ExportWizard, {
@@ -191,7 +194,10 @@ describe('ExportWizard', () => {
 })
 
 describe('ImportWizard', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
 
   it('step 1 warns on duplicate name and shows mode options', async () => {
     const w = mount(ImportWizard, {
@@ -210,7 +216,7 @@ describe('ImportWizard', () => {
       },
     })
     expect(w.text()).toContain('已存在同名发行版')
-    expect(w.text()).toContain('tar 归档导入')
+    expect(w.text()).toContain('tar / tar.gz 归档导入')
 
     const rg = w.findComponent(NRadioGroup)
     await rg.vm.$emit('update:value', 'vhd-inplace')
@@ -282,7 +288,7 @@ describe('ImportWizard', () => {
         defaultDir: 'D:\\Backups',
       },
     })
-    const input = w.find('input[placeholder="选择 .tar 或 .vhdx 备份文件"]')
+    const input = w.find('input[placeholder="选择 .tar / .tar.gz / .vhdx 备份文件"]')
     expect(input.exists()).toBe(true)
     await input.setValue('D:\\b\\u.vhdx')
     await flushPromises()
@@ -373,6 +379,7 @@ describe('BackupView 并发与重置（review 0.1.2 根治）', () => {
     document.body.innerHTML = ''
     wslAPI.io.export.mockResolvedValue({ taskId: 'new-1' })
     wslAPI.io.listBackups.mockResolvedValue([])
+    wslAPI.distros.list.mockResolvedValue([])
   })
 
   it('挂载时接续本页运行中任务到进度视图；reset 保留默认备份格式', async () => {
@@ -467,6 +474,44 @@ describe('BackupView 并发与重置（review 0.1.2 根治）', () => {
     await flushPromises()
     expect(w.text()).toContain('迁移目标位置')
     expect(w.text()).not.toContain('确认信息')
+  })
+
+  it('运行中导出：未确认终止停留在 step2；确认后 payload 带 terminateFirst=true', async () => {
+    wslAPI.distros.list.mockResolvedValue([distro('Ubuntu', 'Running')])
+    wslAPI.io.export.mockResolvedValue({ taskId: 'new-running' })
+    const w = mountBackupView()
+    await flushPromises()
+
+    w.findComponent(ExportWizard).vm.$emit('update:form', {
+      name: 'Ubuntu',
+      path: 'D:\\b\\u.tar',
+      format: 'tar',
+      terminateFirst: false,
+    })
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    // step1 的运行中门禁：未确认终止时停在 step1，不进入确认页
+    expect(w.text()).toContain('正在运行')
+    expect(w.text()).not.toContain('确认信息')
+    expect(wslAPI.io.export).not.toHaveBeenCalled()
+
+    w.findComponent(ExportWizard).vm.$emit('update:form', {
+      name: 'Ubuntu',
+      path: 'D:\\b\\u.tar',
+      format: 'tar',
+      terminateFirst: true,
+    })
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    await findBtn(w, '下一步')!.trigger('click')
+    await flushPromises()
+    await findBtn(w, '开始导出备份')!.trigger('click')
+    await flushPromises()
+    expect(wslAPI.io.export).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Ubuntu', terminateFirst: true }),
+    )
   })
 
   it('日志抽屉只渲染尾部 ≤500 行并提示截断（review 0.1.2 根治）', async () => {

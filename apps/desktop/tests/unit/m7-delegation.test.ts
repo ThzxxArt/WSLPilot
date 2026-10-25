@@ -19,7 +19,7 @@ import {
 } from '../../src/main/services/network-service'
 import { createUsbipdService } from '../../src/main/services/usbipd-service'
 import { createWslService } from '../../src/main/services/wsl-service'
-import { spawnWsl } from '@wslpilot/kit'
+import { spawnWsl, runWsl } from '@wslpilot/kit'
 import type { TaskControl } from '../../src/main/services/task-runner'
 import type {
   ElevationOpResult,
@@ -288,6 +288,20 @@ describe('wsl-service 提权委托', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('install 权限不足 → runOne wsl.install（结构化参数）', async () => {
+    let listCalls = 0
+    vi.mocked(runWsl).mockImplementation(async (args: string[]) => {
+      if (args[0] === '--list') {
+        listCalls++
+        return listCalls === 1
+          ? { stdout: '适用于 Linux 的 Windows 子系统分发版:', stderr: '', code: 0 }
+          : {
+              stdout: '适用于 Linux 的 Windows 子系统分发版:\nUbuntu (默认)',
+              stderr: '',
+              code: 0,
+            }
+      }
+      return { stdout: '', stderr: '', code: 0 }
+    })
     vi.mocked(spawnWsl).mockImplementation((_args, handlers) => {
       handlers.onLine(ELEVATION_DENIED)
       handlers.onExit(1)
@@ -296,7 +310,10 @@ describe('wsl-service 提权委托', () => {
     const elevation = elevationMock()
     const svc = createWslService(logger(), { elevation })
     await svc.install('Ubuntu', makeCtl())
-    expect(elevation.runOne).toHaveBeenCalledWith({ op: 'wsl.install', params: { name: 'Ubuntu' } })
+    expect(elevation.runOne).toHaveBeenCalledWith({
+      op: 'wsl.install',
+      params: { name: 'Ubuntu', noLaunch: true },
+    })
   })
 
   it('setVersion 权限不足 → runOne wsl.setVersion；提权失败映射 PERMISSION_DENIED', async () => {

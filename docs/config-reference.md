@@ -24,7 +24,7 @@
 | `terminal.copyOnSelect`              | boolean                           | `false`                     | 选中即复制                             |
 | `terminal.theme`                     | `auto\|follow-app\|custom`        | `auto`                      | 终端配色                               |
 | `backup.defaultDir`                  | string                            | `%USERPROFILE%\WSL-Backups` | 备份目录（支持环境变量）               |
-| `backup.format`                      | `tar\|vhd`                        | `tar`                       | 备份格式                               |
+| `backup.format`                      | `tar\|tar.gz\|vhd`                | `tar`                       | 备份格式（tar.gz 需 WSL 2.4.4+）       |
 | `backup.keepRecent`                  | number                            | `5`                         | 保留份数（1–50，自动轮转）             |
 | `backup.autoBackupBeforeDestructive` | boolean                           | `true`                      | 迁移等破坏性操作前自动备份             |
 | `advanced.showRawCommand`            | boolean                           | `false`                     | 显示等价命令                           |
@@ -48,6 +48,9 @@
 | `startupCwd`   | 终端启动目录         |
 | `pinned`       | 是否置顶             |
 | `quickActions` | 快捷动作 id 列表     |
+
+`distros.jsonc` 当前为 v2：`tags` 最多 20 个、每个 ≤64 字符；`quickActions` 最多 20 个、
+每个动作 id ≤100 字符。v1 超限数据在迁移时截断（不交给 sanitize 静默丢弃）。
 
 ## actions.jsonc — 自定义动作
 
@@ -81,8 +84,12 @@
 路径 `/etc/wsl.conf`（发行版级，非 `%UserProfile%\.wslconfig`）。应用内「发行版详情 → 配置」提供
 **可视化表单 + 原始文本**双模式，写入前展示行级 Diff 预览：
 
-- 表单覆盖 `[automount]` `[network]` `[interop]` `[user]` `[boot]` 常见键；其余键在「其他设置」中原样保留
-- 逐键最小编辑（保留注释）；字符串清空 / 清除按钮 = 删除该键
+- 表单覆盖 `[automount]`（含 `ldconfig` / `cgroups`）`[network]` `[interop]` `[user]`
+  `[boot]`（含 `protectBinfmt`）`[gpu]` `[time]` 常见键；其余键在「其他设置」中原样保留
+- 逐键最小编辑：只替换 `=` 右侧值，保留行内注释、键写法与等号旁空白；重复段/键取
+  **第一处**（WSL configfile.cpp first-wins），删除时清全部；双引号 + `\\`/`\"` 转义可逆，
+  `#` 是唯一行内注释符（`;` 是字面值）
+- 字符串清空 / 清除按钮 = 删除该键
 - 保存需要发行版内 root（`wsl -d <name> -u root -e tee /etc/wsl.conf`，内容经 stdin）
 - **8 秒规则**：变更在发行版完全停止后约 8 秒才生效。开启
   `settings.wsl.autoShutdownAfterConfigChange` 后，保存时自动 `wsl --terminate <name>`
@@ -119,14 +126,22 @@
 - **代理落点**：`/etc/profile.d/wslpilot-proxy.sh`（写入走 `wsl -d <name> -u root -e tee` + stdin，
   内容不经 shell）。脚本仅导出 `http_proxy/https_proxy/no_proxy` 等环境变量，可随时「清除」或手工编辑。
 
-## `.wslconfig`（全局配置 — 0.1.3）
+## `.wslconfig`（全局配置 — 0.1.4）
 
 路径 `%UserProfile%\.wslconfig`（**Windows 宿主文件**，非发行版内；影响所有发行版与 WSL 虚拟机）。
 「网络」页的「WSL 全局配置（.wslconfig）」面板提供**可视化表单 + 原始文本 + Diff 预览**：
 
-- 表单覆盖：`[wsl2]` 的 `memory` / `processors` / `swap` / `swapFile` / `networkingMode` /
-  `dnsTunneling` / `firewall` / `autoProxy`；`[experimental]` 的 `autoMemoryReclaim` / `sparseVhd`
-- 逐键最小编辑（保留注释与未知键）；容量字段校验 `数字 + MB/GB`
+- 表单覆盖：`[wsl2]` 的 `memory` / `processors` / `swap` / `swapFile` / `networkingMode`
+  （`nat`/`mirrored`/`none`/`consomme`/`bridged`，允许自定义）/ `dnsTunneling` / `firewall` /
+  `autoProxy` / `localhostForwarding` / `safeMode` / `guiApplications` / `nestedVirtualization` /
+  `vmIdleTimeout` / `dnsProxy` / `defaultVhdSize` / `gpuSupport` / `maxCrashDumpCount` /
+  `kernel` / `kernelCommandLine`；`[general]` 的 `instanceIdleTimeout` / `distributionInstallPath`；
+  `[experimental]` 的 `autoMemoryReclaim`（读兼容 `dropcache`；仅用户修改时写规范
+  `dropCache`，加载不置 dirty；允许自定义）/
+  `sparseVhd` / `bestEffortDnsParsing` / `ignoredPorts` / `hostAddressLoopback`
+- 逐键最小编辑（保留行内注释、键写法、等号旁空白与未知键）；容量字段校验 WSL
+  `ParseMemorySize` 语法（整数 + `B|K|KB|M|MB|G|GB|T|TB`，大小写敏感、无小数）
+- 未知 enum 值**不阻塞保存**（WSL 对其有回退语义），面板标注“当前值不在推荐列表”
 - 保存：语法守卫 → 备份轮转（保留 3 份）→ 原子写；**无需 UAC**（纯宿主文件）
 - 生效：执行面板内「立即重启 WSL（`wsl --shutdown`）」，或完全停止所有发行版后约 8 秒
 - 镜像模式（`[wsl2] networkingMode`）的读取与面板编辑共用同一解析器

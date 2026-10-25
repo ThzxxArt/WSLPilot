@@ -198,17 +198,19 @@ describe('preload 契约', () => {
         'wslEnv',
         'wslSetDefaultVersion',
         'wslUpdate',
-        'wslUpdateRollback',
       ].sort(),
     )
     // 其余域的方法面同样全枚举（此前只锁 6 个域 — 新增方法不会红，假信心）
     expect(Object.keys(exposed.distros).sort()).toEqual(
       [
+        'compact',
         'install',
         'list',
         'listOnline',
         'registryDetail',
+        'resize',
         'setDefault',
+        'setDefaultUser',
         'setSparse',
         'setVersion',
         'shutdown',
@@ -315,6 +317,20 @@ describe('preload 契约', () => {
       () => exposed.distros.setSparse('U', true),
       CH.distrosSetSparse,
       { name: 'U', sparse: true },
+    )
+    callAndCheck('distros.compact', () => exposed.distros.compact('U', true), CH.distrosCompact, {
+      name: 'U',
+      terminateFirst: true,
+    })
+    callAndCheck('distros.resize', () => exposed.distros.resize('U', '50GB'), CH.distrosResize, {
+      name: 'U',
+      size: '50GB',
+    })
+    callAndCheck(
+      'distros.setDefaultUser',
+      () => exposed.distros.setDefaultUser('U', 'dev'),
+      CH.distrosSetDefaultUser,
+      { name: 'U', user: 'dev' },
     )
   })
 
@@ -548,7 +564,7 @@ describe('preload 契约', () => {
     callAndCheck('app.pickSaveFile', () => exposed.app.pickSaveFile({}), CH.appPickSaveFile, {})
     callAndCheck('app.pickOpenFile', () => exposed.app.pickOpenFile({}), CH.appPickOpenFile, {})
     callAndCheck('app.getWslVersion', () => exposed.app.getWslVersion(), CH.appGetWslVersion)
-    // 0.1.3：WSL 本体生命周期（环境体检 / 更新 / 回滚 / 默认版本）
+    // 0.1.3：WSL 本体生命周期（环境体检 / 更新 / 默认版本）
     callAndCheck('app.wslEnv', () => exposed.app.wslEnv(), CH.appWslEnv)
     callAndCheck('app.wslUpdate', () => exposed.app.wslUpdate(), CH.appWslUpdate, {
       preRelease: false,
@@ -560,11 +576,6 @@ describe('preload 契约', () => {
       {
         preRelease: true,
       },
-    )
-    callAndCheck(
-      'app.wslUpdateRollback',
-      () => exposed.app.wslUpdateRollback(),
-      CH.appWslUpdateRollback,
     )
     callAndCheck(
       'app.wslSetDefaultVersion',

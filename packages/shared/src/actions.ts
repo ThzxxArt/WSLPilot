@@ -5,7 +5,7 @@
  */
 import type { WslAction } from './types'
 import { formatCommand } from './commands'
-import { assertSafeSlugId } from './slug'
+import { createAppError } from './errors'
 
 /** 动作变量上下文（主进程解析后传入） */
 export interface ActionVarContext {
@@ -92,7 +92,23 @@ export function previewActionCommandForDistro(
   })
 }
 
-/** 动作 id 安全校验（执行白名单的键）：非空、≤100、无控制字符与文件名非法字符 */
+/**
+ * 动作 id 安全校验（执行白名单的键）：非空、≤100、无控制字符、无路径/文件名分隔符。
+ *
+ * 允许 `:` 是为了兼容 0.1.3 已存在的 `git:pull` 等动作 id（它们只是配置查找键，
+ * 不进入文件路径或 shell）；不允许 `/ \ * ? " < > |` 与控制字符。
+ */
 export function assertSafeActionId(id: unknown): string {
-  return assertSafeSlugId(id, '动作 id')
+  const s = typeof id === 'string' ? id.trim() : ''
+  const bad = (msg: string): never => {
+    throw createAppError('CONFIG_INVALID', {
+      message: msg,
+      suggestion: '动作 id 不得包含 \\ / * ? " < > | 或控制字符，长度 1–100（允许 :）',
+    })
+  }
+  if (!s || s.length > 100) bad('动作 id 非法（空或超过 100 字符）')
+  // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
+  if (/[\u0000-\u001f\u007f]/.test(s)) bad('动作 id 非法（含控制字符）')
+  if (/[\\/*?"<>|]/.test(s)) bad('动作 id 非法（含非法字符）')
+  return s
 }

@@ -54,7 +54,6 @@ function register(withWindow = true) {
         })),
         setDefaultVersion: vi.fn(),
         update: vi.fn(),
-        updateRollback: vi.fn(),
       },
       tasks: { start: vi.fn(() => ({ taskId: 't' })) },
     } as never,

@@ -57,11 +57,28 @@ function sectionTitle(name: string): string {
   switch (name) {
     case 'wsl2':
       return '[wsl2] — 资源与网络'
+    case 'general':
+      return '[general] — 通用'
     case 'experimental':
       return '[experimental] — 实验特性'
     default:
       return `[${name}]`
   }
+}
+
+/** enum 选项：当前值不在推荐列表时补一条（WSL 对未知值有回退语义，但必须让用户看见） */
+function enumOptions(field: WslConfigField): Array<{ label: string; value: string }> {
+  const current = textValue(field)
+  const options = (field.options ?? []).map((o) => ({ label: o, value: o }))
+  if (current && !(field.options ?? []).includes(current)) {
+    options.unshift({ label: `${current}（当前值，不在推荐列表）`, value: current })
+  }
+  return options
+}
+
+function isCustomEnum(field: WslConfigField): boolean {
+  const current = textValue(field)
+  return !!current && !(field.options ?? []).includes(current)
 }
 
 function fieldValue(field: WslConfigField): boolean | string | number | undefined {
@@ -296,8 +313,8 @@ function shutdownNow() {
               :value="numberValue(f)"
               size="small"
               :placeholder="f.placeholder ?? ''"
-              :min="1"
-              :max="256"
+              :min="f.min ?? 1"
+              :max="f.max ?? 256"
               @update:value="(v: number | null) => onNumber(f, v)"
             />
             <n-select
@@ -305,7 +322,9 @@ function shutdownNow() {
               :value="textValue(f) || null"
               size="small"
               clearable
-              :options="(f.options ?? []).map((o) => ({ label: o, value: o }))"
+              :filterable="f.allowCustom === true"
+              :tag="f.allowCustom === true"
+              :options="enumOptions(f)"
               :placeholder="f.placeholder ?? '未设置'"
               @update:value="(v: string | null) => onEnum(f, v)"
             />
@@ -318,6 +337,9 @@ function shutdownNow() {
             />
           </div>
           <div v-if="f.hint" class="field-hint">{{ f.hint }}</div>
+          <div v-if="f.type === 'enum' && isCustomEnum(f)" class="field-hint warn">
+            当前值不在推荐列表；WSL 对未知值有回退语义，保存不会被阻止。
+          </div>
           <div v-if="conf.fieldError(f)" class="field-error">{{ conf.fieldError(f) }}</div>
         </div>
       </section>
@@ -525,6 +547,10 @@ function shutdownNow() {
   grid-column: 1 / -1;
   font-size: 11px;
   color: var(--color-text-tertiary);
+}
+
+.field-hint.warn {
+  color: var(--color-warning);
 }
 
 .field-error {

@@ -17,8 +17,9 @@ import {
   removeIniKey,
   type WslConfChange,
 } from './wslconf'
+import { WSL_SIZE_RE, wslSizeToBytes } from './commands'
 
-export type WslConfigSection = 'wsl2' | 'experimental'
+export type WslConfigSection = 'wsl2' | 'general' | 'experimental'
 
 export interface WslConfigModel {
   wsl2: {
@@ -30,15 +31,33 @@ export interface WslConfigModel {
     dnsTunneling?: boolean
     firewall?: boolean
     autoProxy?: boolean
+    localhostForwarding?: boolean
+    safeMode?: boolean
+    guiApplications?: boolean
+    nestedVirtualization?: boolean
+    vmIdleTimeout?: number
+    dnsProxy?: boolean
+    defaultVhdSize?: string
+    gpuSupport?: boolean
+    maxCrashDumpCount?: number
+    kernel?: string
+    kernelCommandLine?: string
+  }
+  general: {
+    instanceIdleTimeout?: number
+    distributionInstallPath?: string
   }
   experimental: {
     autoMemoryReclaim?: string
     sparseVhd?: boolean
+    bestEffortDnsParsing?: boolean
+    ignoredPorts?: string
+    hostAddressLoopback?: boolean
   }
 }
 
 export function emptyWslConfigModel(): WslConfigModel {
-  return { wsl2: {}, experimental: {} }
+  return { wsl2: {}, general: {}, experimental: {} }
 }
 
 export type WslConfigFieldType = 'boolean' | 'string' | 'number' | 'size' | 'enum'
@@ -52,12 +71,17 @@ export interface WslConfigField {
   placeholder?: string
   /** enum 可选值 */
   options?: readonly string[]
+  /** 允许用户输入列表外的值（WSL 对未知 enum 有明确回退语义时使用） */
+  allowCustom?: boolean
   /** size 类型允许字面 `0`（swap=0 语义为禁用交换；memory 不允许） */
   allowZero?: boolean
+  /** number 类型范围 */
+  min?: number
+  max?: number
 }
 
-/** 带单位容量（memory / swap）：`512MB` / `8GB`（不区分大小写） */
-export const SIZE_VALUE_RE = /^\d+(?:\.\d+)?(?:MB|GB)$/i
+/** WSL 容量语法（与 WSL ParseMemorySize 同源，见 commands.ts）：整数 + B/K/KB/M/MB/G/GB/T/TB */
+export const SIZE_VALUE_RE = WSL_SIZE_RE
 
 /** 可视化表单字段目录（唯一事实源；字段归属段落与官方 `.wslconfig` 文档对齐） */
 export const WSL_CONFIG_FIELDS: readonly WslConfigField[] = [
@@ -76,6 +100,8 @@ export const WSL_CONFIG_FIELDS: readonly WslConfigField[] = [
     label: '处理器数量',
     hint: 'wsl2.processors — 留空使用全部逻辑处理器',
     placeholder: '4',
+    min: 1,
+    max: 256,
   },
   {
     section: 'wsl2',
@@ -99,37 +125,143 @@ export const WSL_CONFIG_FIELDS: readonly WslConfigField[] = [
     key: 'networkingMode',
     type: 'enum',
     label: '网络模式',
-    hint: 'wsl2.networkingMode — mirrored 与 Windows 共用网络栈（VPN/本地服务更可靠）',
-    options: ['nat', 'mirrored'],
+    hint: 'wsl2.networkingMode — mirrored 共用网络栈；none 断开网络；consomme 为旧 virtioproxy 的新名字',
+    options: ['nat', 'mirrored', 'none', 'consomme', 'bridged'],
+    allowCustom: true,
   },
   {
     section: 'wsl2',
     key: 'dnsTunneling',
     type: 'boolean',
     label: 'DNS 隧道',
-    hint: 'wsl2.dnsTunneling — 通过虚拟化管道解析 DNS，兼容 VPN/特殊网络',
+    hint: 'wsl2.dnsTunneling — 通过虚拟化管道解析 DNS，兼容 VPN/特殊网络（Win11 22H2+）',
   },
   {
     section: 'wsl2',
     key: 'firewall',
     type: 'boolean',
     label: 'Windows 防火墙集成',
-    hint: 'wsl2.firewall — 应用 Hyper-V 防火墙规则到 WSL',
+    hint: 'wsl2.firewall — 应用 Hyper-V 防火墙规则到 WSL（Win11 22H2+）',
   },
   {
     section: 'wsl2',
     key: 'autoProxy',
     type: 'boolean',
     label: '自动代理继承',
-    hint: 'wsl2.autoProxy — 自动把 Windows 代理设置带入 WSL 环境变量',
+    hint: 'wsl2.autoProxy — 自动把 Windows 代理设置带入 WSL 环境变量（Win11）',
+  },
+  {
+    section: 'wsl2',
+    key: 'localhostForwarding',
+    type: 'boolean',
+    label: 'localhost 转发',
+    hint: 'wsl2.localhostForwarding — 允许从 Windows 通过 localhost 访问 WSL 内端口',
+  },
+  {
+    section: 'wsl2',
+    key: 'safeMode',
+    type: 'boolean',
+    label: '安全模式',
+    hint: 'wsl2.safeMode — 禁用大量功能，仅用于恢复损坏的发行版（Win11，WSL 0.66.2+）',
+  },
+  {
+    section: 'wsl2',
+    key: 'guiApplications',
+    type: 'boolean',
+    label: 'GUI 应用（WSLg）',
+    hint: 'wsl2.guiApplications — 允许运行 Linux GUI 应用',
+  },
+  {
+    section: 'wsl2',
+    key: 'nestedVirtualization',
+    type: 'boolean',
+    label: '嵌套虚拟化',
+    hint: 'wsl2.nestedVirtualization — 允许在 WSL2 内再运行虚拟机（Win11）',
+  },
+  {
+    section: 'wsl2',
+    key: 'vmIdleTimeout',
+    type: 'number',
+    label: 'VM 空闲超时（ms）',
+    hint: 'wsl2.vmIdleTimeout — VM 空闲多久后关闭（默认 60000，Win11）',
+    placeholder: '60000',
+    min: 0,
+    max: 86_400_000,
+  },
+  {
+    section: 'wsl2',
+    key: 'dnsProxy',
+    type: 'boolean',
+    label: 'NAT DNS 代理',
+    hint: 'wsl2.dnsProxy — 仅 NAT 模式：关闭后把 Windows DNS 服务器镜像进 Linux',
+  },
+  {
+    section: 'wsl2',
+    key: 'defaultVhdSize',
+    type: 'size',
+    label: '默认虚拟磁盘上限',
+    hint: 'wsl2.defaultVhdSize — 新建发行版 VHD 的默认上限（默认 1TB）',
+    placeholder: '1TB',
+  },
+  {
+    section: 'wsl2',
+    key: 'gpuSupport',
+    type: 'boolean',
+    label: 'GPU 支持',
+    hint: 'wsl2.gpuSupport — 在 WSL2 VM 中启用 GPU 支持',
+  },
+  {
+    section: 'wsl2',
+    key: 'maxCrashDumpCount',
+    type: 'number',
+    label: '崩溃转储保留数',
+    hint: 'wsl2.maxCrashDumpCount — 最多保留多少个崩溃转储文件（默认 10）',
+    placeholder: '10',
+    min: 0,
+    max: 1000,
+  },
+  {
+    section: 'wsl2',
+    key: 'kernel',
+    type: 'string',
+    label: '自定义内核路径',
+    hint: 'wsl2.kernel — 绝对 Windows 路径；留空使用微软内核',
+    placeholder: 'C:\\Temp\\myCustomKernel',
+  },
+  {
+    section: 'wsl2',
+    key: 'kernelCommandLine',
+    type: 'string',
+    label: '内核命令行',
+    hint: 'wsl2.kernelCommandLine — 追加的内核启动参数',
+    placeholder: 'vsyscall=emulate',
+  },
+  {
+    section: 'general',
+    key: 'instanceIdleTimeout',
+    type: 'number',
+    label: '发行版空闲超时（ms）',
+    hint: 'general.instanceIdleTimeout — 发行版空闲多久后关闭；-1 禁用自动关闭（默认 15000）',
+    placeholder: '15000',
+    min: -1,
+    max: 86_400_000,
+  },
+  {
+    section: 'general',
+    key: 'distributionInstallPath',
+    type: 'string',
+    label: '默认安装目录',
+    hint: 'general.distributionInstallPath — 新发行版的默认安装目录（默认 %LocalAppData%\\wsl）',
+    placeholder: 'D:\\WSL',
   },
   {
     section: 'experimental',
     key: 'autoMemoryReclaim',
     type: 'enum',
     label: '内存自动回收',
-    hint: 'experimental.autoMemoryReclaim — 空闲时把缓存内存归还 Windows',
-    options: ['disabled', 'gradual', 'dropcache'],
+    hint: 'experimental.autoMemoryReclaim — 空闲时把缓存内存归还 Windows；未知值按 dropCache 处理',
+    options: ['disabled', 'gradual', 'dropCache'],
+    allowCustom: true,
   },
   {
     section: 'experimental',
@@ -137,6 +269,28 @@ export const WSL_CONFIG_FIELDS: readonly WslConfigField[] = [
     type: 'boolean',
     label: '稀疏虚拟磁盘',
     hint: 'experimental.sparseVhd — 新建发行版磁盘按需增长（已存在的发行版需 wsl --manage --set-sparse）',
+  },
+  {
+    section: 'experimental',
+    key: 'bestEffortDnsParsing',
+    type: 'boolean',
+    label: '尽力 DNS 解析',
+    hint: 'experimental.bestEffortDnsParsing — DNS 隧道开启时忽略未知记录（Win11 22H2+）',
+  },
+  {
+    section: 'experimental',
+    key: 'ignoredPorts',
+    type: 'string',
+    label: '忽略端口',
+    hint: 'experimental.ignoredPorts — 镜像模式下允许 Linux 绑定的 Windows 已占用端口，逗号分隔',
+    placeholder: '3000,9000,9090',
+  },
+  {
+    section: 'experimental',
+    key: 'hostAddressLoopback',
+    type: 'boolean',
+    label: '宿主地址回环',
+    hint: 'experimental.hostAddressLoopback — 镜像模式下允许通过宿主 IP 互访（Win11 22H2+）',
   },
 ] as const
 
@@ -150,14 +304,26 @@ export function validateWslConfigValue(field: WslConfigField, raw: string): stri
   switch (field.type) {
     case 'size':
       if (field.allowZero && s === '0') return null
-      if (!SIZE_VALUE_RE.test(s)) return `${field.label}格式应为数字 + MB/GB（如 8GB）`
+      if (!SIZE_VALUE_RE.test(s)) {
+        return `${field.label}格式应为整数 + B/K/KB/M/MB/G/GB/T/TB（如 8GB；WSL 不接受小数）`
+      }
+      if (!field.allowZero && wslSizeToBytes(s) === 0) {
+        return `${field.label}不能为 0`
+      }
       return null
     case 'number': {
       const n = Number(s)
-      if (!Number.isInteger(n) || n < 1 || n > 256) return `${field.label}应为 1–256 的整数`
+      const min = field.min ?? 1
+      const max = field.max ?? 256
+      if (!Number.isInteger(n) || n < min || n > max) {
+        return `${field.label}应为 ${min}–${max} 的整数`
+      }
       return null
     }
     case 'enum':
+      // WSL 对未知 enum 有明确回退语义（如 networkingMode 未知 → NAT；
+      // autoMemoryReclaim 未知 → dropCache）：允许保存，但 UI 必须标注“不在推荐列表”。
+      if (field.allowCustom) return null
       if (!(field.options ?? []).includes(s)) {
         return `${field.label}只能取：${(field.options ?? []).join(' / ')}`
       }
@@ -194,8 +360,12 @@ export function parseWslConfigModel(text: string): WslConfigModel {
   const model = emptyWslConfigModel()
   for (const f of WSL_CONFIG_FIELDS) {
     const raw = getIniValue(text, f.section, f.key)
-    const v = coerceWslConfigValue(f.type, raw)
-    if (v === undefined) continue
+    const coerced = coerceWslConfigValue(f.type, raw)
+    if (coerced === undefined) continue
+    const v =
+      typeof coerced === 'string' && f.type === 'enum'
+        ? canonicalWslConfigValue(f, coerced)
+        : coerced
     ;(model[f.section] as Record<string, unknown>)[f.key] = v
   }
   return model
@@ -217,12 +387,51 @@ export function collectUnknownWslConfigKeys(
   return out
 }
 
+/** 枚举值规范写法：读兼容大小写，写回规范值（避免同一语义两种写法反复漂移） */
+export function canonicalWslConfigValue(field: WslConfigField, value: string): string {
+  if (field.key === 'autoMemoryReclaim') {
+    return value.toLowerCase() === 'dropcache' ? 'dropCache' : value
+  }
+  if (field.key === 'networkingMode') return value.toLowerCase()
+  return value
+}
+
+/**
+ * 模型值与磁盘原值是否语义相同（用于避免“只是大小写/规范名不同”就写盘）。
+ * 关键：`dropcache` 与 `dropCache`、`NAT` 与 `nat` 是同一 WSL 语义，加载后
+ * 不应因此把文件标记为 dirty 或重写用户的选择。
+ */
+function sameEffectiveValue(
+  field: WslConfigField,
+  before: string | undefined,
+  next: unknown,
+): boolean {
+  if (before === undefined) return false
+  if (field.type === 'boolean') {
+    const b = /^(true|1|yes|on)$/i.test(before.trim())
+      ? true
+      : /^(false|0|no|off)$/i.test(before.trim())
+        ? false
+        : undefined
+    return b === next
+  }
+  if (field.type === 'enum') {
+    return (
+      canonicalWslConfigValue(field, before).toLowerCase() ===
+      canonicalWslConfigValue(field, String(next)).toLowerCase()
+    )
+  }
+  if (field.type === 'number') return Number(before) === Number(next)
+  return before.trim() === String(next).trim()
+}
+
 /**
  * 把表单模型应用到原文（最小编辑）。
  * 语义（与 `applyWslConfModel` 一致，防静默丢用户数据）：
  * - 模型中 undefined = 不触碰该键（未编辑）
  * - 字符串字段显式置空串 = 清除该键
  * - opts.removeKeys 中显式标记（`section.key`）= 清除该键
+ * - 值语义未变（大小写/规范枚举名）不写盘，避免加载即 dirty
  * 返回新文本与逐键变更清单（供差异预览）。
  */
 export function applyWslConfigModel(
@@ -245,9 +454,9 @@ export function applyWslConfigModel(
       continue
     }
     if (next === undefined) continue
-    const after = String(next)
-    if (before === after) continue
-    out = setIniValue(out, f.section, f.key, next as string | boolean | number)
+    const after = canonicalWslConfigValue(f, String(next))
+    if (sameEffectiveValue(f, before, next)) continue
+    out = setIniValue(out, f.section, f.key, after)
     changes.push({ section: f.section, key: f.key, before, after, kind: 'set' })
   }
   return { text: out, changes }

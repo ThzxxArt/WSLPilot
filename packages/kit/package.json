@@ -1,6 +1,6 @@
 {
   "name": "@wslpilot/kit",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "WSLPilot 主进程工具集：exec、原子写、JSONC、路径、日志",
   "license": "MIT",

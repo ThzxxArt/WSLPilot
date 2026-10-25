@@ -149,6 +149,10 @@ function sectionTitle(name: string): string {
       return '[user] 用户'
     case 'boot':
       return '[boot] 启动'
+    case 'gpu':
+      return '[gpu] GPU'
+    case 'time':
+      return '[time] 时间'
     default:
       return `[${name}]`
   }

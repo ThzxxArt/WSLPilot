@@ -154,6 +154,18 @@ describe('SettingsView 签名与诊断', () => {
     await flushPromises()
     expect(wslAPI.config.set).not.toHaveBeenCalled()
   })
+
+  it('WSL 不支持 tar.gz 时默认格式降级为 tar（不把必然失败的默认值落盘）', async () => {
+    useSettingsStore().backupFormat = 'tar.gz'
+    const env = await wslAPI.app.wslEnv()
+    env.capabilities!.flags.exportFormats = false
+    // WslEnvironmentCard 自己 load 一次，共享 store 再 load 一次；两次都必须返回不支持
+    wslAPI.app.wslEnv.mockResolvedValueOnce(env).mockResolvedValueOnce(env)
+    mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    expect(message.warning).toHaveBeenCalledWith(expect.stringContaining('默认备份格式已改为 tar'))
+    expect(useSettingsStore().backupFormat).toBe('tar')
+  })
 })
 
 describe('SettingsView 更新卡错误面', () => {
@@ -235,6 +247,25 @@ describe('BackupView 导出与守卫', () => {
     findButton(w, '开始导出备份')!.element.click()
     await flushPromises()
     expect(message.error).toHaveBeenCalledWith(expect.stringContaining('磁盘空间不足'))
+  })
+
+  it('运行中迁移未勾选终止：第 2 步直接拦住并显示原因（不拖到长任务才失败）', async () => {
+    wslAPI.distros.list.mockResolvedValue([distro({ state: 'Running' })])
+    const w = mount(BackupView, { attachTo: document.body })
+    await flushPromises()
+    w.findComponent(NRadioGroup).vm.$emit('update:value', 'move')
+    await flushPromises()
+    w.findComponent(MoveWizard).vm.$emit('update:form', {
+      name: 'Ubuntu',
+      path: 'D:\\NewHome',
+      terminateFirst: false,
+    })
+    await flushPromises()
+    findButton(w, '下一步')!.element.click()
+    await flushPromises()
+    expect(bodyText()).toContain('迁移需要先终止它')
+    expect(findButton(w, '下一步')!.element.hasAttribute('disabled')).toBe(true)
+    expect(wslAPI.io.move).not.toHaveBeenCalled()
   })
 
   it('迁移模式需勾选「我已知晓」，未勾选不启动任务', async () => {
