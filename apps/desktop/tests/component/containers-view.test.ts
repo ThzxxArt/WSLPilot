@@ -64,6 +64,23 @@ describe('ContainersView（WSL 3 容器工作台）', () => {
     expect(wslAPI.containers.list).not.toHaveBeenCalled()
   })
 
+  it('运行容器弹框限制 90vh，内容区独立滚动（与发行版详情一致）', async () => {
+    const w = await mountView()
+    const runBtn = w.findAll('button').find((b) => b.text().includes('运行容器'))
+    expect(runBtn).toBeTruthy()
+    runBtn!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const card = document.body.querySelector<HTMLElement>('.n-card')
+    expect(card).toBeTruthy()
+    expect(card!.style.maxHeight).toBe('90vh')
+    expect(card!.style.width).toBe('680px')
+    const content = card!.querySelector<HTMLElement>('.n-card-content')
+    expect(content).toBeTruthy()
+    expect(content!.style.overflow).toBe('auto')
+  })
+
   it('已安装：渲染容器列表、状态、端口与统计', async () => {
     wslAPI.containers.list.mockResolvedValue([
       {

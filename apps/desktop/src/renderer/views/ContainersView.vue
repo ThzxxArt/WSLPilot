@@ -1055,7 +1055,8 @@ function imageLabel(img: WslcImage): string {
       v-model:show="runOpen"
       preset="card"
       title="运行容器"
-      :style="{ width: '680px', maxWidth: '94vw' }"
+      :style="{ width: '680px', maxWidth: '94vw', maxHeight: '90vh' }"
+      :content-style="{ overflow: 'auto' }"
     >
       <div class="form-grid">
         <label>配方</label>
@@ -1163,7 +1164,8 @@ function imageLabel(img: WslcImage): string {
       v-model:show="inspectOpen"
       preset="card"
       title="容器详情"
-      :style="{ width: '720px', maxWidth: '94vw' }"
+      :style="{ width: '720px', maxWidth: '94vw', maxHeight: '90vh' }"
+      :content-style="{ overflow: 'auto' }"
     >
       <div v-if="inspectData" class="inspect-grid">
         <span class="muted">镜像</span><span class="mono">{{ inspectData.image }}</span>
