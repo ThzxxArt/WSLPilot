@@ -81,7 +81,12 @@ export function listContainsDistro(stdout: string, target: string): boolean {
     if (!line) continue
     if (/[:：]$/.test(line)) continue // 说明行（如「适用于 Linux 的 Windows 子系统分发版:」）
     if (line.startsWith('*')) line = line.slice(1).trim()
-    line = line.replace(/\s*[（(]\s*(默认|default)\s*[)）]\s*$/i, '').trim()
+    line = line
+      .replace(
+        /\s*[（(]\s*(?:默认值?|預設值?|default|standard|既定|デフォルト|기본)\s*[)）]\s*$/i,
+        '',
+      )
+      .trim()
     if (line.toLowerCase() === lower) return true
   }
   return false
@@ -191,18 +196,65 @@ async function readWslVersionSafe(): Promise<string> {
   }
 }
 
+/** WSL 常见失败的可行动建议（不改变原始错误文本，只补 suggestion） */
+function explainWslFailure(text: string): string | undefined {
+  if (
+    /0x80370102|required feature is not installed|要求的功能未安装|虚拟机.*无法启动/i.test(text)
+  ) {
+    return '请在「启用或关闭 Windows 功能」中启用「虚拟机平台（Virtual Machine Platform）」，确认 BIOS 已开启 CPU 虚拟化，然后重启 Windows 再试。'
+  }
+  if (/0x8007019e|WSL optional component is not enabled|未启用.*Linux.*子系统/i.test(text)) {
+    return '请在「启用或关闭 Windows 功能」中启用「适用于 Linux 的 Windows 子系统」，重启 Windows 后再试。'
+  }
+  if (
+    /WSL_E_DISTRO_NOT_FOUND|no distribution with the supplied name|不存在具有所提供名称的分发/i.test(
+      text,
+    )
+  ) {
+    return '请先刷新发行版列表；如果刚安装完成，首次启动可能需要一点时间，稍后再试。'
+  }
+  return undefined
+}
+
+interface RunOkOptions {
+  /** 覆盖默认 30s 超时（首次启动 Rocky 等 systemd 发行版可能需要更久） */
+  timeoutMs?: number
+  /** 超时时的用户可读文案（默认「命令执行超时」） */
+  timeoutMessage?: string
+  /** 超时时的后续建议 */
+  timeoutSuggestion?: string
+}
+
 async function runOk(
   args: string[],
   errCode:
     'DISTRO_NOT_FOUND' | 'WSL_NOT_FOUND' | 'WSL_NOT_INSTALLED' | 'TASK_FAILED' = 'TASK_FAILED',
   rawCommand?: string,
+  opts: RunOkOptions = {},
 ): Promise<void> {
-  const r = await runWsl(args)
+  const r = await runWsl(args, opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {})
   if (r.code !== 0) {
+    // stdout / stderr 都可能是 WSL 的错误出口；Node 在 stderr 为空时只给
+    // 「Command failed: …」这种无信息量文案，必须优先展示真正的 WSL 输出。
+    const combined = [r.stderr, r.stdout]
+      .map((s) => (s ?? '').trim())
+      .filter(Boolean)
+      .join('\n')
+    const firstLine =
+      combined
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => l && !/^Command failed:/i.test(l)) ?? ''
+    const message = r.timedOut
+      ? (opts.timeoutMessage ?? '命令执行超时')
+      : firstLine || `命令执行失败（exit ${r.code}）`
     throw createAppError(errCode, {
-      message: r.stderr?.trim() || `命令执行失败（exit ${r.code}）`,
-      detail: r.stderr || r.stdout,
-      rawCommand: rawCommand ?? `wsl.exe ${args.join(' ')}`,
+      message,
+      detail: combined || `exit ${r.code}`,
+      rawCommand: rawCommand ?? getRawCommand('wsl.exe', args),
+      ...(r.timedOut
+        ? { suggestion: opts.timeoutSuggestion ?? '请稍后重试；若持续超时，请检查 WSL 服务状态。' }
+        : { suggestion: explainWslFailure(combined) }),
     })
   }
 }
@@ -427,8 +479,15 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
 
     async start(name) {
       const n = assertName(name)
-      // 启动 = 以默认 shell 跑一条空命令，让发行版进入 Running
-      await runOk(['-d', n, '-e', 'true'], 'DISTRO_NOT_FOUND')
+      // 启动 = 以默认 shell 跑一条空命令，让发行版进入 Running。
+      // 首次启动 Rocky/RLCPlus 等 systemd 发行版可能需要 30s 以上（真机可达 34s），
+      // 沿用默认 30s 会把「慢」误报成「坏」；给足 120s 并明确超时文案。
+      await runOk(['-d', n, '-e', 'true'], 'DISTRO_NOT_FOUND', undefined, {
+        timeoutMs: 120_000,
+        timeoutMessage: `启动 ${n} 超时（首次启动可能需要 1–2 分钟）`,
+        timeoutSuggestion:
+          '请稍后重试；若仍失败，请在命令提示符执行 wsl.exe -d ' + n + ' -e true 查看原始错误。',
+      })
     },
 
     async terminate(name) {
@@ -737,7 +796,10 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       const isTargetRegistered = async (): Promise<boolean> => {
         if (!target) return false
         try {
-          const r = await runWsl(['--list'])
+          // 必须用 --verbose：`wsl --list` 简单列表会省略 Installing 状态的发行版，
+          // 且默认项后缀在中文系统是「(默认值)」而非「(默认)」。verbose 表格由
+          // parseDistroList 按列解析，语言无关、状态无关，是安装完成判定的唯一可靠信号。
+          const r = await runWsl(['--list', '--verbose'])
           return r.code === 0 && listContainsDistro(r.stdout, target)
         } catch {
           return false

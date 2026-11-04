@@ -82,6 +82,19 @@ describe('runWsl', () => {
     expect(r.code).toBe(42)
     expect(r.stderr).toBe('bad thing')
     expect(r.stdout).toBe('out')
+    expect(r.timedOut).toBeUndefined()
+  })
+
+  it('超时被 kill 时标记 timedOut，区别于普通非零退出', async () => {
+    const err: any = new Error('Command failed: wsl.exe -d RLCPlus-10 -e true')
+    err.killed = true
+    err.code = null
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, Buffer.alloc(0), Buffer.alloc(0))
+    })
+    const r = await runWsl(['-d', 'RLCPlus-10', '-e', 'true'], { timeoutMs: 120_000 })
+    expect(r.code).toBe(-1)
+    expect(r.timedOut).toBe(true)
   })
 
   it('supports utf8 encoding option', async () => {

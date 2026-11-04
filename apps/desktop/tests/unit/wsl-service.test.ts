@@ -50,6 +50,7 @@ describe('listContainsDistro（精确名单匹配 — 拒绝前缀误判）', ()
   const verbose = 'NAME STATE VERSION\r\n* Ubuntu-22.04  Running  2\r\n  Debian  Stopped  1'
   const simpleEn = 'Windows Subsystem for Linux Distributions:\nUbuntu-22.04 (Default)\nDebian\n'
   const simpleZh = '适用于 Linux 的 Windows 子系统分发版:\nUbuntu-22.04（默认）\nDebian\n'
+  const simpleZhValue = '适用于 Linux 的 Windows 子系统分发:\nUbuntu-22.04（默认值）\nDebian\n'
 
   it('verbose 表格：精确命中（大小写不敏感）', () => {
     expect(listContainsDistro(verbose, 'Ubuntu-22.04')).toBe(true)
@@ -57,12 +58,15 @@ describe('listContainsDistro（精确名单匹配 — 拒绝前缀误判）', ()
     expect(listContainsDistro(verbose, '  Debian  ')).toBe(true)
   })
 
-  it('真实 `wsl --list` 简单列表（(Default)/(默认) 后缀）：精确命中', () => {
+  it('真实 `wsl --list` 简单列表（(Default)/(默认)/(默认值) 后缀）：精确命中', () => {
     expect(listContainsDistro(simpleEn, 'Ubuntu-22.04')).toBe(true)
     expect(listContainsDistro(simpleEn, 'ubuntu-22.04')).toBe(true)
     expect(listContainsDistro(simpleEn, 'Debian')).toBe(true)
     expect(listContainsDistro(simpleZh, 'Ubuntu-22.04')).toBe(true)
     expect(listContainsDistro(simpleZh, 'debian')).toBe(true)
+    // WSL 3 中文资源的真实默认后缀是「(默认值)」—— 0.2.1 安装完成判定曾因此误报未检测到
+    expect(listContainsDistro(simpleZhValue, 'Ubuntu-22.04')).toBe(true)
+    expect(listContainsDistro(simpleZhValue, 'debian')).toBe(true)
   })
 
   it('前缀不误判：Ubuntu-22.04 在列 ≠ Ubuntu 已装（两种形态）', () => {
@@ -226,10 +230,11 @@ describe('WslService', () => {
   })
 
   describe('start / terminate / shutdown / setDefault', () => {
-    it('start uses -d name -e true', async () => {
+    it('start uses -d name -e true，并给首次启动 120s 超时', async () => {
       ;(runWsl as any).mockResolvedValue(ok(''))
       await svc.start('Ubuntu-22.04')
       expect((runWsl as any).mock.calls[0][0]).toEqual(['-d', 'Ubuntu-22.04', '-e', 'true'])
+      expect((runWsl as any).mock.calls[0][1]).toMatchObject({ timeoutMs: 120_000 })
     })
 
     it('assertRunning：未运行/不存在拒绝，运行中放行（review 隐式启动根治）', async () => {
@@ -291,6 +296,34 @@ describe('WslService', () => {
         code: 1,
       })
       await expect(svc.start('Nope')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
+    })
+
+    it('首次启动超时：给出明确的 120s 超时文案，而不是无信息量的 Command failed', async () => {
+      ;(runWsl as any).mockResolvedValue({
+        stdout: '',
+        stderr: 'Command failed: wsl.exe -d RLCPlus-10 -e true\n',
+        code: -1,
+        timedOut: true,
+      })
+      await expect(svc.start('RLCPlus-10')).rejects.toMatchObject({
+        code: 'DISTRO_NOT_FOUND',
+        message: '启动 RLCPlus-10 超时（首次启动可能需要 1–2 分钟）',
+        suggestion: expect.stringContaining('wsl.exe -d RLCPlus-10 -e true'),
+      })
+    })
+
+    it('虚拟机平台缺失：保留 WSL 原始错误并补上启用建议', async () => {
+      ;(runWsl as any).mockResolvedValue({
+        stdout:
+          'Error: 0x80370102 The virtual machine could not be started because a required feature is not installed.',
+        stderr: '',
+        code: 1,
+      })
+      await expect(svc.start('Ubuntu')).rejects.toMatchObject({
+        code: 'DISTRO_NOT_FOUND',
+        message: expect.stringContaining('0x80370102'),
+        suggestion: expect.stringContaining('虚拟机平台'),
+      })
     })
   })
 
@@ -444,8 +477,8 @@ describe('WslService', () => {
         if (args[0] === '--list') {
           listCalls++
           return listCalls === 1
-            ? ok('适用于 Linux 的 Windows 子系统分发版:')
-            : ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu (默认)')
+            ? ok('  NAME  STATE  VERSION')
+            : ok('  NAME  STATE  VERSION\n* Ubuntu  Running  2')
         }
         return ok('')
       })
@@ -492,6 +525,12 @@ describe('WslService', () => {
       expect(Date.now() - started).toBeLessThan(15_000)
       const reports = (ctl.report.mock as { calls: unknown[][] }).calls
       expect(reports[reports.length - 1]).toEqual([100, '安装完成'])
+      // 安装完成判定必须走 verbose 表格（简单列表会漏掉 Installing 状态且默认后缀本地化）
+      expect(
+        (runWsl as any).mock.calls.some(
+          (c: unknown[]) => JSON.stringify(c[0]) === JSON.stringify(['--list', '--verbose']),
+        ),
+      ).toBe(true)
       // review 0.1.2：本用例依赖真实 4s 轮询时钟（服务实现内固定 4000ms，测试不可注入），
       // 默认 5s 超时在 CI 负载下会假超时 —— 显式放宽到 15s，防抖动不放松断言
     }, 15_000)
@@ -504,8 +543,8 @@ describe('WslService', () => {
       })
       ;(runWsl as any).mockImplementation(async (args: string[]) => {
         if (args[0] === '--list') {
-          // 真实简单列表形态（中文默认后缀）
-          return ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu-22.04（默认）')
+          // 真实 verbose 表格形态；只有前缀相似项，不得判 Ubuntu 已装
+          return ok('  NAME  STATE  VERSION\n  Ubuntu-22.04  Running  2')
         }
         return { stdout: '', stderr: '', code: 0 }
       })
@@ -532,8 +571,7 @@ describe('WslService', () => {
       // 基线即精确存在：不得把「已存在」当完成信号提前结算
       ;(runWsl as any).mockImplementation(async (args: string[]) => {
         if (args[0] === '--list') {
-          // 真实简单列表形态（英文默认后缀）
-          return ok('Windows Subsystem for Linux Distributions:\nUbuntu (Default)')
+          return ok('  NAME  STATE  VERSION\n* Ubuntu  Running  2')
         }
         return { stdout: '', stderr: '', code: 0 }
       })
@@ -547,6 +585,12 @@ describe('WslService', () => {
     })
 
     it('install 对老 WSL 的 --no-launch 不识别自动降级（标准参数重试后成功）', async () => {
+      ;(runWsl as any).mockImplementation(async (args: string[]) => {
+        if (args[0] === '--list') {
+          return ok('  NAME  STATE  VERSION\n* Ubuntu  Running  2')
+        }
+        return ok('')
+      })
       ;(spawnWsl as any).mockImplementation(
         (_a: string[], o: { onLine: (l: string) => void; onExit: (c: number) => void }) => {
           const n = (spawnWsl as any).mock.calls.length
@@ -573,8 +617,8 @@ describe('WslService', () => {
         if (args[0] === '--list') {
           listCalls++
           return listCalls === 1
-            ? ok('适用于 Linux 的 Windows 子系统分发版:')
-            : ok('适用于 Linux 的 Windows 子系统分发版:\nUbuntu (默认)')
+            ? ok('  NAME  STATE  VERSION')
+            : ok('  NAME  STATE  VERSION\n* Ubuntu  Running  2')
         }
         return ok('')
       })
@@ -1066,7 +1110,7 @@ describe('WslService 状态解析/错误文案分支（0.2.0 覆盖率补强）'
     })
     await expect(svc.start('Ubuntu')).rejects.toMatchObject({
       code: 'DISTRO_NOT_FOUND',
-      message: '命令执行失败（exit 1）',
+      message: 'start failed on stdout',
       detail: 'start failed on stdout',
     })
   })

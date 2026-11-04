@@ -18,6 +18,8 @@ export interface ToolResult {
   truncated?: boolean
   /** 因 abort 取消而失败（review 0.1.2 审计修复：调用方可与普通失败区分结算） */
   aborted?: boolean
+  /** 因超时被终止（首次启动发行版等慢命令必须与普通失败区分） */
+  timedOut?: boolean
 }
 
 export interface RunToolOptions {
@@ -60,6 +62,7 @@ export async function runTool(
       message?: string
       stdout?: Buffer
       stderr?: Buffer
+      killed?: boolean
     }
     // spawn 级错误（ENOENT 等）没有 stderr，必须保留 message（与 runWsl 一致）
     const stderrText = decodeToolOutput(err.stderr) || (err.message ? `${err.message}\n` : '')
@@ -68,12 +71,15 @@ export async function runTool(
     const truncated = err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
     // abort 取消（signal.aborted 或 AbortError）：显式标记，调用方按取消结算而非普通失败
     const aborted = opts.signal?.aborted === true || (e as { name?: string }).name === 'AbortError'
+    // execFile 因 timeout 主动 kill 时会置 killed；与普通非零退出区分，避免把「慢」误报成「坏」
+    const timedOut = err.killed === true && !aborted
     return {
       stdout: decodeToolOutput(err.stdout),
       stderr: stderrText,
       code: typeof err.code === 'number' ? err.code : -1,
       ...(truncated ? { truncated: true } : {}),
       ...(aborted ? { aborted: true } : {}),
+      ...(timedOut ? { timedOut: true } : {}),
     }
   }
 }

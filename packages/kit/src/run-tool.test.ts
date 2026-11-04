@@ -124,6 +124,18 @@ describe('runTool', () => {
     const r = await runTool('netsh.exe', ['x'])
     expect(r.truncated).toBeUndefined()
     expect(r.aborted).toBeUndefined()
+    expect(r.timedOut).toBeUndefined()
+  })
+
+  it('timeout kill 标记 timedOut（慢命令不冒充失败）', async () => {
+    const err: Error & { code?: number; killed?: boolean } = new Error('timeout')
+    err.killed = true
+    mockExecFile.mockImplementation((_c: string, _a: string[], _o: unknown, cb: any) => {
+      cb(err, Buffer.alloc(0), Buffer.alloc(0))
+    })
+    const r = await runTool('netsh.exe', ['x'], { timeoutMs: 1000 })
+    expect(r.timedOut).toBe(true)
+    expect(r.code).toBe(-1)
   })
 
   it('abort 后标记 aborted，与普通失败区分 — review 0.1.2 审计修复', async () => {

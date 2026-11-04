@@ -194,13 +194,21 @@ async function runExecutable(
       code: 0,
     }
   } catch (e) {
-    const err = e as { code?: number | string; message?: string; stdout?: Buffer; stderr?: Buffer }
+    const err = e as {
+      code?: number | string
+      message?: string
+      stdout?: Buffer
+      stderr?: Buffer
+      killed?: boolean
+    }
     // spawn 级错误（ENOENT 等）没有 stderr，必须保留 message，否则上层错误映射失效（review M6）
     const stderrText = decode(err.stderr) || (err.message ? `${err.message}\n` : '')
     return {
       stdout: decode(err.stdout),
       stderr: stderrText,
       code: typeof err.code === 'number' ? err.code : -1,
+      // execFile timeout 会置 killed；首次启动发行版较慢时，调用方需要区别于真实失败
+      ...(err.killed ? { timedOut: true } : {}),
     }
   }
 }
@@ -242,7 +250,7 @@ export async function runWslWithStdin(
       if (settled) return
       settled = true
       child.kill()
-      resolve({ stdout: '', stderr: '命令超时\n', code: -1 })
+      resolve({ stdout: '', stderr: '命令超时\n', code: -1, timedOut: true })
     }, opts.timeoutMs ?? 30_000)
     ;(timer as unknown as { unref?: () => void }).unref?.()
 
