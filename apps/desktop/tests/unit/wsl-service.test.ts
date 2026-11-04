@@ -298,6 +298,32 @@ describe('WslService', () => {
       await expect(svc.start('Nope')).rejects.toMatchObject({ code: 'DISTRO_NOT_FOUND' })
     })
 
+    it('刚安装完成首启：名称短暂不可见时自动重试（Fedora 真实时序）', async () => {
+      ;(runWsl as any)
+        .mockResolvedValueOnce({
+          stdout: '',
+          stderr:
+            'There is no distribution with the supplied name. Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND',
+          code: 1,
+        })
+        .mockResolvedValueOnce(ok(''))
+      await expect(svc.start('FedoraLinux-44')).resolves.toBeUndefined()
+      expect(runWsl).toHaveBeenCalledTimes(2)
+    }, 5000)
+
+    it('E_UNEXPECTED 等真实启动故障不自动重试', async () => {
+      ;(runWsl as any).mockResolvedValue({
+        stdout: '',
+        stderr: '灾难性故障\n错误代码： Wsl/Service/E_UNEXPECTED',
+        code: 1,
+      })
+      await expect(svc.start('RLCPlus-10')).rejects.toMatchObject({
+        code: 'DISTRO_NOT_FOUND',
+        message: '灾难性故障',
+      })
+      expect(runWsl).toHaveBeenCalledTimes(1)
+    })
+
     it('首次启动超时：给出明确的 120s 超时文案，而不是无信息量的 Command failed', async () => {
       ;(runWsl as any).mockResolvedValue({
         stdout: '',

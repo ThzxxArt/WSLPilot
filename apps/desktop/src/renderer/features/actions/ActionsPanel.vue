@@ -193,7 +193,7 @@ async function removeAction(a: WslAction) {
     const n = notification.warning({
       title: '动作已删除',
       content: `「${a.label}」`,
-      duration: 6000,
+      duration: 12000,
       action: () =>
         h(
           NButton,

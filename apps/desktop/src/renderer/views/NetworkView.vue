@@ -100,7 +100,7 @@ function onRemove(rule: PortForwardRule) {
         const n = notification.warning({
           title: '规则已删除',
           content: `「${rule.id}」`,
-          duration: 6000,
+          duration: 12000,
           action: () =>
             h(
               NButton,

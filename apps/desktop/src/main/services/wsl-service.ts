@@ -225,6 +225,19 @@ interface RunOkOptions {
   timeoutSuggestion?: string
 }
 
+/** 是否是「发行版名称暂时还查不到」的注册时序错误（安装完成后的首启常见） */
+function isMissingDistroError(e: unknown): boolean {
+  const err = e as { message?: string; detail?: string } | null
+  const text = `${err?.message ?? ''}\n${err?.detail ?? ''}`
+  return /WSL_E_DISTRO_NOT_FOUND|no distribution with the supplied name|不存在具有所提供名称的分发|找不到发行版/i.test(
+    text,
+  )
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function runOk(
   args: string[],
   errCode:
@@ -482,12 +495,26 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
       // 启动 = 以默认 shell 跑一条空命令，让发行版进入 Running。
       // 首次启动 Rocky/RLCPlus 等 systemd 发行版可能需要 30s 以上（真机可达 34s），
       // 沿用默认 30s 会把「慢」误报成「坏」；给足 120s 并明确超时文案。
-      await runOk(['-d', n, '-e', 'true'], 'DISTRO_NOT_FOUND', undefined, {
+      // 刚安装完成时 WSL 可能还没把名称暴露给 `-d`（Fedora 首启实测），
+      // 对「找不到发行版」做短暂重试；E_UNEXPECTED 等真实故障不重试。
+      const opts = {
         timeoutMs: 120_000,
         timeoutMessage: `启动 ${n} 超时（首次启动可能需要 1–2 分钟）`,
         timeoutSuggestion:
           '请稍后重试；若仍失败，请在命令提示符执行 wsl.exe -d ' + n + ' -e true 查看原始错误。',
-      })
+      }
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await runOk(['-d', n, '-e', 'true'], 'DISTRO_NOT_FOUND', undefined, opts)
+          return
+        } catch (e) {
+          if (attempt < 3 && isMissingDistroError(e)) {
+            await delay(800)
+            continue
+          }
+          throw e
+        }
+      }
     },
 
     async terminate(name) {

@@ -212,7 +212,7 @@ onUnmounted(() => {
     :date-locale="naiveDateLocale"
     class="h-full"
   >
-    <n-message-provider>
+    <n-message-provider :duration="10000" :max="5" closable keep-alive-on-hover>
       <n-notification-provider>
         <n-dialog-provider>
           <!-- 启动兜底：桥接缺失 / 子组件未捕获错误 → 显式降级面板（review 0.1.2 根治） -->

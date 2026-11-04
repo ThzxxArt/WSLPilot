@@ -22,7 +22,7 @@
   </p>
 
   <p>
-    <a href="https://github.com/ThzxxArt/WSLPilot"><img alt="Unit tests" src="https://img.shields.io/badge/unit%20tests-1%2C532-8B5CF6?style=flat-square&logo=vitest&logoColor=white" /></a>
+    <a href="https://github.com/ThzxxArt/WSLPilot"><img alt="Unit tests" src="https://img.shields.io/badge/unit%20tests-1%2C534-8B5CF6?style=flat-square&logo=vitest&logoColor=white" /></a>
     <a href="https://github.com/ThzxxArt/WSLPilot"><img alt="Component tests" src="https://img.shields.io/badge/component%20tests-414-A855F7?style=flat-square&logo=vuedotjs&logoColor=white" /></a>
     <a href="https://github.com/ThzxxArt/WSLPilot"><img alt="Coverage" src="https://img.shields.io/badge/coverage-96.17%25%20lines-22C55E?style=flat-square&logo=codecov&logoColor=white" /></a>
   </p>
@@ -177,11 +177,11 @@ npm run smoke:product    # 产物模块图冒烟
 npm run tokens:check     # 设计令牌漂移检查
 ```
 
-| 指标            | 当前基线（0.2.2）                                                                                             |
+| 指标            | 当前基线（0.2.3）                                                                                             |
 | :-------------- | :------------------------------------------------------------------------------------------------------------ |
-| 单元 / 集成测试 | **105 文件 / 1,532 用例**                                                                                     |
+| 单元 / 集成测试 | **105 文件 / 1,534 用例**                                                                                     |
 | 组件测试        | **24 文件 / 414 用例**                                                                                        |
-| 单元覆盖率      | **Lines 96.16% · Branches 86.11% · Functions 94.00%**                                                         |
+| 单元覆盖率      | **Lines 96.17% · Branches 86.12% · Functions 94.01%**                                                         |
 | 组件覆盖率      | **renderer Lines 79.62% · Branches 77.39% · Functions 75.55%**                                                |
 | CI              | **Windows · Node 22 / 24 · lint / format / typecheck / coverage / component / build / smoke / E2E / package** |
 
