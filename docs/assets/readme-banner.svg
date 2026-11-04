@@ -1,0 +1,106 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">WSLPilot — WSL 的驾驶舱</title>
+  <desc id="desc">WSLPilot 项目横幅：终端 2.0 工作台、WSL 3 容器与 JSONC 配置。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#070B18"/>
+      <stop offset="0.55" stop-color="#0B1226"/>
+      <stop offset="1" stop-color="#101A3A"/>
+    </linearGradient>
+    <linearGradient id="aurora" x1="120" y1="40" x2="620" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="0.5" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="logo" x1="80" y1="60" x2="156" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818CF8"/>
+      <stop offset="0.55" stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="line" x1="70" y1="0" x2="1130" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#22D3EE" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#6366F1" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#6366F1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#22D3EE" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" stroke="#94A3B8" stroke-opacity="0.07" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="360" rx="24" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1198" height="358" rx="23" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <rect width="1200" height="360" rx="24" fill="url(#grid)"/>
+
+  <circle cx="180" cy="70" r="210" fill="url(#glowA)" filter="url(#soft)"/>
+  <circle cx="880" cy="310" r="240" fill="url(#glowB)" filter="url(#soft)"/>
+  <circle cx="1080" cy="60" r="130" fill="url(#glowA)" opacity="0.45"/>
+
+  <g opacity="0.45">
+    <circle cx="940" cy="180" r="148" stroke="#22D3EE" stroke-opacity="0.35"/>
+    <circle cx="940" cy="180" r="112" stroke="#818CF8" stroke-opacity="0.28" stroke-dasharray="4 8"/>
+    <circle cx="940" cy="180" r="78" stroke="#22D3EE" stroke-opacity="0.2"/>
+    <path d="M940 18V52M940 308V342M778 180H812M1068 180H1102" stroke="#22D3EE" stroke-opacity="0.35"/>
+  </g>
+
+  <g>
+    <rect x="70" y="58" width="76" height="76" rx="22" fill="url(#logo)"/>
+    <rect x="70" y="58" width="76" height="76" rx="22" stroke="#FFFFFF" stroke-opacity="0.35"/>
+    <path d="M92 82L112 96L92 110" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M116 112H132" stroke="white" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+  </g>
+
+  <text x="70" y="190" fill="#F8FAFC" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="66" font-weight="700" letter-spacing="-1.5">WSLPilot</text>
+  <text x="73" y="228" fill="#A5B4FC" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="22" font-weight="600">WSL 的驾驶舱</text>
+  <text x="73" y="258" fill="#94A3B8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">发行版 · 终端 · 容器 · 备份 · 网络 · USB —— 一个窗口，全部掌控。</text>
+
+  <g font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12" font-weight="600">
+    <rect x="72" y="282" width="118" height="30" rx="15" fill="#6366F1" fill-opacity="0.16" stroke="#6366F1" stroke-opacity="0.45"/>
+    <text x="94" y="302" fill="#C7D2FE">Terminal 2.0</text>
+    <rect x="200" y="282" width="132" height="30" rx="15" fill="#22D3EE" fill-opacity="0.1" stroke="#22D3EE" stroke-opacity="0.4"/>
+    <text x="220" y="302" fill="#A5F3FC">wslc Containers</text>
+    <rect x="342" y="282" width="128" height="30" rx="15" fill="#A855F7" fill-opacity="0.12" stroke="#A855F7" stroke-opacity="0.4"/>
+    <text x="362" y="302" fill="#E9D5FF">JSONC Config v3</text>
+  </g>
+
+  <g>
+    <rect x="760" y="66" width="360" height="226" rx="18" fill="#0B1226" fill-opacity="0.82" stroke="#FFFFFF" stroke-opacity="0.12"/>
+    <rect x="760" y="66" width="360" height="40" rx="18" fill="#FFFFFF" fill-opacity="0.04"/>
+    <circle cx="784" cy="86" r="5" fill="#F87171"/>
+    <circle cx="802" cy="86" r="5" fill="#FBBF24"/>
+    <circle cx="820" cy="86" r="5" fill="#34D399"/>
+    <text x="846" y="90" fill="#64748B" font-family="Cascadia Mono, Consolas, monospace" font-size="11">wslpilot — cockpit</text>
+
+    <g font-family="Cascadia Mono, Consolas, monospace" font-size="12">
+      <text x="786" y="132" fill="#64748B">$</text>
+      <text x="802" y="132" fill="#E2E8F0">wslpilot status</text>
+
+      <circle cx="792" cy="158" r="4" fill="#34D399"/>
+      <text x="806" y="162" fill="#E2E8F0">Debian</text>
+      <text x="1030" y="162" fill="#34D399" text-anchor="end">running</text>
+
+      <circle cx="792" cy="186" r="4" fill="#64748B"/>
+      <text x="806" y="190" fill="#94A3B8">Ubuntu</text>
+      <text x="1030" y="190" fill="#64748B" text-anchor="end">stopped</text>
+
+      <text x="786" y="220" fill="#64748B">containers</text>
+      <text x="1030" y="220" fill="#A5B4FC" text-anchor="end">3 running</text>
+      <text x="786" y="244" fill="#64748B">config</text>
+      <text x="1030" y="244" fill="#A5B4FC" text-anchor="end">settings.jsonc v3</text>
+      <text x="786" y="268" fill="#64748B">terminal</text>
+      <text x="1030" y="268" fill="#A5B4FC" text-anchor="end">2.0 · full bleed</text>
+    </g>
+  </g>
+
+  <rect y="356" width="1200" height="2" fill="url(#line)"/>
+</svg>
