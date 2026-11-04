@@ -14,7 +14,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "package": "electron-builder --config electron-builder.yml",
+    "package": "electron-builder --config electron-builder.yml --publish never",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run"
   },
