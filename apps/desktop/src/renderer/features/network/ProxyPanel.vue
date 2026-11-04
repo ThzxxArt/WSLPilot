@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NInput, NSelect, NSwitch, NTag, useMessage } from 'naive-ui'
 import {
   buildProxyScript,
@@ -37,7 +37,7 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
-const form = reactive<ProxyForm>(proxyToForm(props.proxy))
+const form = ref<ProxyForm>(proxyToForm(props.proxy))
 const targetDistro = ref('')
 /**
  * 展示的脚本是否对应当前目标发行版：
@@ -48,7 +48,7 @@ const scriptFresh = ref(false)
 
 watch(
   () => props.proxy,
-  (p) => Object.assign(form, proxyToForm(p)),
+  (p) => Object.assign(form.value, proxyToForm(p)),
   { deep: true },
 )
 
@@ -83,15 +83,15 @@ const distroOptions = computed(() =>
   })),
 )
 
-const error = computed(() => validateProxyForm(form))
+const error = computed(() => validateProxyForm(form.value))
 
 const effective = computed(() =>
   resolveEffectiveProxy(
     {
-      useWindowsProxy: form.useWindowsProxy,
-      httpProxy: form.httpProxy,
-      httpsProxy: form.httpsProxy,
-      noProxy: form.noProxy,
+      useWindowsProxy: form.value.useWindowsProxy,
+      httpProxy: form.value.httpProxy,
+      httpsProxy: form.value.httpsProxy,
+      noProxy: form.value.noProxy,
     },
     props.windowsProxy,
   ),
@@ -117,10 +117,10 @@ async function save() {
     return
   }
   emit('save', {
-    useWindowsProxy: form.useWindowsProxy,
-    httpProxy: form.httpProxy.trim(),
-    httpsProxy: form.httpsProxy.trim(),
-    noProxy: form.noProxy.trim(),
+    useWindowsProxy: form.value.useWindowsProxy,
+    httpProxy: form.value.httpProxy.trim(),
+    httpsProxy: form.value.httpsProxy.trim(),
+    noProxy: form.value.noProxy.trim(),
   })
 }
 
@@ -136,10 +136,10 @@ async function applyToDistro() {
   // 一次 emit 携带配置：父级串行「保存 → 写入」，
   // 避免 save 与 apply 两个独立 IPC 之间配置被写入旧值（review M-9）
   emit('apply', targetDistro.value, {
-    useWindowsProxy: form.useWindowsProxy,
-    httpProxy: form.httpProxy.trim(),
-    httpsProxy: form.httpsProxy.trim(),
-    noProxy: form.noProxy.trim(),
+    useWindowsProxy: form.value.useWindowsProxy,
+    httpProxy: form.value.httpProxy.trim(),
+    httpsProxy: form.value.httpsProxy.trim(),
+    noProxy: form.value.noProxy.trim(),
   })
 }
 
@@ -191,27 +191,30 @@ function inspect() {
       <label class="field">
         <span class="label">HTTP 代理</span>
         <n-input
-          v-model:value="form.httpProxy"
+          :value="form.httpProxy"
           placeholder="http://127.0.0.1:7890"
           :disabled="applying"
+          @update:value="(v: string) => (form.httpProxy = v)"
         />
       </label>
 
       <label class="field">
         <span class="label">HTTPS 代理</span>
         <n-input
-          v-model:value="form.httpsProxy"
+          :value="form.httpsProxy"
           placeholder="http://127.0.0.1:7890"
           :disabled="applying"
+          @update:value="(v: string) => (form.httpsProxy = v)"
         />
       </label>
 
       <label class="field">
         <span class="label">不代理列表（no_proxy）</span>
         <n-input
-          v-model:value="form.noProxy"
+          :value="form.noProxy"
           placeholder="localhost,127.0.0.1"
           :disabled="applying"
+          @update:value="(v: string) => (form.noProxy = v)"
         />
       </label>
     </div>

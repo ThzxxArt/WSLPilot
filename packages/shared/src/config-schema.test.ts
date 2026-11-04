@@ -16,7 +16,7 @@ import { createAppError, ERROR_CATALOG } from '../src/errors'
 describe('config schema', () => {
   it('provides valid defaults for settings', () => {
     const s = defaultConfig('settings')
-    expect(s.$schemaVersion).toBe(2)
+    expect(s.$schemaVersion).toBe(3)
     expect(s.general.accent).toBe('aurora')
     expect(s.advanced.confirmDestructive).toBe(true)
   })
@@ -69,9 +69,17 @@ describe('uiState 幽灵字段根治', () => {
       tableSort: { key: 'name', dir: 'asc' },
     })
     expect(Object.keys(parsed).sort()).toEqual(
-      ['$schemaVersion', 'recentCommands', 'sidebarCollapsed', 'terminalLayout', 'window'].sort(),
+      [
+        '$schemaVersion',
+        'recentCommands',
+        'sidebarCollapsed',
+        'terminalLayout',
+        'window',
+        'workbench',
+      ].sort(),
     )
-    // 0.1.3：终端分屏布局默认空数组（窗口重载恢复的持久化位）
+    // 0.2.0：工作台布局默认空结构；旧 terminalLayout 仅迁移读取
+    expect(parsed.workbench.tabs).toEqual([])
     expect(parsed.terminalLayout).toEqual([])
   })
 })
@@ -117,7 +125,7 @@ describe('migrations', () => {
     expect(done.general.accent).toBe('ocean')
 
     // 目标版本超出链长度（链不完整）：迁移到链条尽头后**删除版本戳**，决不给假盖章
-    const beyond = migrateConfig('settings', { $schemaVersion: 1, general: {} }, 3) as any
+    const beyond = migrateConfig('settings', { $schemaVersion: 1, general: {} }, 4) as any
     expect(beyond.$schemaVersion).toBeUndefined()
     expect(beyond.general.accent).toBe('aurora') // 链条能到的一步已如实执行
   })

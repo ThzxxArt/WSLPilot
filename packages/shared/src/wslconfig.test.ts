@@ -5,6 +5,7 @@ import {
   emptyWslConfigModel,
   parseWslConfigModel,
   summarizeWslConfigChanges,
+  validateWslConfigDependencies,
   validateWslConfigValue,
   WSL_CONFIG_FIELDS,
   SIZE_VALUE_RE,
@@ -223,5 +224,35 @@ describe('network.parseWslConfigMode 与 wslconfig 解析同源（0.1.3 单一�
     // 其他 section 中的同名键不得干扰
     expect(parseWslConfigMode('[experimental]\nnetworkingMode=mirrored\n').mode).toBe('unknown')
     expect(parseWslConfigMode('').mode).toBe('unknown')
+  })
+})
+
+describe('WSL 3 .wslconfig 依赖校验（0.2.0）', () => {
+  it('VirtioFS 缺依赖时给出两条警告；依赖齐全无警告', () => {
+    const model = emptyWslConfigModel()
+    model.wsl2.virtiofs = true
+    expect(validateWslConfigDependencies(model)).toEqual([
+      'VirtioFS 需要同时启用 [wsl2] virtio=true',
+      'VirtioFS 需要同时启用 [wsl2] hostFileSystemAccess=true',
+    ])
+    model.wsl2.virtio = true
+    model.wsl2.hostFileSystemAccess = true
+    expect(validateWslConfigDependencies(model)).toEqual([])
+  })
+
+  it('systemDistro：必须是绝对 Windows 路径且 .img/.vhd', () => {
+    const model = emptyWslConfigModel()
+    model.wsl2.systemDistro = 'relative/system.vhd'
+    expect(validateWslConfigDependencies(model)[0]).toContain('绝对 Windows 路径')
+    model.wsl2.systemDistro = 'C:\\WSL\\system.iso'
+    expect(validateWslConfigDependencies(model)[0]).toContain('仅支持 .img / .vhd')
+    model.wsl2.systemDistro = 'D:/WSL/system.vhd'
+    expect(validateWslConfigDependencies(model)).toEqual([])
+  })
+
+  it('isolateDistroCgroup 提示 cgroup v2', () => {
+    const model = emptyWslConfigModel()
+    model.wsl2.isolateDistroCgroup = true
+    expect(validateWslConfigDependencies(model)[0]).toContain('cgroup v2')
   })
 })

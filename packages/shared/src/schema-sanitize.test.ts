@@ -8,6 +8,7 @@ const recordHolderSchema = z.object({
   $schemaVersion: z.number().int().default(1),
   metrics: z
     .record(
+      z.string(),
       z.object({
         memUsedKB: z.number(),
         memTotalKB: z.number(),
@@ -17,7 +18,7 @@ const recordHolderSchema = z.object({
         sampledAt: z.string(),
       }),
     )
-    .default({}),
+    .prefault({}),
 })
 const recordHolderDefaults = { $schemaVersion: 1, metrics: {} }
 
@@ -152,7 +153,7 @@ describe('sanitizeWithSchema', () => {
     const inner = z.object({ a: z.number().default(1) }).superRefine((v, ctx) => {
       if (v.a === 5) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'a=5 拒绝' })
     })
-    const schema = z.object({ inner: inner.default({}) })
+    const schema = z.object({ inner: inner.prefault({}) })
     const defaults = { inner: { a: 1 }, legacy: 7 } as any
     const out = sanitizeWithSchema(schema, { inner: { a: 5 } }, defaults)
     // 若未回退，out.inner.a 会是清洗后的 5；回退后为默认 1

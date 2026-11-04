@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const wslAPI = {
+  shellIntegration: {
+    status: vi.fn(async () => ({ state: 'installed' })),
+  },
   terminal: {
     create: vi.fn(),
+    createProfile: vi.fn(),
     input: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
@@ -572,7 +576,7 @@ describe('useTerminalStore（0.1.3 tabs + panes 模型）', () => {
     expect(s.getBuffer(id)).toBe('before-exit')
   })
 
-  it('布局变更防抖持久化到 ui-state.terminalLayout（0.1.3）', async () => {
+  it('布局变更防抖持久化到 ui-state.workbench（0.2.0）', async () => {
     vi.useFakeTimers()
     try {
       const s = useTerminalStore()
@@ -583,9 +587,11 @@ describe('useTerminalStore（0.1.3 tabs + panes 模型）', () => {
       expect(wslAPI.config.set).toHaveBeenCalledTimes(1)
       const call = (wslAPI.config.set.mock.calls as unknown[][])[0]!
       expect(call[0]).toBe('uiState')
-      const patch = call[1] as { terminalLayout: Array<{ layout: { kind: string } }> }
-      expect(patch.terminalLayout).toHaveLength(1)
-      expect(patch.terminalLayout[0]!.layout.kind).toBe('leaf')
+      const patch = call[1] as {
+        workbench: { tabs: Array<{ layout: { kind: string } }> }
+      }
+      expect(patch.workbench.tabs).toHaveLength(1)
+      expect(patch.workbench.tabs[0]!.layout.kind).toBe('leaf')
     } finally {
       vi.useRealTimers()
     }
@@ -602,5 +608,340 @@ describe('useTerminalStore（0.1.3 tabs + panes 模型）', () => {
     expect(s.activeId === a || s.panes[s.activeId]).toBeTruthy()
     expect(s.panes[s.activeId]).toBeTruthy()
     expect(tab).toBeTruthy()
+  })
+})
+
+describe('终端 Profile / Shell 集成（0.2.0）', () => {
+  it('defaultOpenOpts：发行版 defaultShell 覆盖全局，startupCwd 透传', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    const s = useTerminalStore()
+    const settings = useSettingsStore()
+    settings.wslDefaultShell = '/bin/bash'
+    const d = useDistrosStore()
+    d.items = [
+      runningDistro('Ubuntu', {
+        meta: {
+          ...runningDistro('Ubuntu').meta,
+          defaultShell: '/bin/zsh',
+          startupCwd: '/work',
+        },
+      }),
+    ] as never
+    expect(s.defaultOpenOpts('Ubuntu')).toEqual({ shell: '/bin/zsh', cwd: '/work' })
+  })
+
+  it('openDefault：terminalProfileId 存在时走 profile，不再直接 create', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    const s = useTerminalStore()
+    const settings = useSettingsStore()
+    settings.terminalProfiles = [
+      {
+        id: 'dev',
+        label: '开发',
+        launch: { kind: 'distro', distro: 'Ubuntu', shell: '/bin/zsh' },
+      },
+    ]
+    const d = useDistrosStore()
+    d.items = [
+      runningDistro('Ubuntu', {
+        meta: { ...runningDistro('Ubuntu').meta, terminalProfileId: 'dev' },
+      }),
+    ] as never
+    wslAPI.terminal.createProfile.mockResolvedValue({
+      ptyId: 'prof-1',
+      distro: 'Ubuntu',
+      shell: '/bin/zsh',
+      createdAt: 1,
+    })
+    await expect(s.openDefault('Ubuntu')).resolves.toBe('prof-1')
+    expect(wslAPI.terminal.createProfile).toHaveBeenCalledWith({
+      profileId: 'dev',
+      cols: 80,
+      rows: 24,
+    })
+    expect(wslAPI.terminal.create).not.toHaveBeenCalled()
+    expect(s.tabs.at(-1)?.title).toBe('开发')
+  })
+
+  it('openProfile：container / command / 失败分支', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    const s = useTerminalStore()
+    wslAPI.terminal.createProfile.mockResolvedValueOnce({
+      ptyId: 'c1',
+      distro: 'web',
+      shell: '/bin/sh',
+      createdAt: 1,
+    })
+    await expect(
+      s.openProfile({
+        id: 'box',
+        label: '容器',
+        launch: { kind: 'container', containerId: 'web' },
+      }),
+    ).resolves.toBe('c1')
+    expect(s.panes.c1?.containerId).toBe('web')
+
+    wslAPI.terminal.createProfile.mockRejectedValueOnce({
+      code: 'DISTRO_NOT_RUNNING',
+      message: 'not running',
+      recoverable: true,
+    })
+    await expect(
+      s.openProfile({
+        id: 'dev',
+        label: '开发',
+        launch: { kind: 'distro', distro: 'Ubuntu' },
+      }),
+    ).resolves.toBeNull()
+    expect(s.lastError?.message).toBe('not running')
+  })
+
+  it('createPaneSession：设置开启且已安装时才请求 Shell 集成；探测失败降级', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    const settings = useSettingsStore()
+    const s = useTerminalStore()
+    const d = useDistrosStore()
+    d.items = [runningDistro('Ubuntu')] as never
+    wslAPI.terminal.create.mockImplementation(async (o: any) => ({
+      ptyId: freshId('si'),
+      distro: o.distro,
+      shell: o.shell || '/bin/bash',
+      createdAt: 1,
+    }))
+
+    settings.terminalShellIntegration = 'on'
+    wslAPI.shellIntegration.status.mockResolvedValueOnce({ state: 'missing' })
+    await s.open('Ubuntu', { shell: '/bin/bash' })
+    expect(wslAPI.terminal.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shellIntegration: false }),
+    )
+
+    // 缓存 60s 内不重复探测；清除缓存后改为 installed → true
+    const { invalidateShellIntegrationCache } = await import('../../src/renderer/stores/terminal')
+    invalidateShellIntegrationCache()
+    wslAPI.shellIntegration.status.mockResolvedValueOnce({ state: 'installed' })
+    await s.open('Ubuntu', { shell: '/bin/bash' })
+    expect(wslAPI.terminal.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shellIntegration: true }),
+    )
+
+    // 探测抛错 → 降级 false
+    invalidateShellIntegrationCache()
+    wslAPI.shellIntegration.status.mockRejectedValueOnce(new Error('probe'))
+    await s.open('Ubuntu', { shell: '/bin/bash' })
+    expect(wslAPI.terminal.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shellIntegration: false }),
+    )
+  })
+})
+
+describe('recover 边界（0.2.0 覆盖率补强）', () => {
+  it('ui-state 读取失败/形状非法时降级为空布局并收编全部存活会话', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    wslAPI.terminal.list.mockResolvedValue([
+      { ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 1 },
+      { ptyId: 'p2', distro: 'D', shell: '/bin/sh', createdAt: 2 },
+    ])
+    wslAPI.config.get.mockRejectedValueOnce(new Error('ui down'))
+    const s = useTerminalStore()
+    await s.recover()
+    expect(s.tabs).toHaveLength(2)
+
+    setActivePinia(createPinia())
+    const s2 = useTerminalStore()
+    wslAPI.config.get.mockResolvedValueOnce({ terminalLayout: 'bad-shape' } as never)
+    await s2.recover()
+    expect(s2.tabs).toHaveLength(2)
+  })
+
+  it('布局中的重复/已存在 pty 被跳过；活动指针不在标签中时回落到首个标签', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    wslAPI.terminal.list.mockResolvedValue([
+      { ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 1 },
+    ])
+    wslAPI.config.get.mockResolvedValueOnce({
+      terminalLayout: [
+        { id: 't1', title: 'one', layout: { kind: 'leaf', ptyId: 'p1' } },
+        { id: 't2', title: 'dup', layout: { kind: 'leaf', ptyId: 'p1' } },
+      ],
+    } as never)
+    const s = useTerminalStore()
+    s.activeTabId = 'ghost-tab'
+    await s.recover()
+    expect(s.tabs).toHaveLength(1)
+    expect(s.activeTabId).toBe('t1')
+    expect(s.activeId).toBe('p1')
+  })
+
+  it('list 返回空数组时保持空状态（不访问 ui-state）', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    wslAPI.terminal.list.mockResolvedValueOnce([])
+    const s = useTerminalStore()
+    await s.recover()
+    expect(s.tabs).toHaveLength(0)
+    expect(wslAPI.config.get).not.toHaveBeenCalled()
+  })
+})
+
+describe('标签/面板指针边界（0.2.0 覆盖率补强）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    __terminalBuffersForTest.reset()
+    wslAPI.terminal.kill.mockResolvedValue(undefined)
+    wslAPI.terminal.create.mockImplementation(async (o: any) => ({
+      ptyId: freshId('edge'),
+      distro: o.distro,
+      shell: o.shell || '/bin/bash',
+      createdAt: Date.now(),
+    }))
+  })
+
+  it('未知标签/面板操作安全返回；pickPane 记忆失效回退首面板', async () => {
+    const s = useTerminalStore()
+    expect(() => s.removeTabLocal('ghost')).not.toThrow()
+    await expect(s.closeTab('ghost')).resolves.toBeUndefined()
+    expect(wslAPI.terminal.kill).not.toHaveBeenCalled()
+    s.setActivePane('ghost')
+    s.setActiveTab('ghost')
+    expect(s.activeId).toBe('')
+
+    const a = (await s.open('A'))!
+    const b = (await s.open('B'))!
+    const tabA = s.tabs.find((t) => t.layout.kind === 'leaf' && t.layout.ptyId === a)!
+    s.paneMemory[tabA.id] = a
+    expect(s.pickPane(tabA)).toBe(a)
+    s.paneMemory[tabA.id] = 'missing'
+    expect(s.pickPane(tabA)).toBe(a)
+    s.setActivePane(b)
+    expect(s.activeTabId).toBe(
+      s.tabs.find((t) => t.layout.kind === 'leaf' && t.layout.ptyId === b)!.id,
+    )
+  })
+
+  it('reassignActive：无标签时清空；activeId 有效时保持', async () => {
+    const s = useTerminalStore()
+    s.reassignActive()
+    expect(s.activeId).toBe('')
+    expect(s.activeTabId).toBe('')
+    const a = (await s.open('A'))!
+    s.setActivePane(a)
+    s.reassignActive()
+    expect(s.activeId).toBe(a)
+  })
+
+  it('closePane 面板不在任何标签：仍杀进程并重算活动；kill 失败抛出', async () => {
+    const s = useTerminalStore()
+    s.panes['orphan'] = {
+      ptyId: 'orphan',
+      distro: 'A',
+      shell: '/bin/bash',
+      createdAt: 1,
+      alive: true,
+    }
+    await s.closePane('orphan')
+    expect(wslAPI.terminal.kill).toHaveBeenCalledWith('orphan')
+    expect(s.panes.orphan).toBeUndefined()
+
+    s.panes['orphan2'] = {
+      ptyId: 'orphan2',
+      distro: 'A',
+      shell: '/bin/bash',
+      createdAt: 1,
+      alive: true,
+    }
+    wslAPI.terminal.kill.mockRejectedValueOnce({
+      code: 'TASK_FAILED',
+      message: 'kill failed',
+      recoverable: true,
+    })
+    await expect(s.closePane('orphan2')).rejects.toMatchObject({ message: 'kill failed' })
+    expect(s.lastError?.message).toBe('kill failed')
+  })
+
+  it('closeTab 杀进程失败：lastError 落地且不删除面板', async () => {
+    const s = useTerminalStore()
+    const a = (await s.open('A'))!
+    wslAPI.terminal.kill.mockRejectedValueOnce({
+      code: 'TASK_FAILED',
+      message: 'nope',
+      recoverable: true,
+    })
+    await expect(s.closeTab(s.activeTabId)).rejects.toMatchObject({ message: 'nope' })
+    expect(s.panes[a]).toBeTruthy()
+  })
+})
+
+describe('split 边界（0.2.0 覆盖率补强）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    __terminalBuffersForTest.reset()
+    wslAPI.terminal.create.mockImplementation(async (o: any) => ({
+      ptyId: freshId('split'),
+      distro: o.distro,
+      shell: o.shell || '/bin/bash',
+      createdAt: Date.now(),
+    }))
+  })
+
+  it('splitActive 无活动面板返回 null；splitPane 源面板不存在/标签不存在返回 null', async () => {
+    const s = useTerminalStore()
+    await expect(s.splitActive('row')).resolves.toBeNull()
+    await expect(s.splitPane('ghost', 'row')).resolves.toBeNull()
+    const a = (await s.open('A'))!
+    s.setActivePane(a)
+    // 删除标签但保留 pane 元数据：源面板找不到所属标签
+    s.tabs = []
+    await expect(s.splitPane(a, 'col')).resolves.toBeNull()
+  })
+})
+
+describe('终端 Profile 边界（0.2.0）', () => {
+  it('openProfile 达到会话上限 / 同 profile 并发去重 / theme 透传', async () => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    const s = useTerminalStore()
+    s.maxSessions = 1
+    s.panes = {
+      p1: { ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 1, alive: true },
+    }
+    s.tabs = [{ id: 'p1', title: 't', layout: { kind: 'leaf', ptyId: 'p1' }, createdAt: 1 }]
+    await expect(
+      s.openProfile({ id: 'p', label: 'P', launch: { kind: 'distro', distro: 'U' } }),
+    ).resolves.toBeNull()
+    expect(s.lastError?.message).toContain('上限')
+
+    setActivePinia(createPinia())
+    const s2 = useTerminalStore()
+    let resolveCreate!: (v: unknown) => void
+    wslAPI.terminal.createProfile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve
+        }),
+    )
+    const p1 = s2.openProfile({
+      id: 'dev',
+      label: '开发',
+      theme: 'dark',
+      launch: { kind: 'distro', distro: 'U' },
+    })
+    const p2 = s2.openProfile({
+      id: 'dev',
+      label: '开发',
+      launch: { kind: 'distro', distro: 'U' },
+    })
+    await expect(p2).resolves.toBeNull()
+    resolveCreate({ ptyId: 'p1', distro: 'U', shell: '/bin/bash', createdAt: 1 })
+    await expect(p1).resolves.toBe('p1')
+    expect(s2.panes.p1?.theme).toBe('dark')
   })
 })

@@ -126,3 +126,78 @@ describe('useWslConfig（0.1.3 .wslconfig 编辑状态机）', () => {
     expect(conf.loading.value).toBe(false)
   })
 })
+
+describe('useWslConfig 边界/默认 API（0.2.0 覆盖率补强）', () => {
+  it('setMode 同值幂等；raw→form 并入基线；setRaw 在 form 模式重建', async () => {
+    const { api } = makeApi()
+    const conf = useWslConfig({ api })
+    await conf.load()
+    const rawBefore = conf.raw.value
+    conf.setMode('form')
+    expect(conf.raw.value).toBe(rawBefore)
+    conf.setField('wsl2', 'memory', '16GB')
+    conf.setMode('raw')
+    expect(conf.raw.value).toContain('memory=16GB')
+    conf.setRaw('[wsl2]\nprocessors=2')
+    conf.setMode('form')
+    expect(conf.model.value.wsl2.processors).toBe(2)
+
+    conf.setRaw('[wsl2]\nmemory=4GB')
+    expect(conf.model.value.wsl2.memory).toBe('4GB')
+    expect(conf.isDirty.value).toBe(true)
+  })
+
+  it('setField 未知 section / undefined 删除；clearField 未知 section 与重复 id', async () => {
+    const { api } = makeApi()
+    const conf = useWslConfig({ api })
+    await conf.load()
+    conf.setField('nope', 'x', 1)
+    conf.setField('wsl2', 'memory', undefined)
+    expect(conf.model.value.wsl2.memory).toBeUndefined()
+    conf.clearField('nope', 'x')
+    conf.clearField('wsl2', 'processors')
+    conf.clearField('wsl2', 'processors')
+    const changes = conf.pendingChanges()
+    expect(changes.filter((c) => c.kind === 'remove' && c.key === 'processors')).toHaveLength(1)
+    expect(conf.fieldError(WSL_CONFIG_FIELDS.find((f) => f.key === 'memory')!)).toBeNull()
+  })
+
+  it('save 并发：旧响应晚到不覆盖新状态；返回空路径时保留原路径', async () => {
+    const { api } = makeApi()
+    const conf = useWslConfig({ api })
+    await conf.load()
+    let resolveOld!: (v: { path: string }) => void
+    api.write
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          }),
+      )
+      .mockImplementationOnce(async () => ({ path: '' }))
+    conf.setField('wsl2', 'memory', '1GB')
+    const p1 = conf.save()
+    conf.setField('wsl2', 'memory', '2GB')
+    const p2 = conf.save()
+    await p2
+    expect(conf.model.value.wsl2.memory).toBe('2GB')
+    expect(conf.filePath.value).toBe('C:\\Users\\me\\.wslconfig')
+    resolveOld({ path: 'old' })
+    await p1
+    expect(conf.filePath.value).toBe('C:\\Users\\me\\.wslconfig')
+  })
+
+  it('无 window.wslAPI 时默认 API 安全降级', async () => {
+    const g = globalThis as { window?: unknown }
+    const saved = g.window
+    g.window = undefined
+    try {
+      const conf = useWslConfig()
+      await conf.load()
+      expect(conf.exists.value).toBe(false)
+      await expect(conf.save()).resolves.toEqual({ path: '' })
+    } finally {
+      g.window = saved
+    }
+  })
+})

@@ -29,6 +29,7 @@ const settings = useSettingsStore()
 const viewMode = ref<'card' | 'table'>('card')
 const search = ref('')
 const tagFilter = ref<string | null>(null)
+const showHidden = ref(false)
 const detailOpen = ref(false)
 const detailName = ref('')
 /** 手动刷新标识（review 0.1.2 根治）：轮询刷新不得让按钮周期性闪 loading */
@@ -65,15 +66,17 @@ watch(
   { immediate: true },
 )
 
+const baseItems = computed(() => (showHidden.value ? distros.items : distros.visibleItems))
+
 const tagOptions = computed(() => {
   const set = new Set<string>()
-  for (const d of distros.items) for (const t of d.meta?.tags ?? []) set.add(t)
+  for (const d of baseItems.value) for (const t of d.meta?.tags ?? []) set.add(t)
   return [...set].map((t) => ({ label: t, value: t }))
 })
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
-  return distros.items.filter((d) => {
+  return baseItems.value.filter((d) => {
     if (tagFilter.value && !(d.meta?.tags ?? []).includes(tagFilter.value)) return false
     if (!q) return true
     return (
@@ -192,6 +195,14 @@ function onDetailTerminal(name: string) {
           <n-radio-button value="table"> 表格 </n-radio-button>
         </n-radio-group>
         <n-button secondary :loading="refreshing" @click="manualRefresh"> 刷新 </n-button>
+        <n-button
+          v-if="distros.hiddenCount > 0"
+          text
+          type="primary"
+          @click="showHidden = !showHidden"
+        >
+          {{ showHidden ? '隐藏内部发行版' : `显示隐藏（${distros.hiddenCount}）` }}
+        </n-button>
       </div>
     </header>
 
@@ -440,7 +451,7 @@ function onDetailTerminal(name: string) {
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }

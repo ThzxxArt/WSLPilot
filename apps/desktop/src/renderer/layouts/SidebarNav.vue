@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NTooltip } from 'naive-ui'
 
-const props = defineProps<{ collapsed: boolean }>()
+const props = defineProps<{ collapsed: boolean; locked?: boolean }>()
 const emit = defineEmits<{ 'update:collapsed': [boolean] }>()
 
 const route = useRoute()
@@ -30,6 +30,7 @@ const navItems = [
   { name: 'dashboard', title: '驾驶舱', icon: '🛫' },
   { name: 'distros', title: '发行版', icon: '🐧' },
   { name: 'terminal', title: '终端', icon: '⌨️' },
+  { name: 'containers', title: '容器', icon: '📦' },
   { name: 'network', title: '网络', icon: '🌐' },
   { name: 'backup', title: '备份迁移', icon: '💾' },
   { name: 'devices', title: 'USB 设备', icon: '🔌' },
@@ -76,6 +77,7 @@ function toggle() {
     </nav>
 
     <button
+      v-if="!locked"
       class="collapse-btn"
       :disabled="narrow"
       :title="narrow ? '窗口过窄，侧栏自动折叠' : effectiveCollapsed ? '展开侧栏' : '折叠侧栏'"
@@ -101,7 +103,7 @@ function toggle() {
 }
 
 .sidebar.collapsed {
-  width: 64px;
+  width: 56px;
 }
 
 .nav {

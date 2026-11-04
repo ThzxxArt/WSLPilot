@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NDropdown, useMessage } from 'naive-ui'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { NButton, NDropdown, useDialog, useMessage } from 'naive-ui'
 import { EmptyState } from '@wslpilot/ui'
 import { useRoute } from 'vue-router'
-import { useTerminalStore } from '../stores/terminal'
+import type { CommandBlock } from '../features/terminal/command-blocks'
+import { useTerminalStore, invalidateShellIntegrationCache } from '../stores/terminal'
 import { useDistrosStore } from '../stores/distros'
 import { useSettingsStore } from '../stores/settings'
+import { useWorkbenchStore } from '../stores/workbench'
 import { errorLine } from '../composables/useAppError'
+import type { ShellIntegrationStatus } from '@wslpilot/shared'
 import TerminalTabs, { type TerminalTabItem } from '../features/terminal/TerminalTabs.vue'
 import TerminalToolbar from '../features/terminal/TerminalToolbar.vue'
 import XtermPane from '../features/terminal/XtermPane.vue'
+import ShellIntegrationBanner from '../features/terminal/ShellIntegrationBanner.vue'
 import { DEFAULT_TERMINAL_PREFS, type TerminalFontPrefs } from '../features/terminal/theme'
 import {
   leafIds,
@@ -27,7 +31,9 @@ const route = useRoute()
 const terminal = useTerminalStore()
 const distros = useDistrosStore()
 const settings = useSettingsStore()
+const workbench = useWorkbenchStore()
 const message = useMessage()
+const dialog = useDialog()
 
 /** 每个 ptyId 一个 XtermPane 实例（跨标签/分屏保活，切活动不丢现场） */
 const paneRefs = new Map<string, InstanceType<typeof XtermPane>>()
@@ -39,6 +45,22 @@ const lastPrefs = ref({ caseSensitive: false, regex: false })
 const searchState = ref({ index: -1, count: 0 })
 const atBottom = ref(true)
 const panesEl = ref<HTMLElement | null>(null)
+
+// ── Shell 集成 / 命令块（0.2.0）──
+const shellStatus = ref<ShellIntegrationStatus | null>(null)
+const shellBusy = ref(false)
+const shellBannerDismissed = ref(false)
+const commandBlocks = ref<Record<string, CommandBlock | null>>({})
+const lastBlock = computed<CommandBlock | null>(() => {
+  const block = commandBlocks.value[terminal.activeId]
+  return block && block.endLine !== undefined ? block : null
+})
+const lastBlockLabel = computed(() => {
+  const b = lastBlock.value
+  if (!b) return ''
+  if (b.exitCode === undefined) return '命令块'
+  return `退出码 ${b.exitCode}${b.durationMs !== undefined ? ` · ${(b.durationMs / 1000).toFixed(2)}s` : ''}`
+})
 let timer: number | undefined
 /** 分屏拖拽的 window 监听清理（拖拽中切路由/卸载时兜底） */
 let dividerDragCleanup: (() => void) | null = null
@@ -57,13 +79,17 @@ const prefs = computed<TerminalFontPrefs>(() => ({
   fontFamily: settings.terminalFontFamily,
   fontSize: settings.terminalFontSize,
   lineHeight: settings.terminalLineHeight,
+  letterSpacing: settings.terminalLetterSpacing,
   cursorStyle: settings.terminalCursorStyle,
   cursorBlink: settings.terminalCursorBlink,
+  cursorInactiveStyle: settings.terminalCursorInactiveStyle,
   scrollback: settings.terminalScrollback,
+  minimumContrastRatio: settings.terminalMinimumContrastRatio,
+  smoothScroll: settings.terminalSmoothScroll,
 }))
 
 /** 终端只服务运行中发行版（review 状态门禁）：下拉与默认目标都只取 Running */
-const runningDistros = computed(() => distros.items.filter((d) => d.state === 'Running'))
+const runningDistros = computed(() => distros.visibleItems.filter((d) => d.state === 'Running'))
 
 const distroOptions = computed(() =>
   runningDistros.value.map((d) => ({
@@ -191,6 +217,15 @@ onMounted(async () => {
   const wanted = route.query.distro
   if (typeof wanted === 'string' && wanted) {
     await openOrActivate(wanted)
+  } else if (terminal.tabs.length === 0 && settings.terminalDefaultProfileId) {
+    const profile = settings.terminalProfiles.find(
+      (p) => p.id === settings.terminalDefaultProfileId,
+    )
+    if (profile) {
+      await openProfile(profile.id)
+    } else if (defaultDistro.value) {
+      await create(defaultDistro.value)
+    }
   } else if (terminal.tabs.length === 0 && defaultDistro.value) {
     await create(defaultDistro.value)
   } else if (!terminal.activeTabId && terminal.tabs.length > 0) {
@@ -203,22 +238,29 @@ onMounted(async () => {
  * KeepAlive 恢复：路由切回终端时不重建 xterm，但需要重新 fit（隐藏期间尺寸为 0），
  * 并确保 query 意图仍被处理（deactivated 期间 watcher 也会跑，openOrActivate 幂等）。
  */
-onActivated(() => {
-  startTimer()
-  const wanted = route.query.distro
-  if (typeof wanted === 'string' && wanted) void openOrActivate(wanted)
-  requestAnimationFrame(() => {
-    activePane()?.fit()
-    activePane()?.focus()
-  })
-})
+const workbenchActive = computed(
+  () => route.meta?.layout === 'workbench' || route.name === 'terminal',
+)
 
-onDeactivated(() => {
-  if (timer) {
-    window.clearInterval(timer)
-    timer = undefined
-  }
-})
+/** 工作台常驻后不再经过 KeepAlive 的 activated/deactivated，用路由态驱动显隐行为 */
+watch(
+  workbenchActive,
+  (active) => {
+    if (active) {
+      startTimer()
+      const wanted = route.query.distro
+      if (typeof wanted === 'string' && wanted) void openOrActivate(wanted)
+      requestAnimationFrame(() => {
+        activePane()?.fit()
+        activePane()?.focus()
+      })
+    } else if (timer) {
+      window.clearInterval(timer)
+      timer = undefined
+    }
+  },
+  { immediate: true },
+)
 
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
@@ -256,7 +298,7 @@ async function openOrActivate(distro: string) {
 watch(
   () => route.query.distro,
   async (d: unknown) => {
-    if (typeof d === 'string' && d) {
+    if (workbenchActive.value && typeof d === 'string' && d) {
       await openOrActivate(d)
     }
   },
@@ -289,7 +331,28 @@ async function create(payload: string | { distro: string; shell?: string; cwd?: 
   }
 }
 
+function confirmClose(alive: boolean, title: string): Promise<boolean> {
+  const needConfirm =
+    alive && (settings.terminalConfirmCloseWithRunningProcess || settings.workbenchConfirmClosePane)
+  if (!needConfirm) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '关闭终端会话',
+      content: `${title} 仍在运行，关闭会终止其中的进程。确定继续？`,
+      positiveText: '关闭',
+      negativeText: '取消',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
+
 async function closeTab(id: string) {
+  const tab = terminal.tabs.find((t) => t.id === id)
+  if (!tab) return
+  const alive = leafIds(tab.layout).some((paneId) => terminal.panes[paneId]?.alive)
+  if (!(await confirmClose(alive, `标签「${tab.title}」`))) return
   try {
     await terminal.closeTab(id)
     message.success('终端标签已关闭')
@@ -298,13 +361,20 @@ async function closeTab(id: string) {
   }
 }
 
-async function closePane() {
-  if (!terminal.activeId) return
+async function closePaneById(id: string) {
+  const pane = terminal.panes[id]
+  if (!pane) return
+  if (!(await confirmClose(pane.alive, `面板「${pane.distro}」`))) return
   try {
-    await terminal.closePane(terminal.activeId)
+    await terminal.closePane(id)
   } catch (e) {
     message.error(errorLine(e, '关闭面板失败'))
   }
+}
+
+async function closePane() {
+  if (!terminal.activeId) return
+  await closePaneById(terminal.activeId)
 }
 
 async function split(dir: 'row' | 'col') {
@@ -408,14 +478,142 @@ function onRequestSearch() {
   void toolbarRef.value?.openSearch()
 }
 
+// ── 工作台顶栏（0.2.0）──
+const showPaneHeaders = computed(() => {
+  const mode = settings.workbenchShowPaneHeaders
+  if (mode === 'always') return true
+  if (mode === 'never') return false
+  return activeTabPaneCount.value > 1
+})
+const activeDistroLabel = computed(() => {
+  const p = terminal.activePane
+  if (!p) return '终端'
+  return p.distro || '终端'
+})
+const sessionRailOpen = computed({
+  get: () => workbench.sessionRailOpen,
+  set: (v: boolean) => {
+    workbench.sessionRailOpen = v
+  },
+})
+const toolbarOpen = computed({
+  get: () => workbench.toolbarOpen,
+  set: (v: boolean) => {
+    workbench.toolbarOpen = v
+  },
+})
+function toggleFocus() {
+  workbench.toggleFocus()
+}
+function windowAction(action: 'minimize' | 'maximize' | 'close') {
+  const api = window.wslAPI?.app
+  if (!api) return
+  const p =
+    action === 'minimize' ? api.minimize() : action === 'maximize' ? api.maximize() : api.close()
+  void p.catch((e: unknown) => console.error('[WSLPilot] 窗口操作失败:', e))
+}
+function onWorkbenchKey(e: KeyboardEvent) {
+  if (!workbenchActive.value) return
+  if (e.key === 'Escape' && workbench.focusMode) {
+    workbench.exitFocus()
+    return
+  }
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyP') {
+    e.preventDefault()
+    workbench.toggleToolbar()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onWorkbenchKey))
+onUnmounted(() => window.removeEventListener('keydown', onWorkbenchKey))
+
 // ── 面板右键菜单（0.1.3）──
 const menu = ref({ show: false, x: 0, y: 0, paneId: '' })
+
+function onCommandBlock(payload: { ptyId: string; block: CommandBlock }) {
+  commandBlocks.value = { ...commandBlocks.value, [payload.ptyId]: payload.block }
+}
+
+async function openProfile(profileId: string) {
+  const profile = settings.terminalProfiles.find((p) => p.id === profileId)
+  if (!profile) return
+  const id = await terminal.openProfile(profile)
+  if (!id) message.error(errorLine(terminal.lastError, '打开终端 profile 失败'))
+}
+
+async function refreshShellStatus() {
+  const pane = terminal.activePane
+  if (
+    !pane ||
+    pane.containerId ||
+    settings.terminalShellIntegration === 'off' ||
+    !window.wslAPI.shellIntegration
+  ) {
+    shellStatus.value = null
+    return
+  }
+  try {
+    shellStatus.value = await window.wslAPI.shellIntegration.status(pane.distro, pane.shell)
+  } catch {
+    // 状态探测失败不阻塞终端；横幅不显示（用户仍可手动刷新）
+    shellStatus.value = null
+  }
+}
+
+watch(
+  () => [
+    terminal.activeId,
+    terminal.activePane?.distro,
+    terminal.activePane?.shell,
+    terminal.activePane?.containerId,
+    settings.terminalShellIntegration,
+  ],
+  () => {
+    shellBannerDismissed.value = false
+    void refreshShellStatus()
+  },
+  { immediate: true },
+)
+
+async function installShellIntegration() {
+  const pane = terminal.activePane
+  if (!pane || shellBusy.value) return
+  shellBusy.value = true
+  try {
+    shellStatus.value = await window.wslAPI.shellIntegration.install(pane.distro, pane.shell)
+    invalidateShellIntegrationCache(pane.distro)
+    message.success('Shell 集成已安装；新开的终端生效')
+  } catch (e) {
+    message.error(errorLine(e, '安装 Shell 集成失败'))
+  } finally {
+    shellBusy.value = false
+  }
+}
+
+async function removeShellIntegration() {
+  const pane = terminal.activePane
+  if (!pane || shellBusy.value) return
+  shellBusy.value = true
+  try {
+    shellStatus.value = await window.wslAPI.shellIntegration.remove(pane.distro, pane.shell)
+    invalidateShellIntegrationCache(pane.distro)
+    message.success('Shell 集成已移除（用户 rc 未被修改）')
+  } catch (e) {
+    message.error(errorLine(e, '移除 Shell 集成失败'))
+  } finally {
+    shellBusy.value = false
+  }
+}
 
 function onPaneContextMenu(payload: { x: number; y: number; ptyId: string }) {
   menu.value = { show: true, x: payload.x, y: payload.y, paneId: payload.ptyId }
   // 右键即聚焦该面板（后续工具栏动作作用于它）
   terminal.setActivePane(payload.ptyId)
 }
+
+const menuPaneBlock = computed<CommandBlock | null>(() => {
+  const block = commandBlocks.value[menu.value.paneId]
+  return block && block.endLine !== undefined ? block : null
+})
 
 const menuOptions = computed(() => [
   { label: '复制', key: 'copy' },
@@ -425,6 +623,13 @@ const menuOptions = computed(() => [
   { type: 'divider', key: 'd1' },
   { label: '清屏', key: 'clear' },
   { label: '滚动到底部', key: 'bottom' },
+  ...(menuPaneBlock.value
+    ? [
+        { type: 'divider' as const, key: 'db' },
+        { label: '复制上一条输出', key: 'copyOutput' },
+        ...(menuPaneBlock.value.command ? [{ label: '重跑上一条命令', key: 'rerun' }] : []),
+      ]
+    : []),
   { type: 'divider', key: 'd2' },
   { label: '左右分屏', key: 'splitRow', disabled: !terminal.canSplit },
   { label: '上下分屏', key: 'splitCol', disabled: !terminal.canSplit },
@@ -454,6 +659,12 @@ function onMenuSelect(key: string) {
     case 'bottom':
       pane?.scrollToBottom()
       break
+    case 'copyOutput':
+      pane?.copyLastOutput()
+      break
+    case 'rerun':
+      pane?.rerunLastCommand()
+      break
     case 'splitRow':
       void terminal.splitPane(menu.value.paneId, 'row').then((id) => {
         if (!id && terminal.lastError) message.error(errorLine(terminal.lastError))
@@ -465,9 +676,7 @@ function onMenuSelect(key: string) {
       })
       break
     case 'closePane':
-      void terminal.closePane(menu.value.paneId).catch((e: unknown) => {
-        message.error(errorLine(e, '关闭面板失败'))
-      })
+      void closePaneById(menu.value.paneId)
       break
   }
 }
@@ -479,34 +688,239 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="terminal-view">
-    <header class="page-header">
-      <div>
-        <h1>终端</h1>
-        <p class="sub">
-          node-pty + xterm.js · 会话 {{ terminal.aliveCount }}/{{ terminal.maxSessions }}
-          <template v-if="terminal.activePane"> · {{ terminal.activePane.distro }} </template>
-          <template v-if="activeTabPaneCount > 1"> · 面板 {{ activeTabPaneCount }} </template>
-        </p>
+  <div
+    class="terminal-view"
+    :class="{ focus: workbench.focusMode, compact: settings.workbenchDensity === 'compact' }"
+  >
+    <header class="workbench-bar">
+      <div class="wb-brand">
+        <span class="wb-logo" aria-hidden="true" />
+        <span class="wb-title">终端</span>
+        <span class="wb-distro">{{ activeDistroLabel }}</span>
+      </div>
+
+      <div v-if="settings.workbenchTabPosition !== 'left'" class="wb-tabs">
+        <TerminalTabs
+          :tabs="tabItems"
+          :active-tab-id="terminal.activeTabId"
+          :max-sessions="terminal.maxSessions"
+          :distro-options="distroOptions"
+          :default-distro="defaultDistro"
+          :default-shell="defaultShell"
+          :creating-distros="terminal.creatingDistros"
+          @create="create"
+          @select="terminal.setActiveTab"
+          @close="closeTab"
+          @rename="onRename"
+          @reorder="onReorder"
+        />
+      </div>
+
+      <div class="wb-actions">
+        <button
+          class="wb-btn"
+          type="button"
+          aria-label="搜索终端"
+          title="搜索（Ctrl+Shift+F）"
+          @click="onRequestSearch"
+        >
+          搜索
+        </button>
+        <button
+          class="wb-btn"
+          type="button"
+          aria-label="切换工具栏"
+          title="工具栏（Ctrl+Shift+P）"
+          @click="workbench.toggleToolbar()"
+        >
+          操作
+        </button>
+        <button
+          class="wb-btn"
+          type="button"
+          aria-label="切换会话侧栏"
+          :aria-pressed="sessionRailOpen"
+          @click="workbench.toggleSessionRail()"
+        >
+          会话
+        </button>
+        <button class="wb-btn" type="button" aria-label="专注模式" @click="toggleFocus">
+          专注
+        </button>
+        <span class="wb-sep" aria-hidden="true" />
+        <button class="win-btn" type="button" aria-label="最小化" @click="windowAction('minimize')">
+          —
+        </button>
+        <button class="win-btn" type="button" aria-label="最大化" @click="windowAction('maximize')">
+          □
+        </button>
+        <button
+          class="win-btn win-close"
+          type="button"
+          aria-label="关闭"
+          @click="windowAction('close')"
+        >
+          ×
+        </button>
       </div>
     </header>
 
-    <TerminalTabs
-      :tabs="tabItems"
-      :active-tab-id="terminal.activeTabId"
-      :max-sessions="terminal.maxSessions"
-      :distro-options="distroOptions"
-      :default-distro="defaultDistro"
-      :default-shell="defaultShell"
-      :creating-distros="terminal.creatingDistros"
-      @create="create"
-      @select="terminal.setActiveTab"
-      @close="closeTab"
-      @rename="onRename"
-      @reorder="onReorder"
+    <ShellIntegrationBanner
+      v-if="!shellBannerDismissed && !workbench.focusMode"
+      class="shell-banner-float"
+      :status="shellStatus"
+      :busy="shellBusy"
+      @install="installShellIntegration"
+      @remove="removeShellIntegration"
+      @dismiss="shellBannerDismissed = true"
     />
 
-    <div class="toolbar-row">
+    <div class="workbench-body">
+      <div
+        v-if="settings.workbenchTabPosition === 'left' && !workbench.focusMode"
+        class="left-tabs"
+      >
+        <TerminalTabs
+          vertical
+          :tabs="tabItems"
+          :active-tab-id="terminal.activeTabId"
+          :max-sessions="terminal.maxSessions"
+          :distro-options="distroOptions"
+          :default-distro="defaultDistro"
+          :default-shell="defaultShell"
+          :creating-distros="terminal.creatingDistros"
+          @create="create"
+          @select="terminal.setActiveTab"
+          @close="closeTab"
+          @rename="onRename"
+          @reorder="onReorder"
+        />
+      </div>
+      <aside
+        v-if="sessionRailOpen && !workbench.focusMode"
+        class="session-rail"
+        :style="{ width: `${settings.workbenchSessionRailWidth}px` }"
+        aria-label="终端会话"
+      >
+        <div class="rail-head">
+          <span>会话</span>
+          <button
+            class="wb-btn"
+            type="button"
+            aria-label="关闭会话侧栏"
+            @click="workbench.toggleSessionRail()"
+          >
+            ×
+          </button>
+        </div>
+        <div class="rail-group">运行中发行版</div>
+        <button
+          v-for="d in runningDistros"
+          :key="d.name"
+          class="rail-item"
+          type="button"
+          @click="openOrActivate(d.name)"
+        >
+          <span class="rail-dot" />
+          {{ d.meta?.alias || d.name }}
+        </button>
+        <p v-if="runningDistros.length === 0" class="rail-empty">没有运行中的发行版</p>
+        <template v-if="settings.terminalProfiles.length > 0">
+          <div class="rail-group">终端 Profile</div>
+          <button
+            v-for="p in settings.terminalProfiles"
+            :key="p.id"
+            class="rail-item"
+            type="button"
+            :title="p.launch.kind === 'distro' ? p.launch.distro : p.label"
+            @click="openProfile(p.id)"
+          >
+            <span class="rail-profile">▸</span>
+            {{ p.label }}
+          </button>
+        </template>
+        <div class="rail-group">打开的标签</div>
+        <button
+          v-for="t in terminal.tabs"
+          :key="t.id"
+          class="rail-item"
+          :class="{ active: t.id === terminal.activeTabId }"
+          type="button"
+          @click="terminal.setActiveTab(t.id)"
+        >
+          {{ t.title }}
+        </button>
+      </aside>
+
+      <div ref="panesEl" class="panes">
+        <!-- 扁平保活：所有标签的叶子按 ptyId 渲染为绝对定位 host，分屏只改矩形 -->
+        <div
+          v-for="tab in terminal.tabs"
+          v-show="tab.id === terminal.activeTabId"
+          :key="tab.id"
+          class="tab-panes"
+        >
+          <div
+            v-for="p in layoutRects(tab.layout)"
+            :key="p.ptyId"
+            class="pane-host"
+            :class="{ active: p.ptyId === terminal.activeId }"
+            :style="rectStyle(p)"
+            @mousedown.capture="terminal.setActivePane(p.ptyId)"
+          >
+            <div v-if="showPaneHeaders" class="pane-header">
+              <span class="pane-title">{{ terminal.panes[p.ptyId]?.distro || '终端' }}</span>
+              <span class="pane-cwd">{{ terminal.panes[p.ptyId]?.cwd || '~' }}</span>
+              <button
+                class="pane-btn"
+                type="button"
+                aria-label="关闭面板"
+                @click.stop="closePaneById(p.ptyId)"
+              >
+                ×
+              </button>
+            </div>
+            <XtermPane
+              :ref="(el) => setPaneRef(p.ptyId, el)"
+              :pty-id="p.ptyId"
+              :prefs="prefs"
+              :theme-override="terminal.panes[p.ptyId]?.theme"
+              :initial-buffer="terminal.getBuffer(p.ptyId)"
+              @cursor-move="onCursorMove"
+              @request-search="onRequestSearch"
+              @search-results="(payload) => onSearchResults(p.ptyId, payload)"
+              @at-bottom="(v) => onAtBottom(p.ptyId, v)"
+              @context-menu="onPaneContextMenu"
+              @command-block="onCommandBlock"
+            />
+          </div>
+          <div
+            v-for="d in layoutDividers(tab.layout)"
+            :key="d.path.join('.') || 'root'"
+            class="pane-divider"
+            :class="d.dir"
+            role="separator"
+            :aria-label="d.dir === 'row' ? '左右分屏分隔条' : '上下分屏分隔条'"
+            :style="dividerStyle(d)"
+            @pointerdown="onDividerDown(tab.id, d, $event)"
+          />
+        </div>
+
+        <EmptyState
+          v-if="terminal.tabs.length === 0"
+          description="还没有终端会话"
+          illustration="🖥️"
+          class="empty"
+        >
+          <n-button type="primary" :disabled="!defaultDistro" @click="create(defaultDistro)">
+            打开 {{ defaultDistro || '终端' }}
+          </n-button>
+        </EmptyState>
+      </div>
+    </div>
+
+    <!-- 工具栏按需浮层：不占据终端高度（0.2.0） -->
+    <div v-show="toolbarOpen && !workbench.focusMode" class="toolbar-overlay">
       <TerminalToolbar
         ref="toolbarRef"
         :can-zoom="!!terminal.activePane"
@@ -532,65 +946,18 @@ onUnmounted(() => {
       />
     </div>
 
-    <div ref="panesEl" class="panes">
-      <!--
-        扁平保活（0.1.4）：所有标签的叶子都按 ptyId 渲染为独立绝对定位 host，
-        分屏只改变矩形、不改变组件树位置 —— 因此 split/close 不会销毁已有 xterm。
-      -->
-      <div
-        v-for="tab in terminal.tabs"
-        v-show="tab.id === terminal.activeTabId"
-        :key="tab.id"
-        class="tab-panes"
-      >
-        <div
-          v-for="p in layoutRects(tab.layout)"
-          :key="p.ptyId"
-          class="pane-host"
-          :class="{ active: p.ptyId === terminal.activeId }"
-          :style="rectStyle(p)"
-          @mousedown.capture="terminal.setActivePane(p.ptyId)"
-        >
-          <XtermPane
-            :ref="(el) => setPaneRef(p.ptyId, el)"
-            :pty-id="p.ptyId"
-            :prefs="prefs"
-            :initial-buffer="terminal.getBuffer(p.ptyId)"
-            @cursor-move="onCursorMove"
-            @request-search="onRequestSearch"
-            @search-results="(payload) => onSearchResults(p.ptyId, payload)"
-            @at-bottom="(v) => onAtBottom(p.ptyId, v)"
-            @context-menu="onPaneContextMenu"
-          />
-        </div>
-        <div
-          v-for="d in layoutDividers(tab.layout)"
-          :key="d.path.join('.') || 'root'"
-          class="pane-divider"
-          :class="d.dir"
-          role="separator"
-          :aria-label="d.dir === 'row' ? '左右分屏分隔条' : '上下分屏分隔条'"
-          :style="dividerStyle(d)"
-          @pointerdown="onDividerDown(tab.id, d, $event)"
-        />
-      </div>
-
-      <EmptyState
-        v-if="terminal.tabs.length === 0"
-        description="还没有终端会话"
-        illustration="🖥️"
-        class="empty"
-      >
-        <n-button type="primary" :disabled="!defaultDistro" @click="create(defaultDistro)">
-          打开 {{ defaultDistro || '终端' }}
-        </n-button>
-      </EmptyState>
-    </div>
-
-    <footer class="status">
+    <footer v-if="!workbench.focusMode && settings.workbenchShowStatusLine" class="status">
+      <span>{{ activeDistroLabel }}</span>
       <span>行 {{ cursorPos.row }} · 列 {{ cursorPos.col }}</span>
       <span>UTF-8</span>
       <span>会话时长 {{ elapsed }}</span>
+      <span
+        v-if="lastBlockLabel"
+        class="block-status"
+        :class="{ failed: lastBlock && lastBlock.exitCode !== 0 }"
+      >
+        {{ lastBlockLabel }}
+      </span>
       <span v-if="terminal.activePane && !terminal.activePane.alive" class="dead">
         已退出（代码 {{ terminal.activePane.exitCode }}）
       </span>
@@ -612,37 +979,211 @@ onUnmounted(() => {
 
 <style scoped>
 .terminal-view {
-  padding: 16px 20px 12px;
+  position: relative;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 1400px;
-  margin: 0 auto;
+  gap: 0;
+  max-width: none;
+  margin: 0;
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
+  background: var(--color-workbench-bg, var(--color-bg-canvas));
 }
 
-.page-header h1 {
-  font-size: 22px;
+.shell-banner-float {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  right: 0;
+  z-index: 8;
+}
+
+.workbench-bar {
+  -webkit-app-region: drag;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  user-select: none;
+}
+
+.wb-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.wb-logo {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--pilot-gradient-aurora, var(--color-accent));
+  box-shadow: 0 1px 6px -1px var(--color-accent-soft);
+}
+
+.wb-title {
+  font-size: 12.5px;
   font-weight: 650;
-  margin: 0;
   color: var(--color-text-primary);
 }
 
-.sub {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--color-text-secondary);
+.wb-distro {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 10.5px;
 }
 
-.toolbar-row {
+.wb-tabs {
+  flex: 1;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.wb-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.wb-btn,
+.win-btn {
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.wb-btn:hover,
+.win-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.win-btn {
+  width: 28px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.win-close:hover {
+  background: var(--color-danger);
+  color: #fff;
+}
+
+.wb-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--color-border-subtle);
+}
+
+.workbench-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.left-tabs {
+  width: 190px;
+  flex-shrink: 0;
+  padding: 6px;
+  border-right: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.session-rail {
+  width: var(--session-rail-w, 240px);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-right: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  overflow-y: auto;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--color-text-primary);
+}
+
+.rail-group {
+  padding: 10px 6px 4px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-item:hover,
+.rail-item.active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.rail-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  flex-shrink: 0;
+}
+
+.rail-profile {
+  color: var(--color-accent);
+  font-size: 11px;
+}
+
+.rail-empty {
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
 }
 
 .panes {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -663,16 +1204,59 @@ onUnmounted(() => {
   min-width: 0;
   min-height: 0;
   display: flex;
-  border-radius: var(--radius-md);
+  flex-direction: column;
+  border-radius: 0;
   outline: 1px solid transparent;
   transition: outline-color var(--dur-fast) var(--ease-standard);
+  background: var(--color-term-bg, #fbfcfe);
 }
 
 .pane-host.active {
   outline-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
-.pane-host > :deep(*) {
+.pane-header {
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+
+.pane-title {
+  font-weight: 650;
+  color: var(--color-text-primary);
+}
+
+.pane-cwd {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-tertiary);
+}
+
+.pane-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--color-text-tertiary);
+  line-height: 1;
+}
+
+.pane-btn:hover {
+  background: var(--color-danger);
+  color: #fff;
+}
+
+.pane-host > :deep(.xterm-host) {
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -704,15 +1288,68 @@ onUnmounted(() => {
 }
 
 .status {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  padding: 4px 2px;
+  height: 20px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-surface);
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+  user-select: none;
 }
 
 .dead {
   color: var(--color-warning);
+}
+
+.block-status {
+  color: var(--color-success);
+}
+
+.block-status.failed {
+  color: var(--color-danger);
+}
+
+.toolbar-overlay {
+  position: absolute;
+  top: 38px;
+  right: 8px;
+  z-index: 10;
+  max-width: calc(100% - 16px);
+  padding: 8px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+
+/* 专注模式：隐藏顶栏/状态行/侧栏，只保留终端与退出按钮 */
+.terminal-view.focus .workbench-bar,
+.terminal-view.focus .status {
+  display: none;
+}
+
+.terminal-view.compact .shell-banner-float {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  right: 0;
+  z-index: 8;
+}
+
+.workbench-bar {
+  height: 30px;
+}
+
+.terminal-view.compact .tab {
+  height: 22px;
+  font-size: 11px;
+}
+
+.terminal-view.compact .status {
+  height: 18px;
 }
 </style>

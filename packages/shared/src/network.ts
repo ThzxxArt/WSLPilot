@@ -189,7 +189,8 @@ export function normalizeNetworkMode(value: string): NetworkMode {
   if (s === 'mirrored') return 'mirrored'
   if (s === 'nat') return 'nat'
   if (s === 'bridged') return 'bridged'
-  if (s === 'virtioproxy') return 'virtioproxy'
+  if (s === 'virtioproxy' || s === 'consomme') return 'consomme'
+  if (s === 'none') return 'none'
   return 'unknown'
 }
 
@@ -213,8 +214,10 @@ export function mirrorModeSnippet(): string {
 export const NETWORK_MODE_LABEL: Record<NetworkMode, string> = {
   mirrored: '镜像 mirrored',
   nat: 'NAT',
-  bridged: '桥接 bridged',
-  virtioproxy: 'virtio 代理',
+  bridged: '桥接 bridged（已弃用）',
+  virtioproxy: 'Consomme（旧名 virtioproxy）',
+  consomme: 'Consomme',
+  none: '无网络 none',
   unknown: '未配置（默认 NAT）',
 }
 

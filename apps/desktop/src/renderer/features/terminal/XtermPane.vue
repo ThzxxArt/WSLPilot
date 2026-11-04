@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useDialog, useMessage } from 'naive-ui'
 import { Terminal } from '@xterm/xterm'
 // xterm 官方样式必须引入：缺了它内部辅助元素（测量层 / 隐藏 textarea）会以正常流渲染——
 // 表现为终端顶部多出 tofu 与重复字符行、并拦截鼠标导致拖选失效、复制误报「请先选中」
@@ -14,9 +14,12 @@ import {
   DEFAULT_TERMINAL_PREFS,
   normalizeFontFamily,
   resolveTerminalTheme,
+  terminalBackground,
   type TerminalFontPrefs,
 } from './theme'
 import { chunkTerminalInput } from './input-chunk'
+import type { TerminalTheme } from '@wslpilot/shared'
+import { CommandBlockTracker, blockStatus, type CommandBlock } from './command-blocks'
 import { errorLine } from '../../composables/useAppError'
 import { useSettingsStore } from '../../stores/settings'
 
@@ -37,6 +40,11 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  /** Profile 级终端主题覆盖（settings.terminal.profiles[].theme） */
+  themeOverride: {
+    type: String as PropType<TerminalTheme | undefined>,
+    default: undefined,
+  },
 })
 
 const emit = defineEmits<{
@@ -49,17 +57,25 @@ const emit = defineEmits<{
   searchResults: [payload: { index: number; count: number }]
   /** 视口是否贴底（「滚动到底部」按钮按需显示） */
   atBottom: [value: boolean]
+  /** 命令块更新（Shell 集成 OSC 133） */
+  commandBlock: [payload: { ptyId: string; block: CommandBlock }]
 }>()
 
 const host = ref<HTMLElement | null>(null)
 const settings = useSettingsStore()
 const message = useMessage()
+const dialog = useDialog()
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let search: SearchAddon | null = null
 let webgl: WebglAddon | null = null
 let ro: ResizeObserver | null = null
 let unsubs: Array<() => void> = []
+/** 命令块（Shell 集成） */
+let blockTracker: CommandBlockTracker | null = null
+let blockDecorations: Array<{ dispose(): void }> = []
+let blockNavIndex = -1
+let bellTimer: ReturnType<typeof setTimeout> | null = null
 /**
  * 组件已卸载：async onMounted 在 `await host()` 期间可能被卸载，
  * 续体必须二次校验，否则会向已置空的 host 调 open()（泄漏 + unhandled rejection — review 0.1.2 根治）。
@@ -72,9 +88,20 @@ function applyPrefs(t: Terminal, p: Partial<TerminalFontPrefs>) {
   t.options.fontFamily = normalizeFontFamily(full.fontFamily)
   t.options.fontSize = full.fontSize
   t.options.lineHeight = full.lineHeight
+  t.options.letterSpacing = full.letterSpacing ?? 0
   t.options.cursorStyle = full.cursorStyle
   t.options.cursorBlink = full.cursorBlink
+  t.options.cursorInactiveStyle = full.cursorInactiveStyle
   t.options.scrollback = full.scrollback
+  t.options.minimumContrastRatio = full.minimumContrastRatio
+  // xterm 的平滑滚动是时长（ms），不是布尔；0 = 关闭
+  t.options.smoothScrollDuration = full.smoothScroll ? 100 : 0
+}
+
+function ackChunk(ptyId: string, chunk: string): void {
+  const bytes = new TextEncoder().encode(chunk).length
+  if (bytes <= 0) return
+  void window.wslAPI.terminal.ack?.(ptyId, bytes).catch(() => {})
 }
 
 let lastFitW = 0
@@ -204,6 +231,23 @@ async function copySelection(): Promise<void> {
 }
 
 /** 粘贴：主进程剪贴板 → 按 IPC 上限分片发送（大段粘贴不丢字 — 0.1.3） */
+async function sendPaste(text: string): Promise<void> {
+  for (const chunk of chunkTerminalInput(text)) {
+    try {
+      await window.wslAPI.terminal.input(props.ptyId, chunk)
+    } catch (e) {
+      message.error(errorLine(e, '终端输入发送失败'))
+      return
+    }
+  }
+}
+
+function shouldConfirmPaste(text: string): boolean {
+  if (settings.terminalPasteWarning === 'never') return false
+  if (settings.terminalPasteWarning === 'always') return true
+  return /[\r\n]/.test(text)
+}
+
 async function pasteFromClipboard(): Promise<void> {
   let text = ''
   try {
@@ -213,14 +257,24 @@ async function pasteFromClipboard(): Promise<void> {
     return
   }
   if (!text) return
-  for (const chunk of chunkTerminalInput(text)) {
-    try {
-      await window.wslAPI.terminal.input(props.ptyId, chunk)
-    } catch (e) {
-      message.error(errorLine(e, '终端输入发送失败'))
-      return
-    }
+  if (!shouldConfirmPaste(text)) {
+    await sendPaste(text)
+    return
   }
+  const preview = text.length > 200 ? `${text.slice(0, 200)}…` : text
+  await new Promise<void>((resolve) => {
+    dialog.warning({
+      title: '确认粘贴',
+      content: `剪贴板包含 ${text.includes('\n') ? '多行' : ''}内容（${text.length} 字符）：\n${preview}`,
+      positiveText: '粘贴',
+      negativeText: '取消',
+      onPositiveClick: () => {
+        void sendPaste(text).finally(resolve)
+      },
+      onNegativeClick: () => resolve(),
+      onClose: () => resolve(),
+    })
+  })
 }
 
 function selectAll(): void {
@@ -242,6 +296,7 @@ function isAtBottom(): boolean {
  * 这是纯性能增强——任何失败都不得影响终端可用性（绝不半成品：回退静默且真实生效）。
  */
 function tryLoadWebgl(t: Terminal): void {
+  if (settings.terminalWebgl === 'off') return
   try {
     const addon = new WebglAddon()
     addon.onContextLoss(() => {
@@ -265,9 +320,145 @@ function tryLoadWebgl(t: Terminal): void {
  * Ctrl+Shift+C 复制 / Ctrl+Shift+V 粘贴 / Ctrl+Shift+F 打开搜索。
  * 必须在 xterm 内部拦截（不能走 window 级快捷键）——终端聚焦时这些组合不发给 shell。
  */
+function absoluteLine(t: Terminal): number {
+  return t.buffer.active.baseY + t.buffer.active.cursorY
+}
+
+function readBufferLine(t: Terminal, absolute: number): string {
+  // xterm IBuffer.getLine(y) 的 y 是**绝对缓冲行号**（含 scrollback），
+  // 不能减 baseY：减了会在有回滚历史后读到错误行（0.2.0 review 根治）。
+  if (!Number.isFinite(absolute) || absolute < 0) return ''
+  return t.buffer.active.getLine(Math.floor(absolute))?.translateToString(true) ?? ''
+}
+
+function emitBlock(ptyId: string, block: CommandBlock): void {
+  emit('commandBlock', { ptyId, block: { ...block } })
+}
+
+/** 命令块 gutter 状态点（成功绿 / 失败红 / 未知灰） */
+function attachBlockDecoration(t: Terminal, block: CommandBlock): void {
+  try {
+    const offset = block.promptLine - absoluteLine(t)
+    const marker = t.registerMarker(offset)
+    if (!marker) return
+    const deco = t.registerDecoration({ marker, x: 0, width: 1, layer: 'top' })
+    if (!deco) {
+      marker.dispose()
+      return
+    }
+    const status = blockStatus(block)
+    const color = status === 'success' ? '#16A34A' : status === 'failure' ? '#DC2626' : '#94A3B8'
+    const off = deco.onRender((el) => {
+      el.classList.add('term-block-dot')
+      el.style.setProperty('background', color)
+      el.title =
+        block.exitCode === undefined
+          ? '命令块'
+          : `退出码 ${block.exitCode}${block.durationMs !== undefined ? ` · ${block.durationMs}ms` : ''}`
+    })
+    blockDecorations.push({ dispose: () => (off.dispose(), deco.dispose(), marker.dispose()) })
+    // 与 CommandBlockTracker 的 500 块上限对齐，避免长会话装饰无限增长
+    while (blockDecorations.length > 500) {
+      const oldest = blockDecorations.shift()
+      try {
+        oldest?.dispose()
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* decoration 是增强，不影响终端可用性 */
+  }
+}
+
+function registerCommandBlocks(t: Terminal): void {
+  const tracker = new CommandBlockTracker((line) => readBufferLine(t, line))
+  blockTracker = tracker
+  const handle = (payload: string) => {
+    const block = tracker.handleOsc133(payload, absoluteLine(t), t.buffer.active.cursorX)
+    if (!block) return true
+    emitBlock(props.ptyId, block)
+    // D 事件：块完成，补 gutter 状态点
+    if (payload.toUpperCase().startsWith('D') && block.endLine !== undefined) {
+      attachBlockDecoration(t, block)
+      blockNavIndex = tracker.blocks.length - 1
+    }
+    return true
+  }
+  t.parser.registerOscHandler(133, handle)
+  t.parser.registerOscHandler(633, handle)
+  t.parser.registerOscHandler(7, (payload) => {
+    const block = tracker.handleOsc7(payload)
+    if (block) emitBlock(props.ptyId, block)
+    return true
+  })
+}
+
+function copyLastOutput(): void {
+  const block = blockTracker?.lastCompleted() ?? null
+  if (!block || !term || block.outputStart === undefined || block.endLine === undefined) {
+    message.info('没有可复制的命令输出（需要 Shell 集成）')
+    return
+  }
+  const lines: string[] = []
+  // endLine 是 D 事件所在行（下一条提示符行），不属于上一条命令的输出
+  for (let i = block.outputStart; i < block.endLine; i++) {
+    lines.push(readBufferLine(term, i))
+  }
+  const text = lines.join('\n').trimEnd()
+  if (!text) {
+    message.info('上一条命令没有输出')
+    return
+  }
+  void window.wslAPI.clipboard
+    .write(text)
+    .then(() => message.success('已复制上一条输出'))
+    .catch((e: unknown) => message.error(errorLine(e, '复制失败')))
+}
+
+function rerunLastCommand(): void {
+  const block = blockTracker?.lastCompleted() ?? null
+  if (!block?.command || !term) {
+    message.info('没有可重跑的命令（需要 Shell 集成）')
+    return
+  }
+  for (const chunk of chunkTerminalInput(`${block.command}\r`)) {
+    void window.wslAPI.terminal
+      .input(props.ptyId, chunk)
+      .catch((e: unknown) => message.error(errorLine(e, '发送命令失败')))
+  }
+}
+
+/** Alt+↑/↓：在已完成命令块之间跳转（滚动到提示符行） */
+function jumpCommand(delta: number): boolean {
+  const list = blockTracker?.blocks.filter((b) => b.endLine !== undefined) ?? []
+  if (!term || list.length === 0) return false
+  if (blockNavIndex < 0 || blockNavIndex >= list.length) blockNavIndex = list.length - 1
+  blockNavIndex = Math.max(0, Math.min(list.length - 1, blockNavIndex + delta))
+  const target = list[blockNavIndex]!
+  term.scrollToLine(Math.max(0, target.promptLine))
+  term.focus()
+  return true
+}
+
+function lastBlock(): CommandBlock | null {
+  return blockTracker?.lastCompleted() ?? null
+}
+
 function attachShortcutHandler(t: Terminal): void {
   t.attachCustomKeyEventHandler((e: KeyboardEvent) => {
     if (e.type !== 'keydown') return true
+    // Alt+↑/↓：命令块跳转（不依赖 Ctrl）
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+      if (e.code === 'ArrowUp') {
+        e.preventDefault()
+        return !jumpCommand(-1)
+      }
+      if (e.code === 'ArrowDown') {
+        e.preventDefault()
+        return !jumpCommand(1)
+      }
+    }
     if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true
     switch (e.code) {
       case 'KeyC':
@@ -319,7 +510,7 @@ onMounted(async () => {
       pending.push(p.chunk)
       return
     }
-    termRef.write(p.chunk)
+    termRef.write(p.chunk, () => ackChunk(props.ptyId, p.chunk))
     // 尺寸自愈：PTY 停留在旧宽度时 ConPTY 折行会错位——输出间隙零成本校验并拉齐
     if (drifted()) void syncPtySize()
   })
@@ -355,9 +546,7 @@ onMounted(async () => {
     allowProposedApi: true,
     // 真 PTY 数据：不要 convertEol，避免 TUI 光标异常（评审 M2）
     convertEol: false,
-    // 显式零字距：与字体度量严格一致，防字符漂移
-    letterSpacing: 0,
-    theme: resolveTerminalTheme(settings.terminalTheme, settings.accent),
+    theme: resolveTerminalTheme(props.themeOverride ?? settings.terminalTheme, settings.accent),
     ...DEFAULT_TERMINAL_PREFS,
     ...(windowsPty ? { windowsPty } : {}),
   })
@@ -368,7 +557,20 @@ onMounted(async () => {
   search = new SearchAddon()
   t.loadAddon(fit)
   t.loadAddon(search)
-  t.loadAddon(new WebLinksAddon())
+  // 链接统一走主进程 app:openExternal（http/https 白名单）；绝不让 xterm
+  // 默认 handler 调 window.open（会把渲染进程导航到不可控页面）
+  t.loadAddon(
+    new WebLinksAddon((event, uri) => {
+      event.preventDefault()
+      if (!/^https?:\/\//i.test(uri)) {
+        message.warning('仅允许在系统浏览器中打开 http/https 链接')
+        return
+      }
+      void window.wslAPI.app
+        .openExternal(uri)
+        .catch((e: unknown) => message.error(errorLine(e, '打开链接失败')))
+    }),
+  )
   // Unicode 11 宽字符（中文/emoji 表格不错位）评审 M3
   t.loadAddon(new Unicode11Addon())
   t.unicode.activeVersion = '11'
@@ -384,7 +586,8 @@ onMounted(async () => {
     return
   }
   t.open(host.value)
-  host.value.style.background = t.options.theme?.background ?? '#FBFCFE'
+  host.value.style.background = terminalBackground(props.themeOverride ?? settings.terminalTheme)
+  registerCommandBlocks(t)
   // 0.1.3：WebGL 渲染器（失败自动回退 DOM）+ 终端专属快捷键 + 搜索计数 + 贴底追踪 + 右键菜单
   tryLoadWebgl(t)
   attachShortcutHandler(t)
@@ -397,6 +600,25 @@ onMounted(async () => {
   t.onScroll(() => emit('atBottom', isAtBottom()))
   const onContextMenu = (e: MouseEvent) => {
     e.preventDefault()
+    const behavior = settings.terminalRightClickBehavior
+    if (behavior === 'paste') {
+      void pasteFromClipboard()
+      return
+    }
+    if (behavior === 'selectWord') {
+      const buf = t.buffer.active
+      const line = buf.getLine(buf.baseY + buf.cursorY)?.translateToString(true) ?? ''
+      let start = Math.min(buf.cursorX, line.length)
+      let end = start
+      while (start > 0 && /[^\s]/.test(line[start - 1]!)) start--
+      while (end < line.length && /[^\s]/.test(line[end]!)) end++
+      if (end > start) t.select(start, buf.baseY + buf.cursorY, end - start)
+      if (settings.terminalCopyOnSelect) {
+        const sel = t.getSelection()
+        if (sel) void window.wslAPI.clipboard.write(sel).catch(() => {})
+      }
+      return
+    }
     emit('contextMenu', { x: e.clientX, y: e.clientY, ptyId: props.ptyId })
   }
   host.value.addEventListener('contextmenu', onContextMenu)
@@ -407,12 +629,41 @@ onMounted(async () => {
     t.write(props.initialBuffer)
   }
   streaming = true
-  for (const c of pending) t.write(c)
+  for (const c of pending) {
+    t.write(c, () => ackChunk(props.ptyId, c))
+  }
   pending.length = 0
 
   doFit()
   emit('atBottom', isAtBottom())
 
+  // 响铃：visual 闪烁、sound 用 WebAudio 短音；失败静默（终端可用性优先）
+  t.onBell(() => {
+    if (settings.terminalBell === 'none') return
+    if (settings.terminalBell === 'visual') {
+      if (bellTimer) clearTimeout(bellTimer)
+      host.value?.classList.add('bell-flash')
+      bellTimer = setTimeout(() => {
+        host.value?.classList.remove('bell-flash')
+        bellTimer = null
+      }, 160)
+      return
+    }
+    try {
+      const Ctx = window.AudioContext
+      const ctx = new Ctx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.frequency.value = 880
+      gain.gain.value = 0.04
+      osc.connect(gain).connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.08)
+      void ctx.close()
+    } catch {
+      /* 无音频设备 */
+    }
+  })
   t.onData((data) => {
     // 超过 IPC 上限的粘贴必须分片（否则 zod 拒绝后输入静默丢失 — review 根治）
     for (const chunk of chunkTerminalInput(data)) {
@@ -458,6 +709,20 @@ onBeforeUnmount(() => {
   }
   for (const u of unsubs) u()
   unsubs = []
+  for (const d of blockDecorations) {
+    try {
+      d.dispose()
+    } catch {
+      /* ignore */
+    }
+  }
+  blockDecorations = []
+  blockTracker?.clear()
+  blockTracker = null
+  if (bellTimer) {
+    clearTimeout(bellTimer)
+    bellTimer = null
+  }
   ro?.disconnect()
   ro = null
   search = null
@@ -490,13 +755,31 @@ watch(
   { deep: true },
 )
 
+// WebGL 设置热更新：off 立即释放（回退 DOM），从 off 打开时尝试加载
+watch(
+  () => settings.terminalWebgl,
+  (mode) => {
+    if (!term) return
+    if (mode === 'off') {
+      try {
+        webgl?.dispose()
+      } catch {
+        /* ignore */
+      }
+      webgl = null
+      return
+    }
+    if (!webgl) tryLoadWebgl(term)
+  },
+)
+
 // 终端主题跟随设置（auto / follow-app / custom）；容器底色同步跟随
 watch(
   () => [settings.terminalTheme, settings.accent] as const,
   () => {
     if (!term) return
     term.options.theme = resolveTerminalTheme(settings.terminalTheme, settings.accent)
-    if (host.value) host.value.style.background = term.options.theme?.background ?? '#FBFCFE'
+    if (host.value) host.value.style.background = terminalBackground(settings.terminalTheme)
   },
 )
 
@@ -567,6 +850,10 @@ defineExpose({
   selectAll,
   scrollToBottom,
   isAtBottom,
+  copyLastOutput,
+  rerunLastCommand,
+  jumpCommand,
+  lastBlock,
 })
 </script>
 
@@ -579,11 +866,29 @@ defineExpose({
   width: 100%;
   height: 100%;
   min-height: 120px;
-  padding: 6px 8px;
-  border-radius: var(--radius-md);
-  background: #fbfcfe;
-  border: 1px solid var(--color-border-subtle);
+  padding: 4px 6px;
+  border-radius: 0;
+  background: var(--color-term-bg, #fbfcfe);
+  border: none;
   overflow: hidden;
+}
+
+.xterm-host.bell-flash {
+  animation: term-bell 160ms ease-out;
+}
+
+@keyframes term-bell {
+  0% {
+    filter: brightness(1);
+  }
+
+  40% {
+    filter: brightness(1.18);
+  }
+
+  100% {
+    filter: brightness(1);
+  }
 }
 
 .xterm-host :deep(.xterm) {
@@ -614,5 +919,18 @@ defineExpose({
 
 .xterm-host :deep(.xterm-viewport::-webkit-scrollbar-track) {
   background: transparent;
+}
+</style>
+
+<style>
+/* 命令块 gutter 状态点（xterm decoration 由运行时创建，不能使用 scoped） */
+.term-block-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: 1px;
+  margin-top: 5px;
+  border-radius: 50%;
+  opacity: 0.9;
+  pointer-events: auto;
 }
 </style>

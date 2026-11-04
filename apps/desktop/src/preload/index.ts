@@ -5,6 +5,10 @@ import {
   type BackupFileInfo,
   type ConfigKey,
   type ConfigMap,
+  type ContainerDetail,
+  type ContainerRunSpec,
+  type ContainerStats,
+  type ContainerSummary,
   type DiagnosticsExportResult,
   type DirEntry,
   type DistroMeta,
@@ -33,7 +37,15 @@ import {
   type WslAction,
   type WslConfWriteResult,
   type WslConfigFileState,
+  type ShellIntegrationStatus,
   type WslEnvInfo,
+  type WslcCapabilities,
+  type WslcImage,
+  type WslcNetwork,
+  type WslcSessionInfo,
+  type WslcSettings,
+  type WslcSystemInfo,
+  type WslcVolume,
 } from '@wslpilot/shared'
 
 /**
@@ -129,16 +141,26 @@ const api = {
   terminal: {
     create: (opts: {
       distro: string
+      containerId?: string
       shell?: string
       cwd?: string
+      user?: string
+      shellIntegration?: boolean
       cols: number
       rows: number
     }): Promise<PtySessionInfo> => ipcRenderer.invoke(CH.ptyCreate, opts),
+    createProfile: (opts: {
+      profileId: string
+      cols: number
+      rows: number
+    }): Promise<PtySessionInfo> => ipcRenderer.invoke(CH.ptyCreateProfile, opts),
     input: (ptyId: string, data: string): Promise<void> =>
       ipcRenderer.invoke(CH.ptyInput, { ptyId, data }),
     resize: (ptyId: string, cols: number, rows: number): Promise<void> =>
       ipcRenderer.invoke(CH.ptyResize, { ptyId, cols, rows }),
     kill: (ptyId: string): Promise<void> => ipcRenderer.invoke(CH.ptyKill, ptyId),
+    ack: (ptyId: string, bytes: number): Promise<void> =>
+      ipcRenderer.invoke(CH.ptyAck, { ptyId, bytes }),
     list: (): Promise<PtySessionInfo[]> => ipcRenderer.invoke(CH.ptyList),
     maxSessions: (): Promise<number> => ipcRenderer.invoke(CH.ptyMaxSessions),
     /** 终端宿主信息（xterm windowsPty ConPTY 对策用） */
@@ -219,6 +241,86 @@ const api = {
       ipcRenderer.invoke(CH.fsWrite, { distro, path, data }),
     revealInExplorer: (distro: string, path: string): Promise<void> =>
       ipcRenderer.invoke(CH.fsRevealInExplorer, { distro, path }),
+  },
+
+  containers: {
+    status: (force = false): Promise<WslcCapabilities> =>
+      ipcRenderer.invoke(CH.wslcStatus, { force }),
+    list: (): Promise<ContainerSummary[]> => ipcRenderer.invoke(CH.containersList),
+    inspect: (id: string): Promise<ContainerDetail | null> =>
+      ipcRenderer.invoke(CH.containersInspect, id),
+    run: (spec: ContainerRunSpec): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.containersRun, spec),
+    start: (id: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.containersStart, id),
+    stop: (id: string, timeoutSec?: number): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.containersStop, { id, ...(timeoutSec ? { timeoutSec } : {}) }),
+    restart: (id: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.containersRestart, id),
+    remove: (id: string, force = false): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.containersRemove, { id, force }),
+    prune: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.containersPrune),
+    logs: (id: string, follow = false): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.containersLogs, { id, follow }),
+    stats: (): Promise<ContainerStats[]> => ipcRenderer.invoke(CH.containersStats),
+    copy: (src: string, dst: string): Promise<void> =>
+      ipcRenderer.invoke(CH.containersCopy, { src, dst }),
+    systemInfo: (): Promise<WslcSystemInfo> => ipcRenderer.invoke(CH.wslcSystemInfo),
+    sessionList: (): Promise<WslcSessionInfo[]> => ipcRenderer.invoke(CH.wslcSessionList),
+    sessionTerminate: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.wslcSessionTerminate),
+    settingsRead: (): Promise<{
+      path: string
+      exists: boolean
+      content: string
+      model: WslcSettings
+    }> => ipcRenderer.invoke(CH.wslcSettingsRead),
+    settingsWrite: (content: string): Promise<{ path: string }> =>
+      ipcRenderer.invoke(CH.wslcSettingsWrite, { content }),
+    settingsReset: (): Promise<void> => ipcRenderer.invoke(CH.wslcSettingsReset),
+    onChanged: (cb: (payload: { at: number }) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: { at: number }) => cb(p)
+      ipcRenderer.on(CH.containersChanged, h)
+      return () => ipcRenderer.removeListener(CH.containersChanged, h)
+    },
+  },
+
+  images: {
+    list: (): Promise<WslcImage[]> => ipcRenderer.invoke(CH.imagesList),
+    pull: (ref: string): Promise<TaskHandle> => ipcRenderer.invoke(CH.imagesPull, ref),
+    build: (tag: string, context: string): Promise<TaskHandle> =>
+      ipcRenderer.invoke(CH.imagesBuild, { tag, context }),
+    remove: (ref: string): Promise<void> => ipcRenderer.invoke(CH.imagesRemove, ref),
+    prune: (all = false): Promise<TaskHandle> => ipcRenderer.invoke(CH.imagesPrune, { all }),
+  },
+
+  networks: {
+    list: (): Promise<WslcNetwork[]> => ipcRenderer.invoke(CH.networksList),
+    create: (opts: {
+      name: string
+      driver?: string
+      subnet?: string
+      gateway?: string
+    }): Promise<void> => ipcRenderer.invoke(CH.networksCreate, opts),
+    remove: (name: string): Promise<void> => ipcRenderer.invoke(CH.networksRemove, name),
+    connect: (network: string, container: string): Promise<void> =>
+      ipcRenderer.invoke(CH.networksConnect, { network, container }),
+    disconnect: (network: string, container: string): Promise<void> =>
+      ipcRenderer.invoke(CH.networksDisconnect, { network, container }),
+    prune: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.networksPrune),
+  },
+
+  volumes: {
+    list: (): Promise<WslcVolume[]> => ipcRenderer.invoke(CH.volumesList),
+    create: (name: string): Promise<void> => ipcRenderer.invoke(CH.volumesCreate, name),
+    remove: (name: string): Promise<void> => ipcRenderer.invoke(CH.volumesRemove, name),
+    prune: (): Promise<TaskHandle> => ipcRenderer.invoke(CH.volumesPrune),
+  },
+
+  shellIntegration: {
+    status: (distro: string, shell?: string): Promise<ShellIntegrationStatus> =>
+      ipcRenderer.invoke(CH.shellStatus, { distro, ...(shell ? { shell } : {}) }),
+    install: (distro: string, shell?: string): Promise<ShellIntegrationStatus> =>
+      ipcRenderer.invoke(CH.shellInstall, { distro, ...(shell ? { shell } : {}) }),
+    remove: (distro: string, shell?: string): Promise<ShellIntegrationStatus> =>
+      ipcRenderer.invoke(CH.shellRemove, { distro, ...(shell ? { shell } : {}) }),
   },
 
   network: {
@@ -373,5 +475,13 @@ export type {
   DirEntry,
   FsReadResult,
   WslConfigFileState,
+  ShellIntegrationStatus,
   WslEnvInfo,
+  WslcCapabilities,
+  WslcImage,
+  WslcNetwork,
+  WslcSessionInfo,
+  WslcSettings,
+  WslcSystemInfo,
+  WslcVolume,
 }

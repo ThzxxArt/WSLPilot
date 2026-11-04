@@ -74,3 +74,56 @@ describe('useWslEnvStore（0.1.4 能力单一事实源）', () => {
     expect(s.lastError).not.toBeNull()
   })
 })
+
+describe('useWslEnvStore 边界（0.2.0 覆盖率补强）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('loading 中重复 load 直接返回；loaded 且非 force 不重拉', async () => {
+    let resolveEnv!: (v: WslEnvInfo) => void
+    app.wslEnv.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveEnv = resolve
+        }),
+    )
+    const s = useWslEnvStore()
+    const p1 = s.load()
+    await s.load()
+    resolveEnv(env)
+    await p1
+    expect(app.wslEnv).toHaveBeenCalledTimes(1)
+    await s.load()
+    expect(app.wslEnv).toHaveBeenCalledTimes(1)
+  })
+
+  it('requirement 无版本信息时显示「未知」；can 对未知 flag fail-soft', async () => {
+    const s = useWslEnvStore()
+    s.env = { installed: true, capabilities: { ...caps, wslVersion: '', flags } } as never
+    expect(s.can('jsonLists' as never)).toBe(false)
+    expect(s.requirement('compact')).toContain('未知')
+    s.env = { installed: false } as never
+    expect(s.requirement('compact')).toContain('未知')
+  })
+
+  it('invalidate 后强制重拉', async () => {
+    app.wslEnv.mockResolvedValue(env)
+    const s = useWslEnvStore()
+    await s.load()
+    s.invalidate()
+    await s.load()
+    expect(app.wslEnv).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('useWslEnvStore 空 env getter 分支', () => {
+  it('capabilities/installed 在未加载时为 null/false', () => {
+    setActivePinia(createPinia())
+    const s = useWslEnvStore()
+    expect(s.capabilities).toBeNull()
+    expect(s.installed).toBe(false)
+    expect(s.can('compact')).toBe(false)
+  })
+})

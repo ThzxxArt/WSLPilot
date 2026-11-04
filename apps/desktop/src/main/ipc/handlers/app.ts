@@ -91,11 +91,11 @@ export function registerAppHandlers(add: AddFn, _ctx: IpcContext, deps: AppHandl
   })
 
   /** 剪贴板读取（0.1.3 终端粘贴可靠通道 — Electron clipboard，不受 file:// 权限限制） */
-  add(CH.clipboardRead, (): string => clipboard.readText())
+  add(CH.clipboardRead, async (): Promise<string> => clipboard.readText())
 
   /** 剪贴板写入（0.1.3 终端复制可靠通道） */
-  add(CH.clipboardWrite, (_c, arg: never): void => {
-    clipboard.writeText(String(arg ?? ''))
+  add(CH.clipboardWrite, async (_c, arg: never): Promise<void> => {
+    await clipboard.writeText(String(arg ?? ''))
   })
 
   add(CH.appWindowMinimize, (c) => {

@@ -122,3 +122,40 @@ describe('useDevicesStore', () => {
     expect(s.attachedCount).toBe(1)
   })
 })
+
+describe('useDevicesStore 失败分支', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('refresh 别名委托 load；unbind/attach/detach 失败记录并抛出', async () => {
+    wslAPI.devices.status.mockResolvedValue({ installed: true, version: '2.4.1' })
+    wslAPI.devices.list.mockResolvedValue([])
+    const s = useDevicesStore()
+    await s.refresh()
+    expect(wslAPI.devices.list).toHaveBeenCalled()
+
+    wslAPI.devices.unbind.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'unbind',
+      recoverable: true,
+    })
+    wslAPI.devices.attach.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'attach',
+      recoverable: true,
+    })
+    wslAPI.devices.detach.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'detach',
+      recoverable: true,
+    })
+    await expect(s.unbind('1-1')).rejects.toMatchObject({ message: 'unbind' })
+    expect(s.lastError?.message).toBe('unbind')
+    await expect(s.attach('1-1', 'Ubuntu')).rejects.toMatchObject({ message: 'attach' })
+    expect(s.lastError?.message).toBe('attach')
+    await expect(s.detach('1-1')).rejects.toMatchObject({ message: 'detach' })
+    expect(s.lastError?.message).toBe('detach')
+  })
+})

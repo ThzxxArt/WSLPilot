@@ -177,3 +177,20 @@ describe('useActionsStore', () => {
     expect(s.lastError?.code).toBe('TASK_FAILED')
   })
 })
+
+describe('actions 终端动作收编未知 action 的兜底', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('ptyId 存在但 action 不在列表：标题回退 actionId，distro 回退入参', async () => {
+    wslAPI.actions.run.mockResolvedValue({ taskId: 't1', ptyId: 'p9' })
+    const s = useActionsStore()
+    await s.run('missing-action', 'Ubuntu')
+    const { useTerminalStore } = await import('../../src/renderer/stores/terminal')
+    const t = useTerminalStore()
+    expect(t.panes.p9?.distro).toBe('Ubuntu')
+    expect(t.tabs.at(-1)?.title).toBe('missing-action')
+  })
+})

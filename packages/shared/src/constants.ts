@@ -20,6 +20,7 @@ export const CONFIG_FILE_NAMES = {
   distros: 'distros.jsonc',
   actions: 'actions.jsonc',
   network: 'network.jsonc',
+  containers: 'containers.jsonc',
   uiState: 'ui-state.jsonc',
   state: 'state.jsonc',
 } as const satisfies Record<ConfigKeyOf, string>

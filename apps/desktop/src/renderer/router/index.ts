@@ -22,8 +22,16 @@ export const router = createRouter({
     {
       path: '/terminal',
       name: 'terminal',
-      component: () => import('../views/TerminalView.vue'),
-      meta: { title: '终端' },
+      // 终端由 WorkbenchLayout 直接常驻挂载（跨路由保活），router-view 不参与渲染；
+      // 这里保留占位组件只是满足路由契约，避免重复打包 TerminalView。
+      component: { name: 'TerminalRoutePlaceholder', render: () => null },
+      meta: { title: '终端', layout: 'workbench' },
+    },
+    {
+      path: '/containers',
+      name: 'containers',
+      component: () => import('../views/ContainersView.vue'),
+      meta: { title: '容器' },
     },
     {
       path: '/network',

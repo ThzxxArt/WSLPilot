@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const wslAPI = {
   io: {
+    clone: vi.fn(async () => ({ taskId: 'cl-1' })),
     export: vi.fn(),
     import: vi.fn(),
     move: vi.fn(),
@@ -11,6 +12,11 @@ const wslAPI = {
   distros: {
     install: vi.fn(async () => ({ taskId: 'ins-1' })),
     setVersion: vi.fn(async () => ({ taskId: 'cv-1' })),
+    setSparse: vi.fn(async () => ({ taskId: 'sp-1' })),
+    compact: vi.fn(async () => ({ taskId: 'cp-1' })),
+    resize: vi.fn(async () => ({ taskId: 'rs-1' })),
+    setDefaultUser: vi.fn(async () => ({ taskId: 'du-1' })),
+    unregister: vi.fn(async () => ({ taskId: 'un-1' })),
     list: vi.fn(async () => []),
   },
   task: {
@@ -18,6 +24,7 @@ const wslAPI = {
     onProgress: vi.fn(() => () => {}),
   },
   app: {
+    wslUpdate: vi.fn(async () => ({ taskId: 'up-1' })),
     pickDirectory: vi.fn(async () => null),
     pickSaveFile: vi.fn(async () => null),
     pickOpenFile: vi.fn(async () => null),
@@ -280,5 +287,119 @@ describe('useTasksStore', () => {
     expect(s.entries.some((e) => e.taskId === 'running-1')).toBe(true)
     expect(s.entries.some((e) => e.taskId === 'f0')).toBe(false)
     expect(s.entries.some((e) => e.taskId === 'f11')).toBe(true)
+  })
+})
+
+describe('tasks store：0.1.3/0.1.4 任务入口', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    // 前面的用例会整体替换这些 mock（含拒绝实现），此处复位成功实现
+    wslAPI.distros.install = vi.fn(async () => ({ taskId: 'ins-1' }))
+    wslAPI.distros.setVersion = vi.fn(async () => ({ taskId: 'cv-1' }))
+    wslAPI.distros.setSparse = vi.fn(async () => ({ taskId: 'sp-1' }))
+    wslAPI.distros.compact = vi.fn(async () => ({ taskId: 'cp-1' }))
+    wslAPI.distros.resize = vi.fn(async () => ({ taskId: 'rs-1' }))
+    wslAPI.distros.setDefaultUser = vi.fn(async () => ({ taskId: 'du-1' }))
+    wslAPI.distros.unregister = vi.fn(async () => ({ taskId: 'un-1' }))
+    wslAPI.io.clone = vi.fn(async () => ({ taskId: 'cl-1' }))
+  })
+
+  it('install 支持字符串与对象；更新支持预发布通道', async () => {
+    const s = useTasksStore()
+    await expect(s.startInstall('Ubuntu')).resolves.toMatchObject({ type: 'install' })
+    expect(wslAPI.distros.install).toHaveBeenLastCalledWith({ name: 'Ubuntu' })
+    await s.startInstall({ name: 'Debian', version: 2 } as never)
+    expect(wslAPI.distros.install).toHaveBeenLastCalledWith({ name: 'Debian', version: 2 })
+    await s.startUpdate({ preRelease: true })
+    expect(wslAPI.app.wslUpdate).toHaveBeenCalledWith({ preRelease: true })
+  })
+
+  it('sparse / compact / resize / 默认用户 / 注销 / 转换 / 克隆全部登记任务', async () => {
+    const s = useTasksStore()
+    await s.startSparse('Ubuntu', true)
+    await s.startCompact('Ubuntu', true)
+    await s.startResize('Ubuntu', '100GB')
+    await s.startSetDefaultUser('Ubuntu', 'dev')
+    await s.startUnregister('Ubuntu', { backupFirst: true })
+    await s.startConvert('Ubuntu', 2)
+    await s.startClone({ name: 'Ubuntu', newName: 'Ubuntu2', installPath: 'D:\\U2' } as never)
+    expect(wslAPI.distros.setSparse).toHaveBeenCalledWith('Ubuntu', true)
+    expect(wslAPI.distros.compact).toHaveBeenCalledWith('Ubuntu', true)
+    expect(wslAPI.distros.resize).toHaveBeenCalledWith('Ubuntu', '100GB')
+    expect(wslAPI.distros.setDefaultUser).toHaveBeenCalledWith('Ubuntu', 'dev')
+    expect(wslAPI.distros.unregister).toHaveBeenCalledWith('Ubuntu', { backupFirst: true })
+    expect(wslAPI.distros.setVersion).toHaveBeenCalledWith('Ubuntu', 2)
+    expect(wslAPI.io.clone).toHaveBeenCalled()
+    expect(s.entries.map((e) => e.type)).toEqual([
+      'manage',
+      'manage',
+      'manage',
+      'manage',
+      'unregister',
+      'convert',
+      'clone',
+    ])
+  })
+
+  it('所有新任务入口失败时返回 null 并记录 AppError（不抛）', async () => {
+    const s = useTasksStore()
+    const err = { code: 'TASK_FAILED', message: 'boom', recoverable: true }
+    for (const m of [
+      wslAPI.distros.install,
+      wslAPI.app.wslUpdate,
+      wslAPI.distros.setSparse,
+      wslAPI.distros.compact,
+      wslAPI.distros.resize,
+      wslAPI.distros.setDefaultUser,
+      wslAPI.distros.unregister,
+      wslAPI.distros.setVersion,
+      wslAPI.io.clone,
+    ]) {
+      m.mockRejectedValueOnce(err)
+    }
+    const runs = [
+      () => s.startInstall('Ubuntu'),
+      () => s.startUpdate(),
+      () => s.startSparse('Ubuntu', true),
+      () => s.startCompact('Ubuntu', true),
+      () => s.startResize('Ubuntu', '10GB'),
+      () => s.startSetDefaultUser('Ubuntu', 'dev'),
+      () => s.startUnregister('Ubuntu'),
+      () => s.startConvert('Ubuntu', 2),
+      () => s.startClone({ name: 'U', newName: 'U2' } as never),
+    ]
+    for (const run of runs) {
+      await expect(run()).resolves.toBeNull()
+      expect(s.lastError?.message).toBe('boom')
+    }
+  })
+})
+
+describe('tasks store 剩余 getter/文案分支', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    wslAPI.distros.setSparse = vi.fn(async () => ({ taskId: 'sp-2' }))
+    wslAPI.app.wslUpdate = vi.fn(async () => ({ taskId: 'up-2' }))
+  })
+
+  it('byId 未知 id 返回 null；applyProgress 补 distro；sparse=false 文案；update 无预发布', async () => {
+    const s = useTasksStore()
+    expect(s.byId('nope')).toBeNull()
+    s.track({ taskId: 't1' }, { type: 'manage', message: 'm' })
+    s.applyProgress({
+      taskId: 't1',
+      type: 'manage',
+      distro: 'Ubuntu',
+      percent: 1,
+      message: 'x',
+      status: 'running',
+    })
+    expect(s.byId('t1')?.distro).toBe('Ubuntu')
+    await s.startSparse('Ubuntu', false)
+    expect(s.entries.at(-1)?.message).toContain('关闭')
+    await s.startUpdate()
+    expect(s.entries.at(-1)?.message).toBe('更新 WSL')
   })
 })

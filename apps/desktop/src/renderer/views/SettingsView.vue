@@ -568,6 +568,42 @@ async function exportDiagnostics() {
       </div>
       <div class="setting-line">
         <div>
+          <div class="label">字距</div>
+          <div class="hint">-2–4 px</div>
+        </div>
+        <n-input-number
+          :value="settings.terminalLetterSpacing"
+          size="small"
+          :min="-2"
+          :max="4"
+          :step="0.5"
+          @update:value="(v: number | null) => v !== null && settings.setTerminalLetterSpacing(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">非活动光标</div>
+          <div class="hint">窗口失焦时的光标形态</div>
+        </div>
+        <n-select
+          :value="settings.terminalCursorInactiveStyle"
+          size="small"
+          style="width: 140px"
+          :options="[
+            { label: '轮廓', value: 'outline' },
+            { label: '块状', value: 'block' },
+            { label: '竖线', value: 'bar' },
+            { label: '下划线', value: 'underline' },
+            { label: '隐藏', value: 'none' },
+          ]"
+          @update:value="
+            (v: 'outline' | 'block' | 'bar' | 'underline' | 'none') =>
+              settings.setTerminalCursorInactiveStyle(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
           <div class="label">选中即复制</div>
           <div class="hint">选中文本自动写入剪贴板</div>
         </div>
@@ -578,19 +614,361 @@ async function exportDiagnostics() {
       </div>
       <div class="setting-line">
         <div>
+          <div class="label">最小对比度</div>
+          <div class="hint">xterm minimumContrastRatio（1–21）</div>
+        </div>
+        <n-input-number
+          :value="settings.terminalMinimumContrastRatio"
+          size="small"
+          :min="1"
+          :max="21"
+          :step="0.5"
+          @update:value="
+            (v: number | null) => v !== null && settings.setTerminalMinimumContrastRatio(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">平滑滚动</div>
+        </div>
+        <n-switch
+          :value="settings.terminalSmoothScroll"
+          @update:value="(v: boolean) => settings.setTerminalSmoothScroll(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
           <div class="label">终端主题</div>
-          <div class="hint">auto 内置浅色 · follow-app 跟随强调色 · custom 高对比</div>
+          <div class="hint">
+            light 内置浅色 · dark 终端独立深色 · follow-app 跟随强调色 · high-contrast 高对比
+          </div>
         </div>
         <n-select
           :value="settings.terminalTheme"
           size="small"
           style="width: 180px"
           :options="[
-            { label: '自动（浅色）', value: 'auto' },
+            { label: '浅色', value: 'light' },
+            { label: '深色（仅终端）', value: 'dark' },
             { label: '跟随强调色', value: 'follow-app' },
-            { label: '高对比', value: 'custom' },
+            { label: '高对比', value: 'high-contrast' },
           ]"
-          @update:value="(v: 'auto' | 'follow-app' | 'custom') => settings.setTerminalTheme(v)"
+          @update:value="
+            (v: 'light' | 'dark' | 'follow-app' | 'high-contrast') => settings.setTerminalTheme(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">WebGL 渲染</div>
+          <div class="hint">auto 失败自动回退 DOM；off 强制软件渲染</div>
+        </div>
+        <n-select
+          :value="settings.terminalWebgl"
+          size="small"
+          style="width: 120px"
+          :options="[
+            { label: '自动', value: 'auto' },
+            { label: '开启', value: 'on' },
+            { label: '关闭', value: 'off' },
+          ]"
+          @update:value="(v: 'auto' | 'on' | 'off') => settings.setTerminalWebgl(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">响铃</div>
+          <div class="hint">Bell / OSC 9 / OSC 777 的处理方式</div>
+        </div>
+        <n-select
+          :value="settings.terminalBell"
+          size="small"
+          style="width: 120px"
+          :options="[
+            { label: '关闭', value: 'none' },
+            { label: '视觉闪烁', value: 'visual' },
+            { label: '声音', value: 'sound' },
+          ]"
+          @update:value="(v: 'none' | 'visual' | 'sound') => settings.setTerminalBell(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">右键行为</div>
+        </div>
+        <n-select
+          :value="settings.terminalRightClickBehavior"
+          size="small"
+          style="width: 150px"
+          :options="[
+            { label: '上下文菜单', value: 'contextMenu' },
+            { label: '直接粘贴', value: 'paste' },
+            { label: '选中单词', value: 'selectWord' },
+          ]"
+          @update:value="
+            (v: 'contextMenu' | 'paste' | 'selectWord') => settings.setTerminalRightClickBehavior(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">粘贴确认</div>
+        </div>
+        <n-select
+          :value="settings.terminalPasteWarning"
+          size="small"
+          style="width: 150px"
+          :options="[
+            { label: '始终确认', value: 'always' },
+            { label: '多行确认', value: 'multiline' },
+            { label: '从不确认', value: 'never' },
+          ]"
+          @update:value="
+            (v: 'always' | 'multiline' | 'never') => settings.setTerminalPasteWarning(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">Shell 集成</div>
+          <div class="hint">
+            off 关闭 · prompt 提示安装 · on 使用已安装的集成（命令块 / 退出码 / cwd）
+          </div>
+        </div>
+        <n-select
+          :value="settings.terminalShellIntegration"
+          size="small"
+          style="width: 180px"
+          :options="[
+            { label: '关闭', value: 'off' },
+            { label: '提示安装', value: 'prompt' },
+            { label: '启用', value: 'on' },
+          ]"
+          @update:value="(v: 'off' | 'prompt' | 'on') => settings.setTerminalShellIntegration(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">关闭运行中会话前确认</div>
+          <div class="hint">xterm 内仍有进程时，关闭面板/标签先弹确认</div>
+        </div>
+        <n-switch
+          :value="settings.terminalConfirmCloseWithRunningProcess"
+          @update:value="(v: boolean) => settings.setTerminalConfirmCloseWithRunningProcess(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">默认终端 Profile</div>
+          <div class="hint">无发行版参数时优先用该 Profile 新开会话</div>
+        </div>
+        <n-select
+          :value="settings.terminalDefaultProfileId || null"
+          size="small"
+          clearable
+          style="width: 200px"
+          :options="settings.terminalProfiles.map((p) => ({ label: p.label, value: p.id }))"
+          placeholder="跟随默认启动方式"
+          @update:value="(v: string | null) => settings.setTerminalDefaultProfileId(v ?? '')"
+        />
+      </div>
+    </n-card>
+
+    <n-card title="工作台与容器" class="block">
+      <div class="setting-line">
+        <div>
+          <div class="label">启动默认页面</div>
+          <div class="hint">dashboard 驾驶舱 · terminal 终端 · last 上次页面</div>
+        </div>
+        <n-select
+          :value="settings.workbenchDefaultRoute"
+          size="small"
+          style="width: 150px"
+          :options="[
+            { label: '驾驶舱', value: 'dashboard' },
+            { label: '终端', value: 'terminal' },
+            { label: '上次页面', value: 'last' },
+          ]"
+          @update:value="
+            (v: 'dashboard' | 'terminal' | 'last') => settings.setWorkbenchDefaultRoute(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">标签栏位置</div>
+          <div class="hint">top 顶栏 · left 左侧（下次进入终端生效）</div>
+        </div>
+        <n-select
+          :value="settings.workbenchTabPosition"
+          size="small"
+          style="width: 120px"
+          :options="[
+            { label: '顶部', value: 'top' },
+            { label: '左侧', value: 'left' },
+          ]"
+          @update:value="(v: 'top' | 'left') => settings.setWorkbenchTabPosition(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">会话侧栏宽度</div>
+          <div class="hint">180–360px</div>
+        </div>
+        <n-input-number
+          :value="settings.workbenchSessionRailWidth"
+          size="small"
+          :min="180"
+          :max="360"
+          :step="10"
+          @update:value="(v: number | null) => v && settings.setWorkbenchSessionRailWidth(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">关闭分屏面板前确认</div>
+        </div>
+        <n-switch
+          :value="settings.workbenchConfirmClosePane"
+          @update:value="(v: boolean) => settings.setWorkbenchConfirmClosePane(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">终端页自动收起侧栏</div>
+          <div class="hint">进入终端时导航轨收为 56px，给终端让出宽度</div>
+        </div>
+        <n-switch
+          :value="settings.workbenchAutoCollapseSidebar"
+          @update:value="(v: boolean) => settings.setWorkbenchAutoCollapseSidebar(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">密度</div>
+          <div class="hint">紧凑模式缩小顶栏/标签/状态行</div>
+        </div>
+        <n-select
+          :value="settings.workbenchDensity"
+          size="small"
+          style="width: 160px"
+          :options="[
+            { label: '舒适', value: 'comfortable' },
+            { label: '紧凑', value: 'compact' },
+          ]"
+          @update:value="(v: 'comfortable' | 'compact') => settings.setWorkbenchDensity(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">显示终端状态行</div>
+          <div class="hint">底部 20px：发行版 / 行列 / 编码 / 会话时长</div>
+        </div>
+        <n-switch
+          :value="settings.workbenchShowStatusLine"
+          @update:value="(v: boolean) => settings.setWorkbenchShowStatusLine(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">分屏面板标题</div>
+          <div class="hint">auto 仅分屏时显示；always 常显；never 隐藏</div>
+        </div>
+        <n-select
+          :value="settings.workbenchShowPaneHeaders"
+          size="small"
+          style="width: 160px"
+          :options="[
+            { label: '自动', value: 'auto' },
+            { label: '始终显示', value: 'always' },
+            { label: '隐藏', value: 'never' },
+          ]"
+          @update:value="
+            (v: 'auto' | 'always' | 'never') => settings.setWorkbenchShowPaneHeaders(v)
+          "
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">容器列表轮询间隔</div>
+          <div class="hint">无 wslc events 时的兜底轮询（1000–60000ms）</div>
+        </div>
+        <n-input-number
+          :value="settings.containersPollIntervalMs"
+          size="small"
+          :min="1000"
+          :max="60000"
+          :step="500"
+          @update:value="(v: number | null) => v && settings.setContainersPollIntervalMs(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">容器统计刷新间隔</div>
+          <div class="hint">wslc stats 的采样间隔（500–60000ms）</div>
+        </div>
+        <n-input-number
+          :value="settings.containersStatsIntervalMs"
+          size="small"
+          :min="500"
+          :max="60000"
+          :step="500"
+          @update:value="(v: number | null) => v && settings.setContainersStatsIntervalMs(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">清理容器/镜像前确认</div>
+          <div class="hint">prune 会删除已停止容器或未使用镜像</div>
+        </div>
+        <n-switch
+          :value="settings.containersConfirmPrune"
+          @update:value="(v: boolean) => settings.setContainersConfirmPrune(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">删除运行中容器前确认</div>
+          <div class="hint">关闭后删除运行中容器将直接强制删除</div>
+        </div>
+        <n-switch
+          :value="settings.containersConfirmRemoveRunning"
+          @update:value="(v: boolean) => settings.setContainersConfirmRemoveRunning(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">容器默认停止超时</div>
+          <div class="hint">stop -t N（1–300 秒）</div>
+        </div>
+        <n-input-number
+          :value="settings.containersDefaultStopTimeoutSec"
+          size="small"
+          :min="1"
+          :max="300"
+          @update:value="(v: number | null) => v && settings.setContainersDefaultStopTimeoutSec(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">运行向导默认镜像</div>
+        </div>
+        <n-input
+          :value="settings.containersLastImage"
+          size="small"
+          style="max-width: 260px"
+          @update:value="(v: string) => settings.setContainersLastImage(v)"
+        />
+      </div>
+      <div class="setting-line">
+        <div>
+          <div class="label">遮挡容器环境变量值</div>
+          <div class="hint">详情页默认隐藏环境变量值，避免泄露密钥</div>
+        </div>
+        <n-switch
+          :value="settings.containersMaskEnvValues"
+          @update:value="(v: boolean) => settings.setContainersMaskEnvValues(v)"
         />
       </div>
     </n-card>

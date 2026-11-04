@@ -307,6 +307,40 @@ describe('distros + meta IPC handlers', () => {
     expect(list[0].hostDiskBytes).toBe(123456789)
   })
 
+  it('注册表缺条目 / 宿主磁盘不可读时逐项降级（不丢其他发行版）', async () => {
+    const ctx = makeCtx()
+    const { wrapped, deps } = register(ctx)
+    deps.wsl.listWithMeta.mockResolvedValueOnce([
+      {
+        name: 'Ubuntu',
+        state: 'Running',
+        version: 2,
+        isDefault: true,
+        meta: null,
+        basePath: 'C:\\WSL\\Ubuntu',
+      },
+      {
+        name: 'Debian',
+        state: 'Stopped',
+        version: 2,
+        isDefault: false,
+        meta: null,
+        basePath: 'C:\\WSL\\Missing',
+      },
+      { name: 'Alpine', state: 'Stopped', version: 2, isDefault: false, meta: null },
+    ])
+    deps.registry.listAll.mockResolvedValueOnce([
+      { name: 'Ubuntu', guid: '{GUID-1}', basePath: 'C:\\WSL\\Ubuntu', defaultUid: 1000 },
+    ])
+    const list = await wrapped.get(CH.distrosList)({})
+    expect(list[0].guid).toBe('{GUID-1}')
+    expect(list[0].hostDiskBytes).toBe(123456789)
+    expect(list[1].guid).toBeUndefined()
+    expect(list[1].hostDiskBytes).toBe(123456789)
+    expect(list[2].basePath).toBeUndefined()
+    expect(list[2].hostDiskBytes).toBeUndefined()
+  })
+
   it('注册表不可用时降级不阻断（设计书 §9.2）', async () => {
     const ctx = makeCtx()
     const { wrapped, deps } = register(ctx)

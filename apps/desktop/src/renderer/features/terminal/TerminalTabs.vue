@@ -26,6 +26,8 @@ const props = defineProps<{
   defaultShell: string
   /** 创建中的发行版名单：按钮据此进入 loading 并防重（review 0.1.2 根治） */
   creatingDistros?: string[]
+  /** 左侧标签栏（workbench.tabPosition=left） */
+  vertical?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -150,7 +152,7 @@ function submitNew() {
 </script>
 
 <template>
-  <div class="terminal-tabs">
+  <div class="terminal-tabs" :class="{ vertical }">
     <!-- 标签增删：缩放淡出（§12.5）+ 拖拽排序 FLIP（§13.2） -->
     <transition-group name="tab" tag="div" class="tabs-scroll" role="tablist" aria-label="终端标签">
       <!-- 外层不是 button：内部含关闭按钮，嵌套交互元素非法 HTML（review M4） -->
@@ -233,37 +235,57 @@ function submitNew() {
 </template>
 
 <style scoped>
+.terminal-tabs.vertical {
+  flex-direction: column;
+  height: 100%;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.terminal-tabs.vertical .tabs-scroll {
+  flex-direction: column;
+  overflow: hidden auto;
+}
+
+.terminal-tabs.vertical .tab {
+  width: 100%;
+}
+
+.terminal-tabs.vertical .tabs-actions {
+  flex-shrink: 0;
+}
+
 .terminal-tabs {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  gap: 6px;
+  padding: 0;
+  height: 30px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .tabs-scroll {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   flex: 1;
   min-width: 0;
+  scrollbar-width: none;
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: var(--color-bg-sunken);
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 11.5px;
   white-space: nowrap;
-
-  /* 双击改名不被文本选择干扰（核验修复） */
   user-select: none;
   transition: background var(--dur-fast) var(--ease-standard);
 }

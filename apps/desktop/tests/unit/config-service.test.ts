@@ -28,12 +28,12 @@ describe('ConfigService', () => {
 
   it('creates default config files on first run', async () => {
     const settings = await svc.load('settings')
-    expect(settings.$schemaVersion).toBe(2)
+    expect(settings.$schemaVersion).toBe(3)
     expect(settings.general.accent).toBe('aurora')
 
     const text = await fs.readFile(join(dir, 'settings.jsonc'), 'utf8')
     expect(text).toContain('WSLPilot settings.jsonc')
-    expect(text).toContain('"$schemaVersion": 2')
+    expect(text).toContain('"$schemaVersion": 3')
   })
 
   it('network v2 读取时空/非法 id 修复并保留重复，供网络页一键修复', async () => {
@@ -103,7 +103,7 @@ describe('ConfigService', () => {
 
   it('replace writes whole file (documented no-comment case)', async () => {
     await svc.replace('settings', {
-      $schemaVersion: 2,
+      $schemaVersion: 3,
       general: {
         autoRefreshOnStart: true,
         pollIntervalMs: 5000,
@@ -113,6 +113,16 @@ describe('ConfigService', () => {
         launchAtLogin: true,
         reduceMotion: false,
       },
+      workbench: {
+        defaultRoute: 'dashboard',
+        autoCollapseSidebar: true,
+        tabPosition: 'top',
+        density: 'comfortable',
+        showStatusLine: true,
+        showPaneHeaders: 'auto',
+        sessionRailWidth: 240,
+        confirmClosePane: true,
+      },
       wsl: {
         defaultShell: '/bin/bash',
         autoShutdownAfterConfigChange: true,
@@ -121,11 +131,32 @@ describe('ConfigService', () => {
         fontFamily: 'Fira Code',
         fontSize: 16,
         lineHeight: 1.4,
+        letterSpacing: 0,
         cursorStyle: 'bar',
         cursorBlink: false,
+        cursorInactiveStyle: 'outline',
         scrollback: 10000,
         copyOnSelect: true,
+        rightClickBehavior: 'contextMenu',
+        pasteWarning: 'multiline',
         theme: 'follow-app',
+        bell: 'none',
+        webgl: 'auto',
+        smoothScroll: true,
+        minimumContrastRatio: 4.5,
+        shellIntegration: 'off',
+        confirmCloseWithRunningProcess: true,
+        defaultProfileId: '',
+        profiles: [],
+      },
+      containers: {
+        pollIntervalMs: 3000,
+        statsIntervalMs: 1000,
+        confirmPrune: true,
+        confirmRemoveRunning: true,
+        defaultStopTimeoutSec: 10,
+        maskEnvValues: true,
+        lastImage: 'ubuntu:latest',
       },
       backup: {
         defaultDir: 'D:\\Backup',
@@ -391,7 +422,7 @@ describe('ConfigService', () => {
     await svc.patch('settings', { general: { accent: 'ocean' } })
     const s = svc.loadSync('settings') as any
     expect(s.general.accent).toBe('ocean')
-    expect(svc.loadSync('distros').$schemaVersion).toBe(2)
+    expect(svc.loadSync('distros').$schemaVersion).toBe(3)
   })
 
   it('empty patch keeps file intact and comments', async () => {
@@ -466,7 +497,7 @@ describe('ConfigService', () => {
 
   // ── 配置迁移集成（review M6：迁移/备份分支零覆盖根治）──
 
-  it('migrates v1 settings to v2, keeps comments, and backs up original', async () => {
+  it('migrates v1 settings to v3, keeps comments, and backs up original', async () => {
     const filePath = join(dir, 'settings.jsonc')
     const v1 = `{
   // 迁移前的用户注释
@@ -480,13 +511,13 @@ describe('ConfigService', () => {
     try {
       const loaded = await svc2.load('settings')
       // 迁移补全新字段并盖章 v2
-      expect(loaded.$schemaVersion).toBe(2)
+      expect(loaded.$schemaVersion).toBe(3)
       expect(loaded.general.accent).toBe('sunset')
       expect(loaded.general.launchAtLogin).toBe(false)
       expect(loaded.general.reduceMotion).toBe(false)
 
       const text = await fs.readFile(filePath, 'utf8')
-      expect(text).toContain('"$schemaVersion": 2')
+      expect(text).toContain('"$schemaVersion": 3')
       expect(text).toContain('迁移前的用户注释')
 
       const backups = (await fs.readdir(join(dir, 'backups'))).filter((f) => f.includes('.v1.'))

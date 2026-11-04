@@ -4,6 +4,11 @@ import { repairDuplicateRuleIds } from './network'
 /** 配置版本迁移链：旧结构 → 新结构（模块内类型，外部经 migrateConfig 消费） */
 type MigrationFn = (old: Record<string, unknown>) => Record<string, unknown>
 
+/** 脏数据防御：只有普通对象才展开，字符串/数组/null 一律回退空对象 */
+function asObject(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+
 /** 迁移链表（模块内常量，外部经 migrateConfig 消费）。
  *  `Record<ConfigKeyOf, …>` 让新增配置键漏配迁移链在编译期即报错（此前 `?? []` 静默兜底）。 */
 const migrations: Record<ConfigKeyOf, MigrationFn[]> = {
@@ -16,9 +21,52 @@ const migrations: Record<ConfigKeyOf, MigrationFn[]> = {
         accent: 'aurora',
         launchAtLogin: false,
         reduceMotion: false,
-        ...(v1.general ?? {}),
+        ...asObject(v1.general),
       },
     }),
+    // v2 → v3: 工作台/容器设置；终端主题枚举迁移
+    (v2) => {
+      const terminal = asObject(v2.terminal)
+      const oldTheme = String(terminal.theme ?? 'auto')
+      return {
+        ...v2,
+        $schemaVersion: 3,
+        workbench: {
+          defaultRoute: 'dashboard',
+          autoCollapseSidebar: true,
+          tabPosition: 'top',
+          density: 'comfortable',
+          showStatusLine: true,
+          showPaneHeaders: 'auto',
+          sessionRailWidth: 240,
+          confirmClosePane: true,
+          ...asObject(v2.workbench),
+        },
+        containers: {
+          pollIntervalMs: 3000,
+          statsIntervalMs: 1000,
+          confirmPrune: true,
+          confirmRemoveRunning: true,
+          defaultStopTimeoutSec: 10,
+          maskEnvValues: true,
+          lastImage: 'ubuntu:latest',
+          ...asObject(v2.containers),
+        },
+        terminal: {
+          ...terminal,
+          theme:
+            oldTheme === 'auto'
+              ? 'light'
+              : oldTheme === 'custom'
+                ? 'high-contrast'
+                : oldTheme === 'dark' || oldTheme === 'light' || oldTheme === 'high-contrast'
+                  ? oldTheme
+                  : oldTheme === 'follow-app'
+                    ? 'follow-app'
+                    : 'light',
+        },
+      }
+    },
   ],
   distros: [
     // v1 → v2: tags 上限 64/20、quickActions 上限 100/20 在 0.1.4 收紧；
@@ -49,6 +97,20 @@ const migrations: Record<ConfigKeyOf, MigrationFn[]> = {
       })
       return { ...v1, $schemaVersion: 2, distros }
     },
+    // v2 → v3: 终端 profile / 隐藏 / 默认 Shell
+    (v2) => {
+      const list = Array.isArray(v2.distros) ? (v2.distros as unknown[]) : []
+      const distros = list.map((raw) => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+        return {
+          terminalProfileId: '',
+          hidden: false,
+          defaultShell: '',
+          ...(raw as Record<string, unknown>),
+        }
+      })
+      return { ...v2, $schemaVersion: 3, distros }
+    },
   ],
   actions: [],
   network: [
@@ -61,7 +123,22 @@ const migrations: Record<ConfigKeyOf, MigrationFn[]> = {
       return { ...v1, $schemaVersion: 2, portForwarding: repaired.rules }
     },
   ],
-  uiState: [],
+  containers: [],
+  uiState: [
+    // v1 → v2: 工作台布局（旧 terminalLayout 不迁移，会话不跨重启）
+    (v1) => ({
+      ...v1,
+      $schemaVersion: 2,
+      workbench: {
+        activeTabId: '',
+        sessionRailOpen: false,
+        tabs: [],
+        ...(v1.workbench && typeof v1.workbench === 'object' && !Array.isArray(v1.workbench)
+          ? (v1.workbench as Record<string, unknown>)
+          : {}),
+      },
+    }),
+  ],
   state: [],
 }
 

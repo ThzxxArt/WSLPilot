@@ -12,10 +12,10 @@ export interface WindowState {
 }
 
 const DEFAULT_STATE: WindowState = {
-  width: 1180,
-  height: 760,
-  x: 200,
-  y: 120,
+  width: 1440,
+  height: 900,
+  x: 120,
+  y: 80,
   maximized: false,
 }
 
@@ -47,8 +47,8 @@ export async function createMainWindow(
     height: s.height,
     x: s.x,
     y: s.y,
-    minWidth: 720,
-    minHeight: 520,
+    minWidth: 960,
+    minHeight: 600,
     frame: false,
     titleBarStyle: 'hidden',
     show: false,

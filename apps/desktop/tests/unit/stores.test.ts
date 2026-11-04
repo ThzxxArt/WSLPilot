@@ -612,3 +612,88 @@ describe('useDistrosStore edges', () => {
     expect(s.items.map((d) => d.name)).toEqual(['B', 'A', 'C'])
   })
 })
+
+describe('distros store 隐藏发行版 getter（0.2.0）', () => {
+  it('visibleItems 过滤 hidden；hiddenCount 计数', async () => {
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    const s = useDistrosStore()
+    s.items = [
+      { name: 'Ubuntu', meta: { hidden: false } },
+      { name: 'docker-desktop', meta: { hidden: true } },
+      { name: 'Debian' },
+    ] as never
+    expect(s.visibleItems.map((d) => d.name)).toEqual(['Ubuntu', 'Debian'])
+    expect(s.hiddenCount).toBe(1)
+  })
+})
+
+describe('distros store 排序/busy/shutdown/代际（0.2.0 覆盖率补强）', () => {
+  it('refresh 置顶排序；旧响应晚到不覆盖', async () => {
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    const s = useDistrosStore()
+    wslAPI.distros.list.mockResolvedValueOnce([
+      { name: 'A', state: 'Stopped', version: 2, isDefault: false, meta: { pinned: false } },
+      { name: 'B', state: 'Stopped', version: 2, isDefault: false, meta: { pinned: true } },
+    ])
+    await s.refresh()
+    expect(s.items.map((d) => d.name)).toEqual(['B', 'A'])
+
+    let resolveOld!: (v: unknown[]) => void
+    wslAPI.distros.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        }),
+    )
+    const p1 = s.refresh()
+    wslAPI.distros.list.mockResolvedValueOnce([
+      { name: 'C', state: 'Running', version: 2, isDefault: true },
+    ])
+    const p2 = s.refresh()
+    await p2
+    resolveOld([{ name: 'Old', state: 'Stopped', version: 2, isDefault: false }])
+    await p1
+    expect(s.items.map((d) => d.name)).toEqual(['C'])
+  })
+
+  it('isBusy 带/不带 action；shutdownAll 成功把运行态置 Stopped，失败记录并抛出', async () => {
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    const s = useDistrosStore()
+    s.items = [
+      { name: 'A', state: 'Running', version: 2, isDefault: false },
+      { name: 'B', state: 'Stopped', version: 2, isDefault: false },
+    ] as never
+    s.busy.add('start:a')
+    expect(s.isBusy('A', 'start')).toBe(true)
+    expect(s.isBusy('A')).toBe(true)
+    expect(s.isBusy('B')).toBe(false)
+
+    wslAPI.distros.shutdown.mockResolvedValue(undefined)
+    await s.shutdownAll()
+    expect(s.items.every((d) => d.state === 'Stopped')).toBe(true)
+    expect(s.busy.has('*')).toBe(false)
+
+    wslAPI.distros.shutdown.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'shutdown',
+      recoverable: true,
+    })
+    await expect(s.shutdownAll()).rejects.toMatchObject({ message: 'shutdown' })
+    expect(s.lastError?.message).toBe('shutdown')
+    expect(s.busy.has('*')).toBe(false)
+  })
+})
+
+describe('distros store 默认项 / 隐藏回退（0.2.0）', () => {
+  it('默认发行版隐藏时回退到可见发行版', async () => {
+    const { useDistrosStore } = await import('../../src/renderer/stores/distros')
+    const s = useDistrosStore()
+    s.items = [
+      { name: 'hidden-default', isDefault: true, meta: { hidden: true } },
+      { name: 'visible', isDefault: false, meta: {} },
+    ] as never
+    expect(s.defaultDistro?.name).toBe('visible')
+    s.items = [{ name: 'hidden-default', isDefault: true, meta: { hidden: true } }] as never
+    expect(s.defaultDistro?.name).toBe('hidden-default')
+  })
+})

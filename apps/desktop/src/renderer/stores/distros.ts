@@ -15,11 +15,18 @@ export const useDistrosStore = defineStore('distros', {
 
   getters: {
     runningCount: (s) => s.items.filter((d) => d.state === 'Running').length,
-    defaultDistro: (s) => s.items.find((d) => d.isDefault) ?? null,
+    defaultDistro: (s) =>
+      s.items.find((d) => d.isDefault && d.meta?.hidden !== true) ??
+      s.items.find((d) => d.meta?.hidden !== true) ??
+      s.items.find((d) => d.isDefault) ??
+      null,
     /**
      * 按名称查找（大小写不敏感 — review 0.1.2 根治）：
      * WSL 发行版名不区分大小写，此前精确匹配导致 'ubuntu' 查不到 'Ubuntu'。
      */
+    /** 隐藏内部发行版（docker-desktop 等）后的列表；distros.jsonc v3 meta.hidden */
+    visibleItems: (s) => s.items.filter((d) => d.meta?.hidden !== true),
+    hiddenCount: (s) => s.items.filter((d) => d.meta?.hidden === true).length,
     byName: (s) => (name: string) => {
       const key = name.toLowerCase()
       return s.items.find((d) => d.name.toLowerCase() === key) ?? null

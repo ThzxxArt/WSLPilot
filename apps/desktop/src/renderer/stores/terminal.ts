@@ -2,7 +2,9 @@ import { defineStore } from 'pinia'
 import {
   toAppError,
   type AppError,
+  type TerminalProfile,
   type TerminalTabLayout,
+  type TerminalTheme,
   MAX_PTY_SESSIONS,
 } from '@wslpilot/shared'
 import { useDistrosStore } from './distros'
@@ -22,12 +24,50 @@ import {
   type PaneNode,
 } from '../features/terminal/panes'
 
+/**
+ * Shell 集成可用性缓存（0.2.0）：创建终端前确认已安装，避免 bash --rcfile 指向
+ * 不存在的文件产生噪声错误。60s TTL；探测失败按不可用处理。
+ */
+const shellReadyCache = new Map<string, { at: number; ready: boolean }>()
+
+async function shellIntegrationReady(distro: string, shell?: string): Promise<boolean> {
+  const key = `${distro.toLowerCase()}\u0000${shell ?? ''}`
+  const hit = shellReadyCache.get(key)
+  if (hit && Date.now() - hit.at < 60_000) return hit.ready
+  try {
+    const api = window.wslAPI.shellIntegration
+    if (!api) return false
+    const status = await api.status(distro, shell)
+    const ready = status.state === 'installed'
+    shellReadyCache.set(key, { at: Date.now(), ready })
+    return ready
+  } catch {
+    shellReadyCache.set(key, { at: Date.now(), ready: false })
+    return false
+  }
+}
+
+export function invalidateShellIntegrationCache(distro?: string): void {
+  if (!distro) {
+    shellReadyCache.clear()
+    return
+  }
+  const lower = distro.toLowerCase()
+  for (const key of shellReadyCache.keys()) {
+    if (key.startsWith(`${lower}\u0000`)) shellReadyCache.delete(key)
+  }
+}
+
 /** 单个面板（= 一条 pty 会话）元数据 */
 export interface PaneMeta {
   ptyId: string
   distro: string
+  /** 0.2.0：容器终端所属容器 id */
+  containerId?: string
   /** 实际启动的 shell（pty:create 回报；恢复会话时未知为空串） */
   shell: string
+  /** Profile 级终端主题覆盖（不写全局设置） */
+  theme?: TerminalTheme
   cwd?: string
   createdAt: number
   alive: boolean
@@ -178,8 +218,71 @@ export const useTerminalStore = defineStore('terminal', {
       const meta = useDistrosStore().byName(distro)?.meta
       const cwd = meta?.startupCwd?.trim()
       return {
-        shell: settings.wslDefaultShell?.trim() || undefined,
+        // 发行版级默认 Shell 覆盖全局（distros.jsonc v3）
+        shell: meta?.defaultShell?.trim() || settings.wslDefaultShell?.trim() || undefined,
         cwd: cwd && cwd !== '~' ? cwd : undefined,
+      }
+    },
+
+    /** 把已创建的 pty 注册成标签并激活（open/openContainer/openProfile 共享） */
+    activateNewTab(meta: PaneMeta, title: string): string {
+      const tab: TerminalTab = {
+        id: meta.ptyId,
+        title: title.slice(0, 80),
+        layout: makeLeaf(meta.ptyId),
+        createdAt: meta.createdAt,
+      }
+      this.tabs.push(tab)
+      this.activeTabId = tab.id
+      this.activeId = meta.ptyId
+      this.paneMemory[tab.id] = meta.ptyId
+      this.schedulePersistLayout()
+      return meta.ptyId
+    },
+
+    /** 按 settings.terminal.profiles 启动（主进程按 id 查配置，渲染层不传任意 argv） */
+    async openProfile(profile: TerminalProfile): Promise<string | null> {
+      this.lastError = null
+      if (!this.canCreate) {
+        this.lastError = {
+          code: 'TASK_FAILED',
+          message: `终端会话数已达上限 ${this.maxSessions}`,
+          recoverable: true,
+          suggestion: '请先关闭部分终端面板',
+        }
+        return null
+      }
+      const key = `profile:${profile.id}`
+      if (this.creatingDistros.includes(key)) return null
+      this.creatingDistros.push(key)
+      try {
+        const info = await window.wslAPI.terminal.createProfile({
+          profileId: profile.id,
+          cols: 80,
+          rows: 24,
+        })
+        const meta: PaneMeta = {
+          ptyId: info.ptyId,
+          distro: info.distro,
+          ...(profile.launch.kind === 'container'
+            ? { containerId: profile.launch.containerId }
+            : {}),
+          shell: info.shell || '',
+          cwd: info.cwd,
+          ...(profile.theme ? { theme: profile.theme } : {}),
+          createdAt: info.createdAt ?? Date.now(),
+          alive: true,
+        }
+        buffers.set(meta.ptyId, '')
+        adoptOrphan(meta.ptyId)
+        this.panes[meta.ptyId] = meta
+        return this.activateNewTab(meta, profile.label)
+      } catch (e) {
+        this.lastError = toAppError(e)
+        return null
+      } finally {
+        const i = this.creatingDistros.indexOf(key)
+        if (i >= 0) this.creatingDistros.splice(i, 1)
       }
     },
 
@@ -189,17 +292,16 @@ export const useTerminalStore = defineStore('terminal', {
      */
     async createPaneSession(
       distro: string,
-      opts: { shell?: string; cwd?: string } = {},
+      opts: { shell?: string; cwd?: string; containerId?: string } = {},
     ): Promise<PaneMeta | null> {
       this.lastError = null
       // 同一发行版的创建在途：拒绝重复创建（双击 / 双入口并发去重）
       // 大小写归一（review 0.1.2 审计修复）：WSL 名不区分大小写，Ubuntu/ubuntu 是同一发行版
       const lower = distro.toLowerCase()
       if (this.creatingDistros.some((d) => d.toLowerCase() === lower)) return null
-      // 状态硬门禁（review「启动只能走启动按钮」根治）：终端会话绝不隐式启动发行版。
-      // 未启动 → 拒绝并给出行动指引；查不到状态（列表未加载）时放行，交由 wsl 自身报错。
+      // 状态硬门禁：容器终端不依赖发行版；普通终端未启动拒绝（绝不隐式启动发行版）
       const known = useDistrosStore().byName(distro)
-      if (known && known.state !== 'Running') {
+      if (!opts.containerId && known && known.state !== 'Running') {
         this.lastError = {
           code: 'DISTRO_NOT_RUNNING',
           message: `发行版 ${known.name} 未运行，无法打开终端`,
@@ -220,16 +322,24 @@ export const useTerminalStore = defineStore('terminal', {
       // 同步段占用名额：await 期间其他创建会看到 creatingDistros 并拒绝（TOCTOU 封死）
       this.creatingDistros.push(distro)
       try {
+        const settings = useSettingsStore()
+        const wantIntegration =
+          !opts.containerId &&
+          settings.terminalShellIntegration !== 'off' &&
+          (await shellIntegrationReady(distro, opts.shell))
         const info = await window.wslAPI.terminal.create({
           distro,
+          ...(opts.containerId ? { containerId: opts.containerId } : {}),
           shell: opts.shell,
           cwd: opts.cwd,
+          shellIntegration: wantIntegration,
           cols: 80,
           rows: 24,
         })
         const meta: PaneMeta = {
           ptyId: info.ptyId,
           distro: info.distro,
+          ...(opts.containerId ? { containerId: opts.containerId } : {}),
           shell: info.shell || opts.shell || '',
           cwd: info.cwd ?? opts.cwd,
           createdAt: info.createdAt ?? Date.now(),
@@ -252,6 +362,12 @@ export const useTerminalStore = defineStore('terminal', {
 
     /** 新建标签（默认启动参数）：返回 ptyId；失败返回 null（lastError 已落地） */
     async openDefault(distro: string): Promise<string | null> {
+      // 发行版级 profile 优先（distros.jsonc v3 terminalProfileId）
+      const profileId = useDistrosStore().byName(distro)?.meta?.terminalProfileId?.trim()
+      if (profileId) {
+        const profile = useSettingsStore().terminalProfiles.find((p) => p.id === profileId)
+        if (profile) return this.openProfile(profile)
+      }
       return this.open(distro, this.defaultOpenOpts(distro))
     },
 
@@ -262,18 +378,21 @@ export const useTerminalStore = defineStore('terminal', {
     ): Promise<string | null> {
       const meta = await this.createPaneSession(distro, opts)
       if (!meta) return null
-      const tab: TerminalTab = {
-        id: meta.ptyId,
-        title: distro,
-        layout: makeLeaf(meta.ptyId),
-        createdAt: meta.createdAt,
-      }
-      this.tabs.push(tab)
-      this.activeTabId = tab.id
-      this.activeId = meta.ptyId
-      this.paneMemory[tab.id] = meta.ptyId
-      this.schedulePersistLayout()
-      return meta.ptyId
+      return this.activateNewTab(meta, distro)
+    },
+
+    /** 容器终端（wslc exec -it）：标题用容器名，distro 字段用于展示 */
+    async openContainer(
+      containerId: string,
+      title: string,
+      opts: { shell?: string; distro?: string } = {},
+    ): Promise<string | null> {
+      const meta = await this.createPaneSession(opts.distro || title, {
+        ...opts,
+        containerId,
+      })
+      if (!meta) return null
+      return this.activateNewTab(meta, title)
     },
 
     /**
@@ -298,7 +417,10 @@ export const useTerminalStore = defineStore('terminal', {
       const created = await this.createPaneSession(source.distro, {
         shell: source.shell || undefined,
         cwd: source.cwd,
+        // 容器面板分屏必须继续走 wslc exec，否则会误用 `wsl -d <容器名>`（0.2.0 review 根治）
+        ...(source.containerId ? { containerId: source.containerId } : {}),
       })
+      if (created && source.theme) created.theme = source.theme
       if (!created) return null
       const layout = splitLeaf(tab.layout, paneId, created.ptyId, dir)
       if (!layout) {
@@ -480,9 +602,21 @@ export const useTerminalStore = defineStore('terminal', {
         const byId = new Map(infos.map((i) => [i.ptyId, i]))
         const aliveIds = new Set(byId.keys())
         let saved: TerminalTabLayout[] = []
+        let savedActive = ''
         try {
           const ui = await window.wslAPI.config.get('uiState')
-          saved = Array.isArray(ui.terminalLayout) ? ui.terminalLayout : []
+          // ui-state v2：workbench.tabs 是新模型；旧 terminalLayout 仅作为迁移期兜底
+          const current = (ui as { workbench?: { tabs?: unknown } }).workbench?.tabs
+          if (Array.isArray(current) && current.length > 0) {
+            saved = current as TerminalTabLayout[]
+            savedActive =
+              typeof (ui as { workbench?: { activeTabId?: unknown } }).workbench?.activeTabId ===
+              'string'
+                ? (ui as { workbench: { activeTabId: string } }).workbench.activeTabId
+                : ''
+          } else {
+            saved = Array.isArray(ui.terminalLayout) ? ui.terminalLayout : []
+          }
         } catch {
           saved = []
         }
@@ -525,11 +659,11 @@ export const useTerminalStore = defineStore('terminal', {
             createdAt: info.createdAt,
           })
         }
-        // 活动指针校正
-        const firstTab = this.tabs[0]
+        // 活动指针校正（优先恢复 ui-state 里的活动标签）
+        const preferred = this.tabs.find((t) => t.id === savedActive) ?? this.tabs[0]
         if (!this.tabs.some((t) => t.id === this.activeTabId)) {
-          this.activeTabId = firstTab?.id ?? ''
-          this.activeId = firstTab ? firstLeafId(firstTab.layout) : ''
+          this.activeTabId = preferred?.id ?? ''
+          this.activeId = preferred ? this.pickPane(preferred) : ''
         }
       } catch {
         /* 恢复失败不影响主流程 */
@@ -605,9 +739,14 @@ export const useTerminalStore = defineStore('terminal', {
       layoutPersistTimer = setTimeout(() => {
         layoutPersistTimer = null
         const snapshot = this.layoutSnapshot()
-        void window.wslAPI.config.set('uiState', { terminalLayout: snapshot }).catch(() => {
-          /* 布局持久化失败不影响会话 */
-        })
+        // 写入 v2 模型（不再写 deprecated terminalLayout；旧字段仅迁移期读取）
+        void window.wslAPI.config
+          .set('uiState', {
+            workbench: { activeTabId: this.activeTabId, tabs: snapshot },
+          })
+          .catch(() => {
+            /* 布局持久化失败不影响会话 */
+          })
       }, LAYOUT_PERSIST_DEBOUNCE_MS)
     },
   },

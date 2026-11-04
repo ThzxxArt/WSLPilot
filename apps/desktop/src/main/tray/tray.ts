@@ -95,6 +95,10 @@ export function createTray(opts: TrayOptions): Tray {
         click: () => navigate('/terminal'),
       },
       {
+        label: '容器',
+        click: () => navigate('/containers'),
+      },
+      {
         label: '设置',
         click: () => navigate('/settings'),
       },

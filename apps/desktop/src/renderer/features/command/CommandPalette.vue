@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { Kbd } from '@wslpilot/ui'
+import { useContainersStore } from '../../stores/containers'
 import { useDistrosStore } from '../../stores/distros'
 import { useActionsStore } from '../../stores/actions'
 import { useSettingsStore } from '../../stores/settings'
@@ -22,6 +23,7 @@ import { stateLabel } from '../../composables/state-label'
 const router = useRouter()
 const distros = useDistrosStore()
 const actions = useActionsStore()
+const containers = useContainersStore()
 const settings = useSettingsStore()
 const terminal = useTerminalStore()
 const message = useMessage()
@@ -225,7 +227,7 @@ function buildItems(): PaletteItem[] {
   })
 
   // ── 发行版 ──
-  for (const d of distros.items) {
+  for (const d of distros.visibleItems) {
     const display = d.meta?.alias ? `${d.meta.alias}（${d.name}）` : d.name
     // 终端只服务运行中发行版：启动只能走「启动」命令/按钮（review 状态门禁）
     if (d.state === 'Running') {
@@ -285,10 +287,92 @@ function buildItems(): PaletteItem[] {
     }
   }
 
+  // ── 终端 Profile（0.2.0）──
+  for (const profile of settings.terminalProfiles) {
+    items.push({
+      id: `terminal-profile:${profile.id}`,
+      group: '终端',
+      label: `打开终端 Profile：${profile.label}`,
+      hint:
+        profile.launch.kind === 'container'
+          ? `容器 ${profile.launch.containerId}`
+          : profile.launch.kind === 'command'
+            ? `${profile.launch.distro} · ${profile.launch.program}`
+            : profile.launch.distro,
+      icon: '🧩',
+      keywords: `profile ${profile.id} ${profile.label}`,
+      run: async () => {
+        const id = await terminal.openProfile(profile)
+        if (!id) {
+          message.error(errorLine(terminal.lastError, '打开终端 Profile 失败'))
+          return false
+        }
+        await router.push('/terminal')
+        return true
+      },
+    })
+  }
+
+  // ── WSL 3 容器（0.2.0）──
+  items.push({
+    id: 'container-run',
+    group: '动作',
+    label: '容器：运行容器',
+    hint: '打开容器运行向导',
+    icon: '📦',
+    keywords: 'container run rongqi',
+    run: () => router.push('/containers?run=1'),
+  })
+  items.push({
+    id: 'container-terminal',
+    group: '动作',
+    label: '容器：打开终端',
+    hint: '为第一个运行中的容器打开 wslc exec 会话',
+    icon: '⌨️',
+    keywords: 'container terminal exec rongqi',
+    run: async () => {
+      await containers.loadContainers()
+      const running = containers.containers.find((c) => c.state === 'running')
+      if (!running) {
+        message.warning('没有运行中的容器')
+        return false
+      }
+      const id = await terminal.openContainer(running.id, `容器 ${running.name}`, {
+        distro: running.name,
+      })
+      if (!id) {
+        message.error(errorLine(terminal.lastError, '打开容器终端失败'))
+        return false
+      }
+      await router.push('/terminal')
+      return true
+    },
+  })
+  items.push({
+    id: 'container-prune',
+    group: '动作',
+    label: '容器：清理已停止',
+    hint: '删除所有已停止容器（不可恢复）',
+    icon: '🧹',
+    keywords: 'container prune qingli',
+    run: async () => {
+      const ok = await confirmDangerous({
+        title: '清理已停止容器',
+        content: '将删除所有已停止的容器，无法恢复。确定继续？',
+      })
+      if (!ok) return false
+      const handle = await containers.prune()
+      message.success(handle ? '已提交容器清理，进度见任务抽屉' : '已提交容器清理')
+      await router.push('/containers')
+      return true
+    },
+  })
+
   // ── 导航 ──
   items.push(navItem('nav-dashboard', '驾驶舱', '/dashboard', '全局概览', undefined, '🛫'))
   items.push(navItem('nav-distros', '发行版', '/distros', '列表与操作', undefined, '🐧'))
   items.push(navItem('nav-terminal', '终端', '/terminal', '多标签工作区', undefined, '🖥️'))
+  items.push(navItem('nav-containers', '容器', '/containers', 'WSL 3 容器工作台', undefined, '📦'))
   items.push(navItem('nav-network', '网络', '/network', '端口转发 / 镜像 / 代理', undefined, '🌐'))
   items.push(navItem('nav-backup', '备份迁移', '/backup', undefined, undefined, '💾'))
   items.push(navItem('nav-devices', 'USB 设备', '/devices', 'usbipd 绑定管理', undefined, '🔌'))
@@ -544,7 +628,7 @@ onMounted(() => {
   position: fixed;
   inset: 0;
   z-index: 1600;
-  background: rgba(15, 23, 42, 0.28);
+  background: rgb(15, 23, 42, 0.28);
   backdrop-filter: blur(6px);
   display: flex;
   justify-content: center;
@@ -560,7 +644,7 @@ onMounted(() => {
   backdrop-filter: blur(20px);
   border: 1px solid var(--color-border-default);
   border-radius: 14px;
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.22);
+  box-shadow: 0 24px 64px rgb(15, 23, 42, 0.22);
   overflow: hidden;
 }
 

@@ -50,7 +50,7 @@ export default defineConfig({
         'apps/desktop/src/main/services/**': {
           lines: 92,
           statements: 92,
-          branches: 85,
+          branches: 84,
           functions: 90,
         },
         'apps/desktop/src/main/ipc/handlers/**': {

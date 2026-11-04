@@ -1005,3 +1005,33 @@ describe('NetworkView', () => {
     expect(wslAPI.network.proxyApply).toHaveBeenCalledWith('Ubuntu')
   })
 })
+
+describe('ProxyPanel props 同步（0.2.0 review）', () => {
+  it('父级更新 proxy 时表单同步（ref 化后不得 Object.assign 到 ref 本身）', async () => {
+    const w = mount(ProxyPanel, {
+      props: {
+        proxy: {
+          useWindowsProxy: false,
+          httpProxy: 'http://127.0.0.1:7890',
+          httpsProxy: '',
+          noProxy: 'localhost',
+        },
+        distros: [distro('Ubuntu')],
+        windowsProxy: null,
+        proxyScript: null,
+      },
+      attachTo: document.body,
+    })
+    await w.setProps({
+      proxy: {
+        useWindowsProxy: true,
+        httpProxy: 'http://127.0.0.1:8888',
+        httpsProxy: 'http://127.0.0.1:8888',
+        noProxy: 'example.com',
+      },
+    })
+    const inputs = w.findAll('input')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('http://127.0.0.1:8888')
+    expect((inputs[2]!.element as HTMLInputElement).value).toBe('example.com')
+  })
+})

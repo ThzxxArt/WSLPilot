@@ -28,7 +28,7 @@ function makeUpdater(): UpdaterLike & {
     autoInstallOnAppQuit: false,
     checkForUpdates: vi.fn(async () => null),
     downloadUpdate: vi.fn(async () => []),
-    quitAndInstall: vi.fn(),
+    quitAndInstall: vi.fn<(isSilent?: boolean, isForceRunAfter?: boolean) => void>(),
     getFeedURL: () => 'https://github.com/ThzxxArt/WSLPilot',
     on(event: string, listener: (...args: never[]) => void) {
       const list = listeners.get(event) ?? []

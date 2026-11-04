@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { enableAutoUnmount, mount, flushPromises } from '@vue/test-utils'
-import { NCheckbox, NInput, NRadioGroup, NSelect } from 'naive-ui'
+import { NCheckbox, NInput, NInputNumber, NRadioGroup, NSelect, NSwitch } from 'naive-ui'
 import { defaultConfig } from '@wslpilot/shared'
 import { appError, createWslAPI, distro, findButton, bodyText, type WslAPIMock } from './support'
 
@@ -563,5 +563,25 @@ describe('SettingsView 编辑安全与恢复默认（review 0.1.2）', () => {
     expect(wslAPI.config.set).toHaveBeenCalled()
     expect(message.success).not.toHaveBeenCalled()
     expect(message.warning).toHaveBeenCalledWith('已恢复默认设置，界面刷新失败，请重启应用')
+  })
+})
+
+describe('SettingsView 新设置项交互（0.2.0）', () => {
+  it('所有开关/下拉/数字输入均能触发落盘（无幽灵字段）', async () => {
+    const w = mount(SettingsView, { attachTo: document.body })
+    await flushPromises()
+    for (const sw of w.findAllComponents(NSwitch)) {
+      sw.vm.$emit('update:value', true)
+    }
+    for (const sel of w.findAllComponents(NSelect)) {
+      const options = sel.props('options') as Array<{ value: unknown }> | undefined
+      const value = options?.[0]?.value
+      if (value !== undefined) sel.vm.$emit('update:value', value)
+    }
+    for (const num of w.findAllComponents(NInputNumber)) {
+      num.vm.$emit('update:value', 10)
+    }
+    await flushPromises()
+    expect(wslAPI.config.set).toHaveBeenCalled()
   })
 })

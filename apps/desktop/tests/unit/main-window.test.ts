@@ -113,8 +113,8 @@ describe('main-window', () => {
       makeConfigService({ x: -99999, y: -99999, width: 500, height: 400 }),
     )
     const win = createdWindows[0]
-    expect(win.opts.width).toBe(1180)
-    expect(win.opts.height).toBe(760)
+    expect(win.opts.width).toBe(1440)
+    expect(win.opts.height).toBe(900)
   })
 
   it('maximizes when saved state says so', async () => {

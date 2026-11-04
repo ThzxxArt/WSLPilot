@@ -101,6 +101,23 @@ const TASK_TYPE_LABELS = {
   manage: '磁盘管理',
   clone: '克隆发行版',
   unregister: '注销发行版',
+  'container-run': '运行容器',
+  'container-start': '启动容器',
+  'container-stop': '停止容器',
+  'container-restart': '重启容器',
+  'container-remove': '删除容器',
+  'container-prune': '清理容器',
+  'container-logs': '容器日志',
+  'container-copy': '复制容器文件',
+  'image-pull': '拉取镜像',
+  'image-build': '构建镜像',
+  'image-remove': '删除镜像',
+  'image-prune': '清理镜像',
+  'network-create': '创建网络',
+  'network-remove': '删除网络',
+  'volume-create': '创建卷',
+  'volume-remove': '删除卷',
+  'wslc-session': '容器会话',
 } satisfies Record<TaskType, string>
 
 export function taskTypeLabel(type: string): string {

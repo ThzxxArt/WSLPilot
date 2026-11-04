@@ -24,6 +24,8 @@ function makeProc() {
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
     pid: 12345,
     onData: (l) => {
       ee.on('data', l)
@@ -44,7 +46,10 @@ function makeProc() {
 describe('PtyManager', () => {
   let spawned: Array<{ file: string; args: string[]; opts: any }>
   let procs: ReturnType<typeof makeProc>[]
-  let events: { onData: ReturnType<typeof vi.fn>; onExit: ReturnType<typeof vi.fn> }
+  let events: {
+    onData: (ptyId: string, chunk: string) => void
+    onExit: (ptyId: string, code: number) => void
+  }
   let pty: ReturnType<typeof createPtyManager>
 
   const spawnFn: PtySpawnFn = (file, args, opts) => {
@@ -57,7 +62,10 @@ describe('PtyManager', () => {
   beforeEach(() => {
     spawned = []
     procs = []
-    events = { onData: vi.fn(), onExit: vi.fn() }
+    events = {
+      onData: vi.fn<(ptyId: string, chunk: string) => void>(),
+      onExit: vi.fn<(ptyId: string, code: number) => void>(),
+    }
     pty = createPtyManager(logger(), events, spawnFn)
   })
 
@@ -332,5 +340,144 @@ describe('PtyManager', () => {
     procs[0]!.emitExit(undefined as unknown as number)
     await expect(p).resolves.toBe(0)
     expect(events.onExit).toHaveBeenCalledWith(info.ptyId, 0)
+  })
+})
+
+describe('PtyManager 0.2.0（Shell 集成 / profile env / 流控）', () => {
+  let spawned: Array<{ file: string; args: string[]; opts: any }>
+  let procs: Array<ReturnType<typeof makeProc>>
+  let pty: ReturnType<typeof createPtyManager>
+  let events: {
+    onData: (ptyId: string, chunk: string) => void
+    onExit: (ptyId: string, code: number) => void
+  }
+
+  beforeEach(() => {
+    spawned = []
+    procs = []
+    events = { onData: vi.fn(), onExit: vi.fn() }
+    pty = createPtyManager(logger(), events, (file, args, opts) => {
+      const p = makeProc()
+      procs.push(p)
+      spawned.push({ file, args, opts })
+      return p.proc
+    })
+  })
+
+  it('bash 集成：--rcfile + profile env（argv 化）', () => {
+    pty.create({
+      distro: 'Ubuntu',
+      shell: '/bin/bash',
+      shellIntegration: true,
+      homeDir: '/home/me',
+      env: { A: '1', B: 'x y' },
+      cols: 80,
+      rows: 24,
+    })
+    expect(spawned[0]!.args).toEqual([
+      '-d',
+      'Ubuntu',
+      '-e',
+      'env',
+      'A=1',
+      'B=x y',
+      '/bin/bash',
+      '--rcfile',
+      '/home/me/.wslpilot/shell-integration/bashrc',
+      '-i',
+    ])
+  })
+
+  it('zsh 集成：ZDOTDIR 与原始 home；未安装集成时仍保留 env', () => {
+    pty.create({
+      distro: 'Ubuntu',
+      shell: '/usr/bin/zsh',
+      shellIntegration: true,
+      homeDir: '/home/me/',
+      cols: 80,
+      rows: 24,
+    })
+    expect(spawned[0]!.args).toEqual([
+      '-d',
+      'Ubuntu',
+      '-e',
+      'env',
+      'ZDOTDIR=/home/me/.wslpilot/shell-integration/zsh',
+      'WSLPILOT_ORIGINAL_ZDOTDIR=/home/me',
+      '/usr/bin/zsh',
+      '-i',
+    ])
+
+    pty.create({ distro: 'Ubuntu', shell: '/bin/bash', env: { A: '1' }, cols: 80, rows: 24 })
+    expect(spawned[1]!.args).toEqual(['-d', 'Ubuntu', '-e', 'env', 'A=1', '/bin/bash'])
+  })
+
+  it('不支持集成的 shell：忽略集成但仍传 env', () => {
+    pty.create({
+      distro: 'Ubuntu',
+      shell: '/usr/bin/fish',
+      shellIntegration: true,
+      homeDir: '/home/me',
+      env: { A: '1' },
+      cols: 80,
+      rows: 24,
+    })
+    expect(spawned[0]!.args).toEqual(['-d', 'Ubuntu', '-e', 'env', 'A=1', '/usr/bin/fish'])
+  })
+
+  it('容器终端未指定 shell 时回退 /bin/sh（alpine 没有 bash）', () => {
+    pty.create({
+      distro: 'web',
+      containerId: 'web',
+      user: 'dev',
+      cols: 80,
+      rows: 24,
+    })
+    expect(spawned[0]!.args).toEqual(['exec', '-it', '-u', 'dev', 'web', '/bin/sh'])
+  })
+
+  it('容器终端：wslc exec -it + env', () => {
+    pty.create({
+      distro: 'web',
+      containerId: 'web',
+      shell: '/bin/sh',
+      env: { A: '1' },
+      cols: 80,
+      rows: 24,
+    })
+    expect(spawned[0]!.file).toBe('wslc.exe')
+    expect(spawned[0]!.args).toEqual(['exec', '-it', 'web', 'env', 'A=1', '/bin/sh'])
+  })
+
+  it('createCommand 支持 env；非法 env 键/值拒绝', () => {
+    pty.createCommand({ distro: 'U', program: '/bin/true', args: [], env: { A: '1' } })
+    expect(spawned[0]!.args).toEqual(['-d', 'U', '-e', 'env', 'A=1', '/bin/true'])
+
+    expect(() => pty.create({ distro: 'U', env: { 'BAD-KEY': '1' }, cols: 80, rows: 24 })).toThrow()
+    expect(() =>
+      pty.create({
+        distro: 'U',
+        env: { A: 'x'.repeat(9000) },
+        cols: 80,
+        rows: 24,
+      }),
+    ).toThrow()
+    expect(() => pty.create({ distro: 'U', env: { A: 'x\u0000y' }, cols: 80, rows: 24 })).toThrow()
+  })
+
+  it('流控：超过高水位 pause；ACK 回落到低水位 resume；未知会话 ACK 忽略', () => {
+    const info = pty.create({ distro: 'U', cols: 80, rows: 24 })
+    const proc = procs[0]!.proc as unknown as {
+      pause: ReturnType<typeof vi.fn>
+      resume: ReturnType<typeof vi.fn>
+    }
+    procs[0]!.emitData('x'.repeat(1024 * 1024 + 1))
+    expect(proc.pause).toHaveBeenCalledTimes(1)
+    pty.ack(info.ptyId, 900 * 1024)
+    expect(proc.resume).toHaveBeenCalledTimes(1)
+    // 未暂停时 ACK 不下溢
+    pty.ack(info.ptyId, 10 ** 9)
+    pty.ack('no-such', 10)
+    expect(proc.resume).toHaveBeenCalledTimes(1)
   })
 })

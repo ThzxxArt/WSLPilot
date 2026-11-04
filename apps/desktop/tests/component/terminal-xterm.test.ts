@@ -19,10 +19,18 @@ interface FakeTerm {
   rows: number
   handlers: Record<string, (...a: unknown[]) => void>
   buffer: {
-    active: { cursorX: number; cursorY: number; viewportY: number; baseY: number }
+    active: {
+      cursorX: number
+      cursorY: number
+      viewportY: number
+      baseY: number
+      getLine: (n: number) => { translateToString: (trim: boolean) => string } | undefined
+    }
   }
+  parser: { registerOscHandler: ReturnType<typeof vi.fn> }
   customKeyHandler?: (e: KeyboardEvent) => boolean
   scrolledToBottom?: boolean
+  scrolledToLine?: number
   selectedAll?: boolean
 }
 const terms: FakeTerm[] = []
@@ -36,9 +44,20 @@ vi.mock('@xterm/xterm', () => ({
     cols = 80
     rows = 24
     handlers: Record<string, (...a: unknown[]) => void> = {}
-    buffer = { active: { cursorX: 3, cursorY: 5, viewportY: 24, baseY: 24 } }
+    buffer = {
+      active: {
+        cursorX: 3,
+        cursorY: 5,
+        viewportY: 24,
+        baseY: 24,
+        getLine: (_n: number) =>
+          undefined as { translateToString: (trim: boolean) => string } | undefined,
+      },
+    }
+    parser = { registerOscHandler: vi.fn() }
     customKeyHandler?: (e: KeyboardEvent) => boolean
     scrolledToBottom = false
+    scrolledToLine?: number
     selectedAll = false
     constructor(opts: Record<string, unknown>) {
       this.options = { ...opts }
@@ -64,6 +83,10 @@ vi.mock('@xterm/xterm', () => ({
     onScroll(fn: (...a: unknown[]) => void) {
       this.handlers.scroll = fn
     }
+    onBell(fn: (...a: unknown[]) => void) {
+      this.handlers.bell = fn
+    }
+    select() {}
     attachCustomKeyEventHandler(fn: (e: KeyboardEvent) => boolean) {
       this.customKeyHandler = fn
     }
@@ -75,6 +98,21 @@ vi.mock('@xterm/xterm', () => ({
     }
     scrollToBottom() {
       this.scrolledToBottom = true
+    }
+    scrollToLine(line: number) {
+      this.scrolledToLine = line
+    }
+    registerMarker() {
+      return { dispose: vi.fn() }
+    }
+    registerDecoration() {
+      return {
+        onRender: (cb: (el: HTMLElement) => void) => {
+          cb(document.createElement('div'))
+          return { dispose: vi.fn() }
+        },
+        dispose: vi.fn(),
+      }
     }
     clear() {
       ;(this as unknown as { cleared?: boolean }).cleared = true
@@ -496,8 +534,9 @@ describe('XtermPane', () => {
 describe('终端主题对比度（4 个主题关键色对 — review 0.1.2 验收）', () => {
   it('正文前景/背景对比度 ≥ 4.5:1（ANSI 彩色为装饰性例外，不参与断言）', () => {
     const themes = [
-      { name: 'light（auto）', t: resolveTerminalTheme('auto') },
-      { name: 'contrast（custom）', t: resolveTerminalTheme('custom') },
+      { name: 'light', t: resolveTerminalTheme('light') },
+      { name: 'dark', t: resolveTerminalTheme('dark') },
+      { name: 'contrast', t: resolveTerminalTheme('high-contrast') },
       { name: 'follow-app（aurora）', t: resolveTerminalTheme('follow-app', 'aurora') },
       { name: 'follow-app（ocean）', t: resolveTerminalTheme('follow-app', 'ocean') },
     ]
@@ -688,8 +727,17 @@ describe('XtermPane 0.1.3 增强（快捷键 / 粘贴 / 搜索 / WebGL / 右键�
     mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
     await flushPromises()
     const t = lastTerm()
+    useSettingsStore().terminalPasteWarning = 'never'
     wslAPI.clipboard.read.mockResolvedValueOnce('echo hi\n')
-    t.customKeyHandler!(keydownEvent({ ctrlKey: true, shiftKey: true, code: 'KeyV' }))
+    t.customKeyHandler!({
+      type: 'keydown',
+      ctrlKey: true,
+      shiftKey: true,
+      altKey: false,
+      metaKey: false,
+      code: 'KeyV',
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent)
     await flushPromises()
     expect(wslAPI.terminal.input).toHaveBeenCalledWith('p1', 'echo hi\n')
   })
@@ -758,5 +806,204 @@ describe('XtermPane 0.1.3 增强（快捷键 / 粘贴 / 搜索 / WebGL / 右键�
     t.buffer.active.viewportY = 0
     t.handlers.scroll!()
     expect(w.emitted('atBottom')!.at(-1)).toEqual([false])
+  })
+})
+
+describe('命令块（Shell 集成 OSC 133 — 0.2.0）', () => {
+  async function mountWithBlocks() {
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    const osc133 = t.parser.registerOscHandler.mock.calls.find((c) => c[0] === 133)![1] as (
+      data: string,
+    ) => boolean
+    // 绝对行 = baseY(24) + cursorY；提供提示符/输出行
+    t.buffer.active.getLine = (line: number) => {
+      const map: Record<number, string> = {
+        29: '$ echo hi',
+        30: 'hello output',
+        31: '',
+      }
+      return { translateToString: () => map[line] ?? '' }
+    }
+    return { w, t, osc133 }
+  }
+
+  it('A→B→C→D：提取命令、退出码、耗时并创建 gutter 装饰', async () => {
+    const { w, t, osc133 } = await mountWithBlocks()
+    t.buffer.active.cursorY = 5
+    t.buffer.active.cursorX = 2
+    osc133('A')
+    osc133('B')
+    t.buffer.active.cursorY = 6
+    osc133('C')
+    t.buffer.active.cursorY = 7
+    osc133('D;0')
+    const events = w.emitted('commandBlock')!
+    const last = events.at(-1)![0] as { block: { command?: string; exitCode?: number } }
+    expect(last.block.command).toBe('echo hi')
+    expect(last.block.exitCode).toBe(0)
+    expect(t.parser.registerOscHandler).toHaveBeenCalledWith(133, expect.any(Function))
+    expect(t.parser.registerOscHandler).toHaveBeenCalledWith(633, expect.any(Function))
+    expect(t.parser.registerOscHandler).toHaveBeenCalledWith(7, expect.any(Function))
+  })
+
+  it('Alt+↑/↓ 在完成块之间跳转并调用 scrollToLine', async () => {
+    const { w, t, osc133 } = await mountWithBlocks()
+    t.buffer.active.cursorY = 5
+    osc133('A')
+    osc133('B')
+    t.buffer.active.cursorY = 6
+    osc133('C')
+    t.buffer.active.cursorY = 7
+    osc133('D;0')
+    const handled = t.customKeyHandler!({
+      type: 'keydown',
+      altKey: true,
+      ctrlKey: false,
+      shiftKey: false,
+      metaKey: false,
+      code: 'ArrowUp',
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent)
+    expect(handled).toBe(false)
+    expect(t.scrolledToLine).toBe(29)
+    expect(w.emitted('commandBlock')).toBeTruthy()
+  })
+
+  it('copyLastOutput / rerunLastCommand 走剪贴板与 PTY 输入', async () => {
+    const { w, t, osc133 } = await mountWithBlocks()
+    t.buffer.active.cursorY = 5
+    t.buffer.active.cursorX = 2
+    osc133('A')
+    osc133('B')
+    t.buffer.active.cursorY = 6
+    osc133('C')
+    t.buffer.active.cursorY = 7
+    osc133('D;0')
+    const vm = w.vm as unknown as {
+      copyLastOutput: () => void
+      rerunLastCommand: () => void
+    }
+    vm.copyLastOutput()
+    await flushPromises()
+    expect(wslAPI.clipboard.write).toHaveBeenCalledWith('hello output')
+    vm.rerunLastCommand()
+    await flushPromises()
+    expect(wslAPI.terminal.input).toHaveBeenCalledWith('p1', 'echo hi\r')
+  })
+
+  it('无命令块时复制/重跑安全降级（提示而不是抛错）', async () => {
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const vm = w.vm as unknown as {
+      copyLastOutput: () => void
+      rerunLastCommand: () => void
+    }
+    vm.copyLastOutput()
+    vm.rerunLastCommand()
+    expect(wslAPI.clipboard.write).not.toHaveBeenCalled()
+    expect(wslAPI.terminal.input).not.toHaveBeenCalled()
+  })
+})
+
+describe('XtermPane 设置接线（0.2.0 review）', () => {
+  it('响铃 visual 闪烁 / sound 不抛错', async () => {
+    const settings = useSettingsStore()
+    settings.terminalBell = 'visual'
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const host = document.querySelector<HTMLElement>('.xterm-host')!
+    lastTerm().handlers.bell!()
+    expect(host.classList.contains('bell-flash')).toBe(true)
+
+    settings.terminalBell = 'sound'
+    expect(() => lastTerm().handlers.bell!()).not.toThrow()
+  })
+
+  it('右键行为 paste / selectWord 不弹菜单', async () => {
+    const settings = useSettingsStore()
+    settings.terminalRightClickBehavior = 'paste'
+    wslAPI.clipboard.read.mockResolvedValue('x')
+    const w = mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const host = document.querySelector<HTMLElement>('.xterm-host')!
+    host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 2 }))
+    await flushPromises()
+    expect(wslAPI.clipboard.read).toHaveBeenCalled()
+    expect(w.emitted('contextMenu')).toBeUndefined()
+
+    settings.terminalRightClickBehavior = 'selectWord'
+    const t = lastTerm()
+    t.buffer.active.getLine = () => ({ translateToString: () => 'hello world' })
+    t.buffer.active.cursorX = 1
+    host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 2 }))
+    await flushPromises()
+    expect(w.emitted('contextMenu')).toBeUndefined()
+  })
+
+  it('WebGL off 不加载；切成 off 释放已有 addon', async () => {
+    const settings = useSettingsStore()
+    webglInstances.length = 0
+    settings.terminalWebgl = 'off'
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    expect(webglInstances).toHaveLength(0)
+
+    settings.terminalWebgl = 'auto'
+    await flushPromises()
+    expect(webglInstances).toHaveLength(1)
+    settings.terminalWebgl = 'off'
+    await flushPromises()
+    expect(webglInstances[0]!.disposed).toBe(true)
+  })
+
+  it('粘贴确认：always 弹出对话框，positive 后发送', async () => {
+    const settings = useSettingsStore()
+    settings.terminalPasteWarning = 'always'
+    wslAPI.clipboard.read.mockResolvedValue('one')
+    dialog.warning.mockImplementationOnce((opts: { onPositiveClick?: () => void }) => {
+      opts.onPositiveClick?.()
+    })
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const t = lastTerm()
+    t.customKeyHandler!({
+      type: 'keydown',
+      ctrlKey: true,
+      shiftKey: true,
+      altKey: false,
+      metaKey: false,
+      code: 'KeyV',
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent)
+    await flushPromises()
+    expect(dialog.warning).toHaveBeenCalled()
+    expect(wslAPI.terminal.input).toHaveBeenCalledWith('p1', 'one')
+  })
+})
+
+describe('XtermPane 响铃/粘贴关闭分支（0.2.0）', () => {
+  it('bell=none 不闪烁；pasteWarning=never 直接发送', async () => {
+    const settings = useSettingsStore()
+    settings.terminalBell = 'none'
+    settings.terminalPasteWarning = 'never'
+    wslAPI.clipboard.read.mockResolvedValue('x')
+    mount(XtermPane, { props: { ptyId: 'p1' }, attachTo: document.body })
+    await flushPromises()
+    const host = document.querySelector<HTMLElement>('.xterm-host')!
+    lastTerm().handlers.bell!()
+    expect(host.classList.contains('bell-flash')).toBe(false)
+    lastTerm().customKeyHandler!({
+      type: 'keydown',
+      ctrlKey: true,
+      shiftKey: true,
+      altKey: false,
+      metaKey: false,
+      code: 'KeyV',
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent)
+    await flushPromises()
+    expect(wslAPI.terminal.input).toHaveBeenCalledWith('p1', 'x')
   })
 })

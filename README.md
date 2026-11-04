@@ -7,7 +7,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 - **技术栈**：TypeScript + Vue 3 + Electron（npm workspaces monorepo）
 - **持久化**：人类可读的 JSONC 配置文件（无数据库，可纳入 Git）
 - **设计系统**：浅色「极光」风格（四套强调色），完整动效基座，支持 `prefers-reduced-motion`
-- **当前版本**：`0.1.4`（WSL 3.0 对齐版——能力矩阵、存储治理、终端保活回归修复、`.wslconfig`/`wsl.conf` 配置面扩展、tar.gz 备份）。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
+- **当前版本**：`0.2.0`（终端 2.0 工作台 + WSL 3 容器工作台 + 配置 v3）。终端全出血布局、Shell 集成与命令块、容器/镜像/网络/卷全链路、Electron 45 / Vite 8 / Vue Router 5 / Pinia 4 / Zod 4 / TS 6 底座。版本序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**
 
 ---
 
@@ -36,7 +36,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 
 - 驾驶舱总览：运行状态、真实资源采样（内存 / 磁盘 / CPU `/proc/stat` 双采样差分，不推算伪造）
 - 一键启动 / 停止 / 设为默认 / 全部关机；卡片与表格双视图，搜索与标签筛选
-- 发行版详情弹窗（概览 / 配置 / 动作 / 文件四标签）：注册表详情、元数据编辑（别名 / 图标 / 品牌色 / 启动目录 / 置顶等 8 字段）、版本转换、注销（可勾选注销前自动备份）
+- 发行版详情弹窗（概览 / 配置 / 动作 / 文件四标签）：注册表详情、元数据编辑（别名 / 图标 / 品牌色 / 启动目录 / 默认 Shell / Profile / 隐藏 / 置顶等 11 字段）、版本转换、注销（可勾选注销前自动备份）
 - **宿主磁盘与存储治理**：详情页展示 `ext4.vhdx` 实际占用、内部用量与可回收上限估算；支持压缩（`--compact`）、扩容（`--resize`，只增不减）、默认用户（`--set-default-user`）、稀疏磁盘与“停止全部 WSL”显式入口（WSL 版本能力自动门禁）
 - **克隆发行版**：导出临时归档 → 以新名导入 → 自动清理（失败自动回滚）；**安装向导**（`wsl --list --online` 友好名 + `wsl --install` 高级选项：安装位置 / 版本 / 磁盘大小 / 固定磁盘 / Internet 下载，带进度与取消）
 - **WSL 本体生命周期**（设置 → WSL / 驾驶舱引导）：环境体检（版本 / 内核 / 默认发行版 / 默认版本 / 能力矩阵）、未安装时**一键安装 WSL**、`wsl --update` 更新与修复（含预发布通道）、`wsl --set-default-version` 默认版本；**不再提供失效的 `--rollback`**，改为查看版本历史 / 手动安装旧版
@@ -50,6 +50,21 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 - **快捷键与右键菜单**：Ctrl+Shift+C/V 复制/粘贴（主进程剪贴板，大段粘贴自动分片）、Ctrl+Shift+F 搜索、Ctrl+Tab 循环标签；右键菜单（复制/粘贴/全选/查找/清屏/滚到底/分屏/关闭面板）
 - **搜索增强**：全部命中高亮 + 当前命中强调、区分大小写 / 正则、命中计数（N/M）
 - 缩放与导出会话记录、滚动到底部快捷跳转
+- **终端 2.0 工作台**（0.2.0）：终端路由独立全出血壳（无全局 TitleBar / StatusBar，导航轨 56px），1920×1080 绘图区 ≥90%；专注模式、按需工具栏浮层、会话侧栏、紧凑密度
+- **Shell 集成与命令块**：显式安装（只写 `~/.wslpilot/shell-integration/`，绝不改用户 rc，可一键移除）；解析 OSC 133/633/7，展示命令块状态点、退出码、耗时与 cwd；右键复制上一条输出 / 重跑命令，`Alt+↑/↓` 跳转命令块
+- **容器终端**：`wslc exec -it` 直接打开容器会话，与发行版终端共享标签/分屏/流控；输出 ACK 流控防止大输出压垮渲染层
+- **终端 Profile**：`settings.terminal.profiles` 支持 distro / container / command 三类启动方式，可从会话侧栏或命令面板一键打开
+- 深色终端主题（应用仍浅色）、高对比主题、主题切换即时持久化；终端专用 New 快捷键（专注模式 / 侧栏 / 工具栏）
+
+### WSL 3 容器（wslc）
+
+- **能力探测与降级**：独立探测 `wslc.exe`（不因容器能力缺失影响发行版管理）；旧版 WSL 显示「更新 WSL」引导而不是白屏
+- **容器工作台**：容器 / 镜像 / 网络 / 卷 / 系统五个 Tab；运行向导实时预览等价 `wslc.exe` argv，端口 / 挂载 / 环境变量 / 内存 / CPU / GPU / 健康检查
+- **全生命周期**：启动 / 停止 / 重启 / 删除 / 清理、inspect 详情、日志流、复制文件、容器终端
+- **镜像**：列表 / 拉取 / 构建（Containerfile 目录选择）/ 删除 / prune
+- **网络与卷**：创建 / 删除 / 连接 / 断开 / prune；系统页管理 `settings.yaml`（读写 / 重置）与容器会话（终止会话会停止全部容器）
+- **实时性**：`wslc events` 推送 + 统计轮询（间隔可配）；页面卸载自动退订
+- **安全边界**：所有 argv 由 `packages/shared/src/containers.ts` 结构化构建；容器名 / 镜像引用 / 挂载路径 / 端口 / 环境变量名全部校验，拒绝注入与路径逃逸
 
 ### 备份与迁移
 
@@ -100,7 +115,8 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 | ----------- | ---------------------------------------------------------------------------------------------- |
 | 🛫 驾驶舱   | 全局概览：指标卡、我的发行版、快捷操作、一键安装 / 全部关机                                    |
 | 🐧 发行版   | 列表与行内操作，搜索 / 标签筛选，卡片 ⇄ 表格切换                                               |
-| ⌨️ 终端     | 多标签终端工作区，偏好设置实时生效                                                             |
+| ⌨️ 终端     | 全出血多标签工作台；分屏 / 专注 / 命令块 / 容器终端 / Shell 集成                               |
+| 📦 容器     | WSL 3 容器 / 镜像 / 网络 / 卷 / 系统会话工作台                                                 |
 | 🌐 网络     | 镜像模式引导、端口转发规则表、代理配置                                                         |
 | 💾 备份迁移 | 导出 / 导入 / 迁移三模式向导 + 最近备份列表                                                    |
 | 🔌 USB 设备 | usbipd 设备管理，未安装时的安装引导                                                            |
@@ -110,18 +126,21 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 
 全局可用；macOS 上 Ctrl 对应 ⌘。在输入框与终端内自动让位，不劫持输入。
 
-| 快捷键             | 功能                       |
-| ------------------ | -------------------------- |
-| `Ctrl + K`         | 打开命令面板               |
-| `Ctrl + N`         | 新建终端标签               |
-| `Ctrl + Shift + T` | 新建终端标签（终端内可用） |
-| `Ctrl + Tab`       | 循环切换终端标签           |
-| `Ctrl + Shift + 5` | 终端左右分屏               |
-| `Ctrl + Shift + 6` | 终端上下分屏               |
-| `Ctrl + ,`         | 打开设置                   |
-| `Ctrl + R`         | 刷新发行版列表             |
-| `Ctrl + Shift + P` | 显示 / 隐藏等价命令行      |
-| `Ctrl + 1…9`       | 切换终端标签               |
+| 快捷键                 | 功能                       |
+| ---------------------- | -------------------------- |
+| `Ctrl + K`             | 打开命令面板               |
+| `Ctrl + N`             | 新建终端标签               |
+| `Ctrl + Shift + T`     | 新建终端标签（终端内可用） |
+| `Ctrl + Tab`           | 循环切换终端标签           |
+| `Ctrl + Shift + 5`     | 终端左右分屏               |
+| `Ctrl + Shift + 6`     | 终端上下分屏               |
+| `Ctrl + ,`             | 打开设置                   |
+| `Ctrl + R`             | 刷新发行版列表             |
+| `Ctrl + Shift + P`     | 终端工具栏浮层             |
+| `Ctrl + Shift + B`     | 显示 / 隐藏会话侧栏        |
+| `Ctrl + Shift + Enter` | 专注模式                   |
+| `Alt + ↑ / ↓`          | 上一条 / 下一条命令块      |
+| `Ctrl + 1…9`           | 切换终端标签               |
 
 终端内快捷键：`Ctrl + Shift + C` 复制选中、`Ctrl + Shift + V` 粘贴、`Ctrl + Shift + F` 搜索。
 
@@ -132,7 +151,7 @@ Windows Subsystem for Linux 的现代化图形控制中枢——发行版管理�
 **环境要求**
 
 - Windows 10/11 + 已启用 WSL（WSL2 推荐；WSL 部分能力依赖 WSL2）
-- Node.js ≥ 20、npm ≥ 12（`corepack enable` 可启用仓库钉定的 npm 版本）
+- Node.js ≥ 22.22、npm ≥ 12（`corepack enable` 可启用仓库钉定的 npm 版本）
 
 ```bash
 npm install        # 安装依赖（postinstall 自动生成设计令牌）
@@ -158,7 +177,7 @@ npm run tokens           # 重新生成设计令牌 CSS（tokens.generated.scss�
 
 ```bash
 npm run test:coverage    # 单元测试 + 覆盖率硬门禁（≥85%，不达标即失败）
-npm run test:component   # 组件测试 + 覆盖率硬门禁（ui 96/87/90、renderer 87/82/57 两档地板）
+npm run test:component   # 组件测试 + 覆盖率硬门禁（ui 96/88/90、renderer 78/76/74）
 npm run test:e2e         # E2E + 视觉回归（需显示环境；先构建 desktop）
 npm run test:visual      # 仅视觉回归（基线比对，缺基线直接红）
 npm run smoke:product    # 产物冒烟（main / preload 模块图完整性）
@@ -172,9 +191,9 @@ npm run tokens:check     # 设计令牌漂移检查（tokens.ts 与生成产物�
   也不受本机强调色 / 侧栏折叠 / 语言影响；`test:e2e` 含视觉回归，`test:visual` 仅跑视觉
 - **视觉回归**：截图基线按平台入库（`{arg}-{platform}.png`，linux / win32 各一套），`updateSnapshots: 'none'` 硬门禁——缺基线直接失败，禁止 CI 自动造基线放行；新增 / 更新截图用 `npx playwright test --grep @visual --update-snapshots=all` 并提交产物
 - **E2E 串行**：应用是单实例语义，`workers: 1` 防并行双开假红
-- **实测（2026-10-14）**：单测 1186 条（lines 95.07% / branches 88.08% / functions 94.84%）；
-  组件 365 用例（ui 桶 98.99/90.58/92.86、renderer 桶 89.72/84.30/63.53，两档地板为「实测 −2pp」）；
-  E2E = smoke 2 条 + 视觉 2 条；`tokens:check` 已入 CI（令牌漂移即红）
+- **实测（2026-11-04，0.2.0）**：单测 1,521 条（lines 96.17% / branches 86.16% / functions 93.99%）；
+  组件 413 用例（ui 桶 98.99/90.58/92.86、renderer 桶 78.60/76.83/74.51）；
+  E2E = 启动冒烟 + 设置持久化 + 终端几何 + 视觉基线；`tokens:check` 已入 CI（令牌漂移即红）
 
 分层策略与门禁细节见 [docs/testing.md](./docs/testing.md)。
 
@@ -189,7 +208,7 @@ npm run package --workspace @wslpilot/desktop -- --x64    # 指定架构打包
 
 **代码签名（可选）**：导出 `CSC_LINK`（pfx 路径或 base64）与 `CSC_KEY_PASSWORD` 后打包即自动签名；未签名构建首次运行可能出现 Windows SmartScreen 提示（「更多信息 → 仍要运行」），签名状态可在「设置 → 关于」查看。
 
-> **0.1.4 当前发布状态**：仓库默认构建**未配置证书**，安装包为未签名；`app-update.yml`
+> **0.2.0 当前发布状态**：仓库默认构建**未配置证书**，安装包为未签名；`app-update.yml`
 > 没有 `publisherName`，因此即使 `verifyUpdateCodeSignature: true`，electron-updater 的
 > 发布者校验也不会真正生效。`node scripts/verify-release.mjs --allow-unsigned` 会把这一点作为
 > 警告输出；要获得发布者校验，必须配置签名证书并设置 `publisherName`。
@@ -207,15 +226,16 @@ npm run package --workspace @wslpilot/desktop -- --x64    # 指定架构打包
 
 应用数据目录（`%APPDATA%\WSLPilot\`）：
 
-| 文件             | 用途                                                   |
-| ---------------- | ------------------------------------------------------ |
-| `settings.jsonc` | 应用偏好（外观 / 通用 / WSL / 终端 / 备份 / 高级）     |
-| `distros.jsonc`  | 发行版元数据（别名 / 图标 / 品牌色 / 置顶 / 快捷动作） |
-| `actions.jsonc`  | 自定义动作（执行白名单，带模板与占位符）               |
-| `network.jsonc`  | 端口转发规则 / 代理配置                                |
-| `ui-state.jsonc` | 界面状态（窗口位置 / 侧栏折叠 / 最近命令）             |
-| `state.jsonc`    | 运行态缓存（任务结果等）                               |
-| `logs/`          | 按日滚动日志                                           |
+| 文件               | 用途                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| `settings.jsonc`   | 应用偏好（外观 / 通用 / 工作台 / 终端 / 容器 / WSL / 备份 / 高级）                   |
+| `distros.jsonc`    | 发行版元数据（别名 / 图标 / 品牌色 / 置顶 / 快捷动作 / 默认 Shell / Profile / 隐藏） |
+| `actions.jsonc`    | 自定义动作（执行白名单，带模板与占位符）                                             |
+| `network.jsonc`    | 端口转发规则 / 代理配置                                                              |
+| `containers.jsonc` | 容器运行配方与最近镜像（v1，不保存实时状态）                                         |
+| `ui-state.jsonc`   | 界面状态（窗口位置 / 侧栏折叠 / 最近命令）                                           |
+| `state.jsonc`      | 运行态缓存（任务结果等）                                                             |
+| `logs/`            | 按日滚动日志                                                                         |
 
 所有配置均为**人类可读 JSONC**（允许注释与尾逗号），路径可见、内容可改、可纳入 Git。安全语义：
 

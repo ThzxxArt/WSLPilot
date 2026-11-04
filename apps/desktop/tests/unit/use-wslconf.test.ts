@@ -235,3 +235,57 @@ describe('useWslConf', () => {
     expect(conf.diff().every((d) => d.type === 'same')).toBe(true)
   })
 })
+
+describe('useWslConf 名称形态 / 默认 API / 幂等（0.2.0 覆盖率补强）', () => {
+  it('distro 名支持 string / ref / getter', async () => {
+    const api = makeApi()
+    const { ref } = await import('vue')
+    const name = ref('Ubuntu')
+    const confRef = useWslConf(name, { api })
+    await confRef.load()
+    expect(api.read).toHaveBeenCalledWith('Ubuntu')
+
+    const confFn = useWslConf(() => 'Debian', { api })
+    await confFn.load()
+    expect(api.read).toHaveBeenCalledWith('Debian')
+
+    name.value = 'Fedora'
+    await confRef.load()
+    expect(api.read).toHaveBeenLastCalledWith('Fedora')
+  })
+
+  it('名称为空 load 直接返回（不调用 API）', async () => {
+    const api = makeApi()
+    const conf = useWslConf('', { api })
+    await conf.load()
+    expect(api.read).not.toHaveBeenCalled()
+    expect(conf.loading.value).toBe(false)
+  })
+
+  it('默认 API（无 window.wslAPI）安全降级；save 默认返回 terminated:false', async () => {
+    const g = globalThis as { window?: unknown }
+    const saved = g.window
+    g.window = undefined
+    try {
+      const conf = useWslConf('Ubuntu')
+      await conf.load()
+      expect(conf.mode.value).toBe('form')
+      await expect(conf.save()).resolves.toEqual({ terminated: false })
+    } finally {
+      g.window = saved
+    }
+  })
+
+  it('setMode 同值幂等 / clearField 未知 section 与重复 id 不重复', async () => {
+    const api = makeApi()
+    const conf = useWslConf('Ubuntu', { api })
+    await conf.load()
+    const before = conf.raw.value
+    conf.setMode('form')
+    expect(conf.raw.value).toBe(before)
+    conf.clearField('nope', 'x')
+    conf.clearField('network', 'hostname')
+    conf.clearField('network', 'hostname')
+    expect(conf.pendingChanges().filter((c) => c.key === 'hostname')).toHaveLength(1)
+  })
+})

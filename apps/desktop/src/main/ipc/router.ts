@@ -21,6 +21,8 @@ import type { NetworkService } from '../services/network-service'
 import type { UsbipdService } from '../services/usbipd-service'
 import type { DiagnosticsService } from '../services/diagnostics-service'
 import type { SignatureService } from '../services/signature-service'
+import type { WslcService } from '../services/wslc-service'
+import type { ShellIntegrationService } from '../services/shell-integration-service'
 import type { UpdateService } from '../updater/auto-update'
 import { registerConfigHandlers } from './handlers/config'
 import { registerAppHandlers } from './handlers/app'
@@ -35,6 +37,8 @@ import { registerActionHandlers } from './handlers/actions'
 import { registerFsHandlers } from './handlers/fs'
 import { registerNetworkHandlers } from './handlers/network'
 import { registerDeviceHandlers } from './handlers/devices'
+import { registerContainerHandlers } from './handlers/containers'
+import { registerShellHandlers } from './handlers/shell'
 
 export interface IpcContext {
   configService: ConfigService
@@ -70,6 +74,10 @@ export function registerIpcHandlers(
     fsBridge: FsBridge
     network: NetworkService
     devices: UsbipdService
+    /** 0.2.0 容器服务；测试装配可省略（生产必须提供） */
+    wslc?: WslcService
+    /** 0.2.0 Shell 集成服务；测试装配可省略（生产必须提供） */
+    shell?: ShellIntegrationService
   },
 ): void {
   const routes = new Map<string, Handler>()
@@ -89,6 +97,8 @@ export function registerIpcHandlers(
   registerFsHandlers(add, deps)
   registerNetworkHandlers(add, deps)
   registerDeviceHandlers(add, deps)
+  if (deps.wslc) registerContainerHandlers(add, { wslc: deps.wslc, tasks: deps.tasks })
+  if (deps.shell) registerShellHandlers(add, { shell: deps.shell, wsl: deps.wsl })
 
   for (const [channel, handler] of routes) {
     ipcMain.handle(channel, async (_event, ...args) => {

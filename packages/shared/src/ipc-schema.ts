@@ -4,7 +4,21 @@ import { assertSafeDistroName } from './errors'
 import { assertSafeActionId } from './actions'
 import { assertSafeRuleId } from './network'
 import { assertSafeBusId } from './usbipd'
-import { distroMetaSchema } from './config-schema'
+import {
+  containerHealthSchema,
+  containerMountSchema,
+  containerPortSchema,
+  distroMetaSchema,
+} from './config-schema'
+import {
+  assertArgValue,
+  assertContainerName,
+  assertContainerRef,
+  assertCopyPath,
+  assertEnvKey,
+  assertEnvValue,
+  assertImageRef,
+} from './containers'
 import { WSL_SIZE_RE } from './commands'
 import {
   DEFAULT_BACKUP_KEEP,
@@ -52,6 +66,103 @@ export const linuxUserSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z_][A-Za-z0-9_-]{0,31}$/, '用户名格式非法（字母/数字/下划线/连字符，1–32 位）')
+
+/** 容器 id/名称：允许短 ID（十六进制）与合法 DNS label */
+export const containerIdSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .superRefine((s, ctx) => {
+    try {
+      assertContainerRef(s)
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: e instanceof Error ? e.message : '容器 id 非法',
+      })
+    }
+  })
+
+export const imageRefSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .superRefine((s, ctx) => {
+    try {
+      assertImageRef(s)
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: e instanceof Error ? e.message : '镜像引用非法',
+      })
+    }
+  })
+
+export const containerRunSchema = z.object({
+  image: imageRefSchema,
+  name: z
+    .string()
+    .max(63)
+    .superRefine((s, ctx) => {
+      try {
+        assertContainerName(s)
+      } catch (e) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+      }
+    })
+    .optional(),
+  command: z
+    .array(
+      z.string().superRefine((s, ctx) => {
+        try {
+          assertArgValue(s)
+        } catch (e) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+        }
+      }),
+    )
+    .max(200)
+    .default([]),
+  ports: z.array(containerPortSchema).max(50).default([]),
+  mounts: z.array(containerMountSchema).max(50).default([]),
+  env: z
+    .record(
+      z.string().superRefine((key, ctx) => {
+        try {
+          assertEnvKey(key)
+        } catch (e) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+        }
+      }),
+      z.string().superRefine((value, ctx) => {
+        try {
+          assertEnvValue(value)
+        } catch (e) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+        }
+      }),
+    )
+    .default({}),
+  network: z
+    .string()
+    .max(63)
+    .superRefine((s, ctx) => {
+      try {
+        assertContainerName(s)
+      } catch (e) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+      }
+    })
+    .optional(),
+  memory: z.string().max(32).optional(),
+  cpus: z.number().positive().max(1024).optional(),
+  gpus: z.literal('all').optional(),
+  health: containerHealthSchema.optional(),
+  detach: z.boolean().default(true),
+  rm: z.boolean().default(false),
+  stopTimeoutSec: z.number().int().min(1).max(300).optional(),
+  pull: z.boolean().default(false),
+})
 
 /**
  * metrics:sample 单发行版名：在 nameSchema 基础上拒绝全局保留键 `*`。
@@ -236,7 +347,7 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
       fixedVhd: z.boolean().default(false),
       webDownload: z.boolean().default(false),
     })
-    .default({}),
+    .prefault({}),
   // 存储与身份（0.1.4）
   [CH.distrosCompact]: z.object({
     name: nameSchema,
@@ -276,8 +387,12 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
   // PTY
   [CH.ptyCreate]: z.object({
     distro: nameSchema,
+    containerId: z.string().max(200).optional(),
     shell: noControl(200).optional(),
     cwd: noControl(500).optional(),
+    user: noControl(100).optional(),
+    /** 启用 Shell 集成（bash/zsh）；home 目录由主进程探测，渲染层不可指定 */
+    shellIntegration: z.boolean().default(false),
     cols: z.number().int().min(2).max(500).default(80),
     rows: z.number().int().min(1).max(200).default(24),
   }),
@@ -291,7 +406,98 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     cols: z.number().int().min(2).max(500),
     rows: z.number().int().min(1).max(200),
   }),
+  [CH.ptyCreateProfile]: z.object({
+    profileId: z.string().min(1).max(100),
+    cols: z.number().int().min(2).max(500).default(80),
+    rows: z.number().int().min(1).max(200).default(24),
+  }),
+
+  [CH.shellStatus]: z.object({
+    distro: nameSchema,
+    shell: noControl(200).optional(),
+  }),
+  [CH.shellInstall]: z.object({
+    distro: nameSchema,
+    shell: noControl(200).optional(),
+  }),
+  [CH.shellRemove]: z.object({
+    distro: nameSchema,
+    shell: noControl(200).optional(),
+  }),
+
   [CH.ptyKill]: idSchema,
+  [CH.ptyAck]: z.object({
+    ptyId: idSchema,
+    bytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(16 * 1024 * 1024),
+  }),
+
+  // WSL 3 容器（wslc — 0.2.0）
+  [CH.wslcStatus]: z.object({ force: z.boolean().default(false) }).prefault({}),
+  [CH.containersRun]: containerRunSchema,
+  [CH.containersInspect]: containerIdSchema,
+  [CH.containersStart]: containerIdSchema,
+  [CH.containersStop]: z.object({
+    id: containerIdSchema,
+    timeoutSec: z.number().int().min(1).max(300).optional(),
+  }),
+  [CH.containersRestart]: containerIdSchema,
+  [CH.containersRemove]: z.object({
+    id: containerIdSchema,
+    force: z.boolean().default(false),
+  }),
+  [CH.containersLogs]: z.object({
+    id: containerIdSchema,
+    follow: z.boolean().default(false),
+  }),
+  [CH.containersCopy]: z.object({
+    src: z.string().superRefine((s, ctx) => {
+      try {
+        assertCopyPath(s)
+      } catch (e) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+      }
+    }),
+    dst: z.string().superRefine((s, ctx) => {
+      try {
+        assertCopyPath(s)
+      } catch (e) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) })
+      }
+    }),
+  }),
+  [CH.imagesPull]: imageRefSchema,
+  [CH.imagesBuild]: z.object({
+    tag: imageRefSchema,
+    context: z.string().min(1).max(1024),
+  }),
+  [CH.imagesRemove]: imageRefSchema,
+  [CH.imagesPrune]: z.object({ all: z.boolean().default(false) }).prefault({}),
+  [CH.networksCreate]: z.object({
+    name: z.string().min(1).max(63),
+    driver: z.string().max(32).optional(),
+    subnet: z.string().max(64).optional(),
+    gateway: z.string().max(64).optional(),
+  }),
+  [CH.networksRemove]: z.string().min(1).max(63),
+  [CH.networksConnect]: z.object({
+    network: z.string().min(1).max(63),
+    container: containerIdSchema,
+  }),
+  [CH.networksDisconnect]: z.object({
+    network: z.string().min(1).max(63),
+    container: containerIdSchema,
+  }),
+  [CH.volumesCreate]: z.string().min(1).max(63),
+  [CH.volumesRemove]: z.string().min(1).max(63),
+  [CH.wslcSettingsWrite]: z.object({
+    content: textNoControl(64 * 1024).refine((s) => utf8Bytes(s) <= 64 * 1024, {
+      message: 'settings.yaml 超过 64KB 上限',
+    }),
+  }),
 
   // IO（M4 备份迁移）
   [CH.ioExport]: z.object({
@@ -325,13 +531,13 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     .object({
       dir: ioPathSchema.optional(),
     })
-    .default({}),
+    .prefault({}),
   [CH.ioCleanupBackups]: z
     .object({
       dir: ioPathSchema.optional(),
       keep: z.number().int().min(1).max(50).default(DEFAULT_BACKUP_KEEP),
     })
-    .default({}),
+    .prefault({}),
   [CH.taskCancel]: idSchema,
 
   // 系统文件对话框
@@ -339,20 +545,20 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     .object({
       defaultPath: ioPathSchema.optional(),
     })
-    .default({}),
+    .prefault({}),
   [CH.appPickSaveFile]: z
     .object({
       defaultPath: ioPathSchema.optional(),
       suggestedName: noControl(255).optional(),
       filters: z.array(fileFilterSchema).max(10).optional(),
     })
-    .default({}),
+    .prefault({}),
   [CH.appPickOpenFile]: z
     .object({
       defaultPath: ioPathSchema.optional(),
       filters: z.array(fileFilterSchema).max(10).optional(),
     })
-    .default({}),
+    .prefault({}),
   [CH.appOpenPath]: ioPathSchema,
   // 外链：只放行 http/https（review 0.1.2 审计修复），handler 侧再做二次协议校验（纵深防御）
   [CH.appOpenExternal]: httpUrlSchema,
@@ -362,7 +568,7 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     .object({
       preRelease: z.boolean().default(false),
     })
-    .default({}),
+    .prefault({}),
   // 设置默认 WSL 版本（0.1.3）：仅影响新导入的发行版
   [CH.appWslSetDefaultVersion]: z.object({
     version: z.union([z.literal(1), z.literal(2)]),
@@ -373,7 +579,7 @@ export const IPC_SCHEMAS: Partial<Record<ChannelName, z.ZodTypeAny>> = {
     .object({
       defaultPath: ioPathSchema.optional(),
     })
-    .default({}),
+    .prefault({}),
 
   // wsl.conf（M5）
   [CH.wslconfRead]: nameSchema,

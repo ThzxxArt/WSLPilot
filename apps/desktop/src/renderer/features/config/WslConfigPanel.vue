@@ -16,7 +16,12 @@ import {
   useMessage,
 } from 'naive-ui'
 import { CodeEditor, Kbd } from '@wslpilot/ui'
-import { WSL_CONFIG_FIELDS, summarizeWslConfigChanges, type WslConfigField } from '@wslpilot/shared'
+import {
+  WSL_CONFIG_FIELDS,
+  summarizeWslConfigChanges,
+  validateWslConfigDependencies,
+  type WslConfigField,
+} from '@wslpilot/shared'
 import { useWslConfig } from '../../composables/useWslConfig'
 import { errorLine } from '../../composables/useAppError'
 
@@ -138,6 +143,7 @@ function clearKey(field: WslConfigField) {
 
 const diff = computed(() => conf.diff())
 const hasChanges = computed(() => diff.value.some((d) => d.type !== 'same'))
+const dependencyWarnings = computed(() => validateWslConfigDependencies(conf.model.value))
 const changeSummary = computed(() => {
   if (conf.mode.value === 'form') return summarizeWslConfigChanges(conf.pendingChanges())
   const adds = diff.value.filter((d) => d.type === 'add').length
@@ -262,6 +268,7 @@ function shutdownNow() {
     </p>
 
     <p v-if="conf.error.value" class="error">{{ conf.error.value }}</p>
+    <p v-for="w in dependencyWarnings" :key="w" class="warning" role="status">{{ w }}</p>
 
     <div class="modes" role="tablist" aria-label="编辑模式">
       <button
@@ -462,6 +469,15 @@ function shutdownNow() {
   border-radius: 8px;
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
   color: var(--color-danger);
+  font-size: 12px;
+}
+
+.warning {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
   font-size: 12px;
 }
 

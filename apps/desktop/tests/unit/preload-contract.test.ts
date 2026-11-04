@@ -140,17 +140,22 @@ describe('preload 契约', () => {
         'app',
         'clipboard',
         'config',
+        'containers',
         'devices',
         'diagnostics',
         'distros',
         'fs',
+        'images',
         'io',
         'meta',
         'metrics',
         'network',
+        'networks',
+        'shellIntegration',
         'task',
         'terminal',
         'update',
+        'volumes',
         'wslconf',
         'wslconfig',
       ].sort(),
@@ -224,6 +229,8 @@ describe('preload 契约', () => {
     expect(Object.keys(exposed.terminal).sort()).toEqual(
       [
         'create',
+        'createProfile',
+        'ack',
         'host',
         'input',
         'kill',
@@ -240,6 +247,7 @@ describe('preload 契约', () => {
     expect(Object.keys(exposed.wslconf).sort()).toEqual(['read', 'write'])
     expect(Object.keys(exposed.wslconfig).sort()).toEqual(['read', 'write'])
     expect(Object.keys(exposed.clipboard).sort()).toEqual(['read', 'write'])
+    expect(Object.keys(exposed.shellIntegration).sort()).toEqual(['install', 'remove', 'status'])
     expect(Object.keys(exposed.actions).sort()).toEqual(['list', 'run', 'save'])
     expect(Object.keys(exposed.fs).sort()).toEqual(['read', 'readDir', 'revealInExplorer', 'write'])
     expect(Object.keys(exposed.task).sort()).toEqual(['cancel', 'onProgress'])
@@ -373,6 +381,157 @@ describe('preload 契约', () => {
     callAndCheck('terminal.list', () => exposed.terminal.list(), CH.ptyList)
     callAndCheck('terminal.maxSessions', () => exposed.terminal.maxSessions(), CH.ptyMaxSessions)
     callAndCheck('terminal.host', () => exposed.terminal.host(), CH.ptyHostInfo)
+    callAndCheck(
+      'terminal.createProfile',
+      () => exposed.terminal.createProfile({ profileId: 'p1', cols: 80, rows: 24 }),
+      CH.ptyCreateProfile,
+      { profileId: 'p1', cols: 80, rows: 24 },
+    )
+    callAndCheck('terminal.ack', () => exposed.terminal.ack('p1', 12), CH.ptyAck, {
+      ptyId: 'p1',
+      bytes: 12,
+    })
+
+    // ── 0.2.0 Shell 集成 ──
+    callAndCheck(
+      'shellIntegration.status',
+      () => exposed.shellIntegration.status('Ubuntu', '/bin/bash'),
+      CH.shellStatus,
+      { distro: 'Ubuntu', shell: '/bin/bash' },
+    )
+    callAndCheck(
+      'shellIntegration.install',
+      () => exposed.shellIntegration.install('Ubuntu'),
+      CH.shellInstall,
+      { distro: 'Ubuntu' },
+    )
+    callAndCheck(
+      'shellIntegration.remove',
+      () => exposed.shellIntegration.remove('Ubuntu', '/bin/zsh'),
+      CH.shellRemove,
+      { distro: 'Ubuntu', shell: '/bin/zsh' },
+    )
+
+    // ── 0.2.0 WSL 3 容器 ──
+    const runSpec = {
+      image: 'ubuntu:latest',
+      ports: [],
+      mounts: [],
+      env: {},
+      command: [],
+      detach: true,
+      rm: false,
+    }
+    callAndCheck('containers.status', () => exposed.containers.status(), CH.wslcStatus, {
+      force: false,
+    })
+    callAndCheck('containers.list', () => exposed.containers.list(), CH.containersList)
+    callAndCheck(
+      'containers.inspect',
+      () => exposed.containers.inspect('c1'),
+      CH.containersInspect,
+      'c1',
+    )
+    callAndCheck('containers.run', () => exposed.containers.run(runSpec), CH.containersRun, runSpec)
+    callAndCheck('containers.start', () => exposed.containers.start('c1'), CH.containersStart, 'c1')
+    callAndCheck('containers.stop', () => exposed.containers.stop('c1', 10), CH.containersStop, {
+      id: 'c1',
+      timeoutSec: 10,
+    })
+    callAndCheck(
+      'containers.restart',
+      () => exposed.containers.restart('c1'),
+      CH.containersRestart,
+      'c1',
+    )
+    callAndCheck(
+      'containers.remove',
+      () => exposed.containers.remove('c1', true),
+      CH.containersRemove,
+      { id: 'c1', force: true },
+    )
+    callAndCheck('containers.prune', () => exposed.containers.prune(), CH.containersPrune)
+    callAndCheck('containers.logs', () => exposed.containers.logs('c1', true), CH.containersLogs, {
+      id: 'c1',
+      follow: true,
+    })
+    callAndCheck('containers.stats', () => exposed.containers.stats(), CH.containersStats)
+    callAndCheck(
+      'containers.copy',
+      () => exposed.containers.copy('C:\\a', '/b'),
+      CH.containersCopy,
+      { src: 'C:\\a', dst: '/b' },
+    )
+    callAndCheck('containers.systemInfo', () => exposed.containers.systemInfo(), CH.wslcSystemInfo)
+    callAndCheck(
+      'containers.sessionList',
+      () => exposed.containers.sessionList(),
+      CH.wslcSessionList,
+    )
+    callAndCheck(
+      'containers.sessionTerminate',
+      () => exposed.containers.sessionTerminate(),
+      CH.wslcSessionTerminate,
+    )
+    callAndCheck(
+      'containers.settingsRead',
+      () => exposed.containers.settingsRead(),
+      CH.wslcSettingsRead,
+    )
+    callAndCheck(
+      'containers.settingsWrite',
+      () => exposed.containers.settingsWrite('session: {}\n'),
+      CH.wslcSettingsWrite,
+      { content: 'session: {}\n' },
+    )
+    callAndCheck(
+      'containers.settingsReset',
+      () => exposed.containers.settingsReset(),
+      CH.wslcSettingsReset,
+    )
+    callAndCheck('images.list', () => exposed.images.list(), CH.imagesList)
+    callAndCheck(
+      'images.pull',
+      () => exposed.images.pull('nginx:latest'),
+      CH.imagesPull,
+      'nginx:latest',
+    )
+    callAndCheck('images.build', () => exposed.images.build('app:dev', 'C:\\ctx'), CH.imagesBuild, {
+      tag: 'app:dev',
+      context: 'C:\\ctx',
+    })
+    callAndCheck(
+      'images.remove',
+      () => exposed.images.remove('nginx:latest'),
+      CH.imagesRemove,
+      'nginx:latest',
+    )
+    callAndCheck('images.prune', () => exposed.images.prune(false), CH.imagesPrune, { all: false })
+    callAndCheck('networks.list', () => exposed.networks.list(), CH.networksList)
+    callAndCheck(
+      'networks.create',
+      () => exposed.networks.create({ name: 'net' }),
+      CH.networksCreate,
+      { name: 'net' },
+    )
+    callAndCheck('networks.remove', () => exposed.networks.remove('net'), CH.networksRemove, 'net')
+    callAndCheck(
+      'networks.connect',
+      () => exposed.networks.connect('net', 'c1'),
+      CH.networksConnect,
+      { network: 'net', container: 'c1' },
+    )
+    callAndCheck(
+      'networks.disconnect',
+      () => exposed.networks.disconnect('net', 'c1'),
+      CH.networksDisconnect,
+      { network: 'net', container: 'c1' },
+    )
+    callAndCheck('networks.prune', () => exposed.networks.prune(), CH.networksPrune)
+    callAndCheck('volumes.list', () => exposed.volumes.list(), CH.volumesList)
+    callAndCheck('volumes.create', () => exposed.volumes.create('vol'), CH.volumesCreate, 'vol')
+    callAndCheck('volumes.remove', () => exposed.volumes.remove('vol'), CH.volumesRemove, 'vol')
+    callAndCheck('volumes.prune', () => exposed.volumes.prune(), CH.volumesPrune)
   })
 
   it('io 域', () => {

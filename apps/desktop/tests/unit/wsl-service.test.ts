@@ -942,6 +942,15 @@ describe('WslService 0.1.4（compact / resize / setDefaultUser）', () => {
     })
   })
 
+  it('setSparse：运行中拒绝（分支与 setDefaultUser 对齐）', async () => {
+    const svc = makeSvc()
+    ;(runWsl as any).mockResolvedValueOnce(ok(runningList))
+    await expect(svc.setSparse('Ubuntu', true, ctl as never)).rejects.toMatchObject({
+      code: 'DISTRO_RUNNING',
+    })
+    expect(spawnWsl).not.toHaveBeenCalled()
+  })
+
   it('VHD 仍被 WSL 占用：映射为可行动的 wsl --shutdown 提示（真机 3.0.3 行为）', async () => {
     const svc = makeSvc()
     ;(runWsl as any).mockResolvedValueOnce(ok(stoppedList))
@@ -955,5 +964,152 @@ describe('WslService 0.1.4（compact / resize / setDefaultUser）', () => {
     )
     await expect(svc.resize('Ubuntu', '50GB', ctl as never)).rejects.toThrow(/wsl --shutdown/)
     expect(ctl.report).not.toHaveBeenCalledWith(100, expect.stringContaining('扩容命令已完成'))
+  })
+})
+
+describe('listContainsDistro 形态兜底分支（0.2.0 覆盖率补强）', () => {
+  it('BOM / * 默认标记 / 说明行 / 空行 / 尾部 default', () => {
+    const text = '\uFEFF\r\n* Ubuntu (Default)\r\n说明行:\r\n\r\nDebian（默认）\r\n'
+    expect(listContainsDistro(text, 'Ubuntu')).toBe(true)
+    expect(listContainsDistro(text, 'Debian')).toBe(true)
+    expect(listContainsDistro(text, 'NoSuch')).toBe(false)
+    expect(listContainsDistro(text, '   ')).toBe(false)
+  })
+})
+
+describe('WslService 状态解析/错误文案分支（0.2.0 覆盖率补强）', () => {
+  it('normalizeState converting/未知；parseWslStatus(null) 安全', async () => {
+    expect(normalizeState('Converting')).toBe('Converting')
+    expect(normalizeState('转换中')).toBe('Converting')
+    expect(normalizeState('???')).toBe('Unknown')
+    const { parseWslStatus } = await import('../../src/main/services/wsl-service')
+    expect(parseWslStatus(null as never)).toEqual({
+      defaultDistro: '',
+      defaultVersion: null,
+      kernelVersion: '',
+    })
+  })
+
+  it('listContainsDistro(null) 不抛错；start 失败且 stderr 为空时使用 stdout/兜底文案', async () => {
+    expect(listContainsDistro(null as never, 'Ubuntu')).toBe(false)
+    const svc = createWslService(logger(), {
+      capabilities: async () => ({
+        source: 'help',
+        wslVersion: '3.0.3.0',
+        windowsBuild: 26300,
+        wslcVersion: '3.0.3.0',
+        inbox: false,
+        flags: {
+          compact: true,
+          resize: true,
+          setDefaultUser: true,
+          installLocation: true,
+          vhdSize: true,
+          fixedVhd: true,
+          webDownload: true,
+          exportFormats: true,
+          importFromFile: true,
+          updatePreRelease: true,
+          manageSparse: true,
+        },
+      }),
+    })
+    ;(runWsl as any).mockResolvedValueOnce({
+      stdout: 'start failed on stdout',
+      stderr: '',
+      code: 1,
+    })
+    await expect(svc.start('Ubuntu')).rejects.toMatchObject({
+      code: 'DISTRO_NOT_FOUND',
+      message: '命令执行失败（exit 1）',
+      detail: 'start failed on stdout',
+    })
+  })
+})
+
+describe('WslService update 版本读取失败降级（0.2.0 覆盖率补强）', () => {
+  it('前后 --version 都失败时仍完成更新并如实报告「更新完成」', async () => {
+    ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'version failed', code: 1 })
+    ;(spawnWsl as any).mockImplementation(
+      (_a: string[], o: { onLine?: (l: string) => void; onExit: (c: number) => void }) => {
+        queueMicrotask(() => o.onExit(0))
+        return { kill: vi.fn() }
+      },
+    )
+    const svc = createWslService(logger(), {
+      capabilities: async () => ({
+        source: 'help',
+        wslVersion: '3.0.3.0',
+        windowsBuild: 26300,
+        wslcVersion: '3.0.3.0',
+        inbox: false,
+        flags: {
+          compact: true,
+          resize: true,
+          setDefaultUser: true,
+          installLocation: true,
+          vhdSize: true,
+          fixedVhd: true,
+          webDownload: true,
+          exportFormats: true,
+          importFromFile: true,
+          updatePreRelease: true,
+          manageSparse: true,
+        },
+      }),
+    })
+    const ctl = {
+      taskId: 't',
+      type: 'update' as const,
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: () => {},
+      onCancel: vi.fn(),
+    }
+    await svc.update(ctl as never)
+    expect(ctl.report).toHaveBeenCalledWith(100, 'WSL 更新完成')
+    expect(runWsl).toHaveBeenCalledWith(['--version'])
+  })
+})
+
+describe('WslService requireDistro 未找到分支（0.2.0）', () => {
+  it('findDistro 返回 null 时拒绝并给发行版不存在错误', async () => {
+    ;(runWsl as any).mockResolvedValue(ok('NAME  STATE  VERSION'))
+    const svc = createWslService(logger(), {
+      capabilities: async () => ({
+        source: 'help',
+        wslVersion: '3.0.3.0',
+        windowsBuild: 26300,
+        wslcVersion: '3.0.3.0',
+        inbox: false,
+        flags: {
+          compact: true,
+          resize: true,
+          setDefaultUser: true,
+          installLocation: true,
+          vhdSize: true,
+          fixedVhd: true,
+          webDownload: true,
+          exportFormats: true,
+          importFromFile: true,
+          updatePreRelease: true,
+          manageSparse: true,
+        },
+      }),
+    })
+    const ctl = {
+      report: vi.fn(),
+      log: vi.fn(),
+      isCanceled: () => false,
+      throwIfCanceled: () => {},
+      onCancel: vi.fn(),
+    }
+    await expect(svc.compact('Ghost', false, ctl as never)).rejects.toMatchObject({
+      code: 'DISTRO_NOT_FOUND',
+    })
+    await expect(svc.setDefaultUser('Ghost', 'dev', ctl as never)).rejects.toMatchObject({
+      code: 'DISTRO_NOT_FOUND',
+    })
   })
 })

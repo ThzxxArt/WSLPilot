@@ -57,3 +57,125 @@ describe('readVhdxVirtualSize', () => {
     await expect(readVhdxVirtualSize(join(dir, 'missing.vhdx'))).resolves.toBeUndefined()
   })
 })
+
+describe('readVhdxVirtualSize 破坏性输入（0.2.0 覆盖率与安全反例）', () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = join(tmpdir(), `wslpilot-vhdx-bad-${randomUUID()}`)
+    await fs.mkdir(dir, { recursive: true })
+  })
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  async function writeVariant(name: string, mutate: (b: Buffer) => Buffer) {
+    const p = join(dir, name)
+    await fs.writeFile(p, mutate(makeVhdx(1024n ** 3n)))
+    return readVhdxVirtualSize(p)
+  }
+
+  it('魔数/区域签名/区域数量非法 → undefined', async () => {
+    await expect(
+      writeVariant('magic.vhdx', (b) => {
+        b.write('notvhdx!', 0, 'ascii')
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('regi.vhdx', (b) => {
+        b.write('bad!', REGION_OFFSET, 'ascii')
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('count0.vhdx', (b) => {
+        b.writeUInt32LE(0, REGION_OFFSET + 8)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('countMax.vhdx', (b) => {
+        b.writeUInt32LE(4096, REGION_OFFSET + 8)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('区域表截断 / 缺 metadata 区域 / offset 超安全整数 → undefined', async () => {
+    await expect(
+      writeVariant('trunc.vhdx', (b) => b.subarray(0, REGION_OFFSET + 20)),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('noguid.vhdx', (b) => {
+        b.writeUInt32LE(1, REGION_OFFSET + 8)
+        b.write('00'.repeat(16), REGION_OFFSET + 16, 'hex')
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('bigoff.vhdx', (b) => {
+        b.writeUInt32LE(1, REGION_OFFSET + 8)
+        b.write('00'.repeat(16), REGION_OFFSET + 16, 'hex')
+        b.writeBigUInt64LE(BigInt(Number.MAX_SAFE_INTEGER) + 1n, REGION_OFFSET + 16 + 16)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('元数据头/数量/条目 Guid/长度/越界/零值全部拒绝', async () => {
+    await expect(
+      writeVariant('mdsig.vhdx', (b) => {
+        b.write('badmeta!', METADATA_OFFSET, 'ascii')
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('mdcount0.vhdx', (b) => {
+        b.writeUInt16LE(0, METADATA_OFFSET + 10)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('mdcountmax.vhdx', (b) => {
+        b.writeUInt16LE(4096, METADATA_OFFSET + 10)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('mdguid.vhdx', (b) => {
+        b.write('00'.repeat(16), METADATA_OFFSET + 32, 'hex')
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('mdlen.vhdx', (b) => {
+        b.writeUInt32LE(4, METADATA_OFFSET + 32 + 20)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('mdoff.vhdx', (b) => {
+        b.writeUInt32LE(900 * 1024, METADATA_OFFSET + 32 + 16)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('zero.vhdx', (b) => {
+        b.writeBigUInt64LE(0n, METADATA_OFFSET + 64)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      writeVariant('huge.vhdx', (b) => {
+        b.writeBigUInt64LE(BigInt(Number.MAX_SAFE_INTEGER) + 1n, METADATA_OFFSET + 64)
+        return b
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('元数据条目截断 → undefined', async () => {
+    await expect(
+      writeVariant('mdtrunc.vhdx', (b) => b.subarray(0, METADATA_OFFSET + 40)),
+    ).resolves.toBeUndefined()
+  })
+})

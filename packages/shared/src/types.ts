@@ -26,6 +26,9 @@ export interface DistroMeta {
   note: string
   startupCwd: string
   pinned: boolean
+  terminalProfileId?: string
+  hidden?: boolean
+  defaultShell?: string
   quickActions: string[]
 }
 
@@ -39,12 +42,185 @@ export interface DistroView extends DistroRuntime {
   hostDiskBytes?: number
 }
 
+// ─────────────────────── WSL 3 容器（wslc）领域模型 ───────────────────────
+
+export interface WslcCapabilities {
+  installed: boolean
+  version: string
+  /** list 子命令支持 --format json */
+  jsonLists: boolean
+  /** stats 支持 --format json */
+  jsonStats: boolean
+  events: boolean
+  health: boolean
+  copy: boolean
+  restart: boolean
+  systemInfo: boolean
+  session: boolean
+  mount: boolean
+  gpu: boolean
+  networks: boolean
+  volumes: boolean
+  settingsFile: boolean
+}
+
+export type ContainerState = 'running' | 'exited' | 'created' | 'paused' | 'dead' | 'unknown'
+export type ContainerHealth = 'healthy' | 'unhealthy' | 'starting' | 'none' | 'unknown'
+
+export interface ContainerPort {
+  host: number
+  container: number
+  address?: string
+}
+
+export interface ContainerMount {
+  host: string
+  container: string
+  readOnly?: boolean
+}
+
+export interface ContainerHealthSpec {
+  cmd: string
+  interval?: string
+  timeout?: string
+  retries?: number
+  startPeriod?: string
+}
+
+export interface ContainerRunSpec {
+  image: string
+  name?: string
+  command?: string[]
+  ports: ContainerPort[]
+  mounts: ContainerMount[]
+  env: Record<string, string>
+  network?: string
+  memory?: string
+  cpus?: number
+  gpus?: 'all'
+  health?: ContainerHealthSpec
+  detach?: boolean
+  rm?: boolean
+  stopTimeoutSec?: number
+  pull?: boolean
+}
+
+export interface ContainerSummary {
+  id: string
+  name: string
+  image: string
+  state: ContainerState
+  status: string
+  health: ContainerHealth
+  ports: ContainerPort[]
+  createdAt: string
+}
+
+export interface ContainerDetail extends ContainerSummary {
+  command?: string[]
+  env?: Record<string, string>
+  mounts?: ContainerMount[]
+  networks?: string[]
+  raw?: unknown
+}
+
+export interface ContainerStats {
+  containerId: string
+  name: string
+  cpuPercent: number
+  memUsedBytes: number
+  memLimitBytes: number
+  netRxBytes: number
+  netTxBytes: number
+  blockReadBytes: number
+  blockWriteBytes: number
+  pids: number
+  sampledAt: string
+}
+
+export interface WslcImage {
+  id: string
+  repository: string
+  tag: string
+  sizeBytes: number
+  createdAt: string
+  containers: number
+}
+
+export interface WslcNetwork {
+  id: string
+  name: string
+  driver: string
+  subnet?: string
+  gateway?: string
+  internal?: boolean
+  containers: string[]
+}
+
+export interface WslcVolume {
+  name: string
+  driver: string
+  mountpoint?: string
+  createdAt?: string
+}
+
+export interface WslcSessionInfo {
+  name: string
+  state: string
+  storagePath?: string
+  cpuCount?: number
+  memorySize?: string
+  idleTimeoutSec?: number
+}
+
+export interface WslcSystemInfo {
+  version: string
+  session?: WslcSessionInfo
+  storagePath?: string
+  storageBytes?: number
+  /** wslc 客户端设置文件（settings.yaml）路径 */
+  settingsPath?: string
+  raw?: string
+}
+
+export interface WslcSettings {
+  session: {
+    cpuCount?: number
+    memorySize?: string
+    maxStorageSize?: string
+    storagePath?: string
+    defaultBindingAddress?: string
+    hostLoopback?: string
+    idleTimeout?: number
+  }
+  credentialStore?: 'wincred' | 'file'
+}
+
+/** 容器运行配方（containers.jsonc） */
+export interface ContainerRecipe {
+  id: string
+  label: string
+  image: string
+  name?: string
+  command?: string[]
+  ports: ContainerPort[]
+  mounts: ContainerMount[]
+  env: Record<string, string>
+  network?: string
+  detach: boolean
+  rm: boolean
+  stopTimeoutSec?: number
+  health?: ContainerHealthSpec
+}
+
 export type LocaleCode = 'system' | 'zh-CN' | 'en-US'
 export type CloseBehavior = 'minimizeToTray' | 'quit'
 export type CursorStyle = 'block' | 'underline' | 'bar'
-export type TerminalTheme = 'auto' | 'follow-app' | 'custom'
+export type TerminalTheme = 'light' | 'dark' | 'follow-app' | 'high-contrast'
 export type BackupFormat = 'tar' | 'tar.gz' | 'vhd'
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error'
+export type TabPosition = 'top' | 'left'
+export type Density = 'comfortable' | 'compact'
 
 export interface GeneralSettings {
   autoRefreshOnStart: boolean
@@ -65,11 +241,92 @@ export interface TerminalSettings {
   fontFamily: string
   fontSize: number
   lineHeight: number
+  letterSpacing: number
   cursorStyle: CursorStyle
   cursorBlink: boolean
+  cursorInactiveStyle: 'outline' | 'block' | 'bar' | 'underline' | 'none'
   scrollback: number
   copyOnSelect: boolean
+  rightClickBehavior: 'contextMenu' | 'paste' | 'selectWord'
+  pasteWarning: 'always' | 'multiline' | 'never'
   theme: TerminalTheme
+  bell: 'none' | 'visual' | 'sound'
+  webgl: 'auto' | 'on' | 'off'
+  smoothScroll: boolean
+  minimumContrastRatio: number
+  shellIntegration: 'off' | 'prompt' | 'on'
+  confirmCloseWithRunningProcess: boolean
+  defaultProfileId: string
+  profiles: TerminalProfile[]
+}
+
+/** 终端启动 profile（settings.terminal.profiles） */
+export interface TerminalProfile {
+  id: string
+  label: string
+  launch: TerminalLaunch
+  theme?: TerminalTheme
+  shellIntegration?: boolean
+}
+
+/** 0.2.0 Shell 集成 */
+export type ShellKind = 'bash' | 'zsh' | 'fish' | 'unknown'
+
+export interface ShellIntegrationStatus {
+  distro: string
+  shell: ShellKind
+  state: 'installed' | 'partial' | 'missing' | 'unsupported'
+  supported: boolean
+  version: string
+  expectedVersion: string
+  path: string
+  files: { bashrc: boolean; zshrc: boolean }
+}
+
+export type TerminalLaunch =
+  | {
+      kind: 'distro'
+      distro: string
+      shell?: string
+      cwd?: string
+      user?: string
+      env?: Record<string, string>
+    }
+  | {
+      kind: 'container'
+      containerId: string
+      shell?: string
+      user?: string
+      env?: Record<string, string>
+    }
+  | {
+      kind: 'command'
+      distro: string
+      program: string
+      args: string[]
+      user?: string
+      cwd?: string
+    }
+
+export interface WorkbenchSettings {
+  defaultRoute: 'dashboard' | 'terminal' | 'last'
+  autoCollapseSidebar: boolean
+  tabPosition: TabPosition
+  density: Density
+  showStatusLine: boolean
+  showPaneHeaders: 'auto' | 'always' | 'never'
+  sessionRailWidth: number
+  confirmClosePane: boolean
+}
+
+export interface ContainerSettings {
+  pollIntervalMs: number
+  statsIntervalMs: number
+  confirmPrune: boolean
+  confirmRemoveRunning: boolean
+  defaultStopTimeoutSec: number
+  maskEnvValues: boolean
+  lastImage: string
 }
 
 export interface BackupSettings {
@@ -91,8 +348,10 @@ export interface AdvancedSettings {
 export interface AppSettings {
   $schemaVersion: number
   general: GeneralSettings
-  wsl: WslSettings
+  workbench: WorkbenchSettings
   terminal: TerminalSettings
+  containers: ContainerSettings
+  wsl: WslSettings
   backup: BackupSettings
   advanced: AdvancedSettings
 }
@@ -137,8 +396,9 @@ export interface NetworkConfig {
   proxy: ProxyConfig
 }
 
-/** `.wslconfig` 的 `[wsl2] networkingMode`（M6 镜像引导） */
-export type NetworkMode = 'mirrored' | 'nat' | 'bridged' | 'virtioproxy' | 'unknown'
+/** `.wslconfig` 的 `[wsl2] networkingMode`（M6 镜像引导；0.2.0 补 none/consomme） */
+export type NetworkMode =
+  'mirrored' | 'nat' | 'bridged' | 'virtioproxy' | 'consomme' | 'none' | 'unknown'
 
 /** `netsh interface portproxy show all` 的一条系统级转发 */
 export interface PortProxyEntry {
@@ -254,6 +514,24 @@ export type TaskType =
   | 'clone'
   /** 注销发行版（0.1.3：备份前置流程任务化） */
   | 'unregister'
+  // 0.2.0 WSL 3 容器
+  | 'container-run'
+  | 'container-start'
+  | 'container-stop'
+  | 'container-restart'
+  | 'container-remove'
+  | 'container-prune'
+  | 'container-logs'
+  | 'container-copy'
+  | 'image-pull'
+  | 'image-build'
+  | 'image-remove'
+  | 'image-prune'
+  | 'network-create'
+  | 'network-remove'
+  | 'volume-create'
+  | 'volume-remove'
+  | 'wslc-session'
 export type TaskStatus = 'running' | 'success' | 'failed' | 'canceled'
 
 export interface TaskProgress {
@@ -372,12 +650,24 @@ export interface ConfigMap {
   distros: { $schemaVersion: number; distros: DistroMeta[] }
   actions: { $schemaVersion: number; actions: WslAction[] }
   network: NetworkConfig
+  containers: { $schemaVersion: number; recipes: ContainerRecipe[]; recentImages: string[] }
   uiState: {
     $schemaVersion: number
     window: { width: number; height: number; x: number; y: number; maximized: boolean }
     sidebarCollapsed: boolean
     recentCommands: string[]
-    /** 终端分屏布局（0.1.3）：窗口重载后恢复标签与分屏结构 */
+    /** 0.2.0 工作台布局 */
+    workbench: {
+      activeTabId: string
+      sessionRailOpen: boolean
+      tabs: Array<{
+        id: string
+        title: string
+        profileId: string
+        layout: TerminalLayoutNode
+      }>
+    }
+    /** @deprecated 0.1.x 终端分屏布局；仅迁移读取 */
     terminalLayout: TerminalTabLayout[]
   }
   state: {

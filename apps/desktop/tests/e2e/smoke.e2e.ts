@@ -47,9 +47,20 @@ test.describe('WSLPilot 启动冒烟', () => {
       })
       await expect(window).toHaveTitle('发行版 · WSLPilot')
 
-      // 打开终端页（M3）
+      // 打开终端页（0.2.0 工作台：无全局 TitleBar/StatusBar，顶栏 + 全出血内容）
       await nav.getByRole('button', { name: '终端', exact: true }).click()
-      await expect(window.getByText('node-pty', { exact: false })).toBeVisible({ timeout: 15_000 })
+      await expect(window.locator('.workbench-bar')).toBeVisible({ timeout: 15_000 })
+      await expect(window.locator('.wb-title')).toHaveText('终端')
+      await expect(window.locator('.terminal-view')).toBeVisible({ timeout: 15_000 })
+      await expect(window.locator('.titlebar')).toHaveCount(0)
+      await expect(window.locator('.statusbar')).toHaveCount(0)
+
+      // 容器页（0.2.0）：标题必在；未安装 wslc 时显示升级引导（环境无关结构断言）
+      await nav.getByRole('button', { name: '容器', exact: true }).click()
+      await expect(window.getByRole('heading', { name: '容器', exact: true })).toBeVisible({
+        timeout: 15_000,
+      })
+      await expect(window.locator('.containers-page')).toBeVisible({ timeout: 15_000 })
 
       // 打开备份迁移页（M4）：向导模式与最近备份面板可见（exact 文本防子串误中）
       await nav.getByRole('button', { name: '备份迁移', exact: true }).click()

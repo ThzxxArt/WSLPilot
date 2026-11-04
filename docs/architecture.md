@@ -105,9 +105,52 @@ TerminalStore（Pinia）
     已有 xterm 实例与 scrollback 不被销毁；`SplitPane.vue` 已删除。
 - 保活：路由层 `<KeepAlive :include="['TerminalView']">`，切路由不卸载终端页；
   `onActivated` 重新 fit 并处理 query 意图。
-- 布局持久化到 `ui-state.terminalLayout`（防抖 500ms）；窗口重载后 `recover()` 按存活会话
+- 布局持久化到 `ui-state.workbench.tabs`（防抖 500ms；旧 `terminalLayout` 仅迁移期兜底读取）；窗口重载后 `recover()` 按存活会话
   恢复分屏（死面板剪枝、单子 split 折叠、深度超限整树拒绝退化为独立标签）。
 - 上限双保险：单标签 ≤4 面板 + 全局 `MAX_PTY_SESSIONS`；拆分继承源面板的发行版/Shell/启动目录。
+
+## 终端 2.0 工作台与 Shell 集成（0.2.0）
+
+```
+WorkbenchLayout（meta.layout='workbench'，App 中 v-show 常驻）
+  ├─ SidebarNav（56px，专注模式隐藏；autoCollapseSidebar=false 时展开）
+  ├─ TerminalView（直接挂载，跨路由保活；不经过 router-view KeepAlive）
+  │    ├─ 顶栏 34px（拖拽区 / 标签 / 搜索 / 会话 / 专注 / 窗口控制）
+  │    ├─ 会话侧栏（运行中发行版 / Profile / 打开标签）
+  │    ├─ .panes（扁平 pane host + 分隔条；XtermPane 按 ptyId 保活）
+  │    └─ 状态行 20px（发行版 / 行列 / 编码 / 时长 / 命令块退出码）
+  └─ 无全局 TitleBar / StatusBar
+```
+
+- **全出血几何**：终端路由不渲染全局壳；1920×1080 绘图区 ≥90%，1180×760 ≥85%。
+  `terminal-geometry.e2e.ts` 用 `boundingBox()` 实测，不靠截图目测。
+- **流控**：PtyManager 按会话累计未 ACK 字节，超过 1MB `pause()`，渲染层 xterm
+  `write` 回调 ACK 后回落到 256KB 再 `resume()`；大输出不撑爆内存。
+- **命令块**：`features/terminal/command-blocks.ts` 纯状态机解析 OSC 133/633 与 OSC 7，
+  XtermPane 注册 parser handler 并从 buffer 提取命令文本；gutter 状态点由 marker/decoration 渲染。
+- **Shell 集成**：固定模板写入 `~/.wslpilot/shell-integration/{bashrc,zsh/.zshrc,version}`，
+  启动时 bash `--rcfile` / zsh `ZDOTDIR` 接管；绝不修改用户 rc；移除 = 删除目录。
+  IPC：`shell:status` / `shell:install` / `shell:remove`，全部过发行版运行门禁。
+- **终端 Profile**：`settings.terminal.profiles` 只存结构化 launch；`pty:createProfile`
+  由主进程按 id 查配置并构建 argv，渲染层不能传任意程序/参数。
+
+## WSL 3 容器工作台（0.2.0）
+
+```
+Renderer ContainersView / stores/containers
+  ── wslc:status / containers:* / images:* / networks:* / volumes:* ──▶ Ipc handlers/containers
+        ──▶ WslcService ──▶ runTool（短命令）/ spawnTool（logs/events/pull/build）
+              └─ 输出解析：packages/shared/src/containers.ts（JSON / NDJSON / 表格回退）
+        ◀── containers:changed（wslc events 推送，渲染层节流重载）
+```
+
+- **能力独立**：`wslc` 与 `wsl` 能力探测分离；缺失/旧版只影响容器页，不影响发行版管理。
+- **安全边界**：所有 argv 由 shared 构建；容器名、镜像引用、挂载路径、端口、环境变量名先校验，
+  再进入 `wslc.exe`。流式命令可取消（TaskControl.onCancel → kill）。
+- **实时性**：主进程订阅 `wslc events`（仅 installed+events 能力时），渲染层
+  `containers:changed` 250ms 节流重载；统计按 `settings.containers.statsIntervalMs` 轮询，
+  页面卸载退订/清定时器。
+- **配置**：`containers.jsonc` v1 只存配方；`settings.containers` 存轮询/确认/遮挡偏好。
 
 ## 网络与设备（M6）
 

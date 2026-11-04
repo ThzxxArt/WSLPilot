@@ -5,6 +5,72 @@
 
 > **版本号策略**：序列自 `0.1.0` 起步并保持 `0.x`，**永不发布 `1.0.0`**。
 
+## [0.2.0] - 2026-11-04
+
+### Notes
+
+- **终端 2.0 + WSL 3 容器工作台 + 配置 v3**：本版本允许破坏性变更（配置一次性迁移），
+  保留 JSONC 无数据库、副作用集中于 Service 层、参数数组化、命令白名单、渲染层零 Node 原则。
+- 依赖基线：Electron 45.2.1 / electron-vite 6 / Vite 8 / Vue 3.5 / Vue Router 5 / Pinia 4 /
+  Zod 4 / TypeScript 6 / Vitest 5 / Playwright 1.64 / ESLint 10（flat config）/ Stylelint 17。
+- 真机限制：当前开发环境为 WSL Debian，无法执行 `wslc.exe` / Windows Electron E2E / 视觉基线；
+  相关链路由单测、共享解析器、mock 与 Windows CI 覆盖。**测试期间禁止 `wsl --shutdown`。**
+
+### Added
+
+- **终端工作台**：`WorkbenchLayout`（终端路由无全局 TitleBar/StatusBar，导航轨 56px）、
+  专注模式、会话侧栏、按需工具栏浮层、紧凑密度、窗口控制、状态行退出码/耗时。
+- **Shell 集成与命令块**：bash/zsh 固定模板、显式安装/移除（只写
+  `~/.wslpilot/shell-integration/`）、OSC 133/633/7 解析、gutter 状态点、复制上一条输出、
+  重跑上一条命令、`Alt+↑/↓` 跳转。
+- **终端 Profile**：`settings.terminal.profiles`（distro/container/command），
+  `pty:createProfile` 由主进程按 id 查配置构建 argv。
+- **容器终端**：PTY 支持 `wslc exec -it`；输出 ACK 流控（高水位 1MB / 低水位 256KB）。
+- **WSL 3 容器工作台**：容器/镜像/网络/卷/系统五 Tab，运行向导与等价 argv 预览，
+  启停/重启/删除/清理、inspect、日志流、复制、镜像拉取/构建、网络/卷 CRUD、
+  `settings.yaml` 编辑/重置、容器会话终止、`wslc events` 事件与统计轮询。
+- **配置**：`containers.jsonc` v1；settings v3（workbench/terminal/containers 新字段）；
+  distros v3（`terminalProfileId`/`hidden`/`defaultShell`）；ui-state v2（`workbench` 布局）。
+- **驱动/发现**：驾驶舱容器指标卡与最近容器；命令面板容器/Profile 命令；托盘「容器」入口。
+
+### Changed
+
+- 终端主题枚举改为 `light | dark | follow-app | high-contrast`，深色终端不污染应用浅色主题。
+- 默认窗口 1440×900；终端绘图区目标 1920×1080 ≥90%、1180×760 ≥85%。
+- 配置迁移：settings v2→v3（旧 `auto`→`light`、`custom`→`high-contrast`）、
+  distros v2→v3、ui-state v1→v2；升级前自动备份。
+- `.wslconfig` 面板新增 WSL 3 字段与依赖校验（VirtioFS / systemDistro / cgroup）。
+- CI Node 矩阵改为 22/24；ESLint 迁移到 v10 flat config；新增终端几何 E2E。
+
+### Fixed
+
+- **真实 `wslc` 3.0.3 输出适配**：容器列表支持中英文本地化表头（不再把表头当容器行）、
+  `system info` 解析嵌套 `Client/Server.Sessions`、网络 NDJSON 的 `Internal` 字符串布尔、
+  `stats` 的 `CPUPerc`、镜像 `Size` 字符串，并在 `--format json` 为空时正确返回空列表。
+- **能力探测**：不再只读顶层 `wslc --help`（会误判 json/systemInfo/session/health/copy 全为
+  false），改为并行读取子命令帮助后合并解析；容器统计/会话/系统信息恢复可用。
+- **终端保活**：`WorkbenchLayout` 常驻 + `TerminalView` 直接挂载，切换路由不再卸载 xterm
+  （此前后两个布局互斥，`KeepAlive` 随布局一起被卸载）；全局快捷键上移到应用壳，
+  终端页 Ctrl+N / Ctrl+Tab / 分屏快捷键恢复。
+- **命令块**：`xterm IBuffer.getLine` 使用绝对缓冲行号（此前减 baseY，回滚历史后读错行）；
+  复制上一条输出不再包含下一条提示符行。
+- **容器运行向导**：Windows 盘符挂载路径不再被 `:` 拆分；容器分屏继续走 `wslc exec`；
+  复制路径拒绝 `--help` 等伪参数；磁盘根目录挂载、host 网络、重复宿主端口、非法时长/环境值拒绝。
+- 容器命令预览与任务日志对 `-e KEY=VALUE` 脱敏；inspect 原始 JSON 同样遵守 env 遮挡设置。
+- `ui-state` v2 真正写入/恢复 `workbench.tabs`（此前只写 deprecated `terminalLayout`）。
+- `wslc` 事件流断开后指数退避重连；容器页在无 events 能力时回退列表轮询。
+- WebLinksAddon 统一走 `app:openExternal`（http/https），不再调用 `window.open`。
+- ui-state v1→v2 迁移不再把 `workbench` 字段错误展开到根对象。
+- `listContainsDistro(null)` 不再抛 `split` 异常；`runOk` 空 stderr 时给出可读兜底文案。
+- `wslc` 服务 `onError` 改为一次性 reject（此前构造错误对象后丢弃）。
+- `wslc` settings.yaml 顶层数组被拒绝（此前仅检查 typeof object）。
+- 容器配置 schema 校验环境变量名、主机/容器挂载路径，拒绝注入与 `..` 逃逸。
+
+### Removed
+
+- 旧终端 `auto/custom` 主题值（迁移期一次性映射）。
+- 旧 `ui-state.terminalLayout` 不再是写入目标（仅迁移期读取）。
+
 ## [0.1.4] - 2026-10-25
 
 ### Notes

@@ -383,3 +383,74 @@ describe('useNetworkStore', () => {
     expect(s.enabledRules).toHaveLength(1)
   })
 })
+
+describe('useNetworkStore 边界分支（0.2.0 覆盖率补强）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('loadStatus 失败记录错误；silent 失败也不抛出', async () => {
+    wslAPI.network.status.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'status down',
+      recoverable: true,
+    })
+    const s = useNetworkStore()
+    await s.loadStatus()
+    expect(s.lastError?.message).toBe('status down')
+    await s.loadStatus({ silent: true })
+    expect(s.statusLoading).toBe(false)
+  })
+
+  it('setEnabled 未知 id 静默；undoRestore 无快照安全返回', async () => {
+    wslAPI.network.listRules.mockResolvedValue([RULE])
+    wslAPI.network.getProxy.mockResolvedValue(PROXY)
+    wslAPI.network.saveRules.mockResolvedValue({})
+    const s = useNetworkStore()
+    await s.load()
+    await s.setEnabled('ghost', true)
+    expect(wslAPI.network.saveRules).not.toHaveBeenCalled()
+    await s.undoRestore()
+    expect(s.rules).toHaveLength(1)
+  })
+
+  it('applyAll / removeFromSystem / proxyClear 失败记录并抛出', async () => {
+    wslAPI.network.applyAll.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'a',
+      recoverable: true,
+    })
+    wslAPI.network.remove.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'r',
+      recoverable: true,
+    })
+    wslAPI.network.proxyClear.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'p',
+      recoverable: true,
+    })
+    const s = useNetworkStore()
+    await expect(s.applyAll()).rejects.toMatchObject({ message: 'a' })
+    expect(s.lastError?.message).toBe('a')
+    await expect(s.removeFromSystem('dev-3000')).rejects.toMatchObject({ message: 'r' })
+    expect(s.lastError?.message).toBe('r')
+    await expect(s.proxyClear('Ubuntu')).rejects.toMatchObject({ message: 'p' })
+    expect(s.lastError?.message).toBe('p')
+  })
+
+  it('loadProxyState 失败记录错误；saveProxy 成功清空错误', async () => {
+    wslAPI.network.proxyState.mockRejectedValue({
+      code: 'TASK_FAILED',
+      message: 'ps',
+      recoverable: true,
+    })
+    wslAPI.network.saveProxy.mockResolvedValue({})
+    const s = useNetworkStore()
+    await s.loadProxyState('Ubuntu')
+    expect(s.lastError?.message).toBe('ps')
+    await s.saveProxy(PROXY)
+    expect(s.proxy).toEqual(PROXY)
+  })
+})

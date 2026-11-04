@@ -5,10 +5,9 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/renderer/*"],
-      "@ui/*": ["../../packages/ui/src/*"]
+      "@/*": ["./src/renderer/*"],
+      "@ui/*": ["./../../packages/ui/src/*"]
     }
   },
   "include": ["src", "tests", "electron.vite.config.ts"]

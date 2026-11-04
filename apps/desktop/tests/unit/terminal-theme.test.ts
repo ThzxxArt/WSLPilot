@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   TERMINAL_LIGHT_THEME,
+  TERMINAL_DARK_THEME,
   TERMINAL_CONTRAST_THEME,
   DEFAULT_TERMINAL_PREFS,
   hexToRgba,
@@ -65,12 +66,15 @@ describe('terminal theme', () => {
     expect(hexToRgba('#abcd', 0.5)).toBe('rgba(99, 102, 241, 0.5)')
   })
 
-  it('resolveTerminalTheme 三模式', () => {
-    // auto：内置浅色
-    expect(resolveTerminalTheme('auto')).toEqual(TERMINAL_LIGHT_THEME)
+  it('resolveTerminalTheme 四模式', () => {
+    // light：内置浅色
+    expect(resolveTerminalTheme('light')).toEqual(TERMINAL_LIGHT_THEME)
 
-    // custom：高对比
-    expect(resolveTerminalTheme('custom')).toEqual(TERMINAL_CONTRAST_THEME)
+    // dark：独立深色
+    expect(resolveTerminalTheme('dark')).toEqual(TERMINAL_DARK_THEME)
+
+    // high-contrast
+    expect(resolveTerminalTheme('high-contrast')).toEqual(TERMINAL_CONTRAST_THEME)
 
     // follow-app：浅色 + 强调色光标/选区
     const follow = resolveTerminalTheme('follow-app', 'ocean')

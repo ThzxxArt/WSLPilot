@@ -32,6 +32,20 @@ const VOID_INVOKE_CHANNELS = new Set<string>([
   CH.appWslEnv,
   CH.wslconfigRead,
   CH.clipboardRead,
+  // 0.2.0 容器（无参通道）
+  CH.containersList,
+  CH.containersStats,
+  CH.containersPrune,
+  CH.wslcSystemInfo,
+  CH.wslcSessionList,
+  CH.wslcSessionTerminate,
+  CH.wslcSettingsRead,
+  CH.wslcSettingsReset,
+  CH.imagesList,
+  CH.networksList,
+  CH.networksPrune,
+  CH.volumesList,
+  CH.volumesPrune,
 ])
 
 describe('IPC 契约一致性（review M1）', () => {

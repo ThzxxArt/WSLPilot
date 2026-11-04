@@ -41,7 +41,22 @@ export interface WslConfigModel {
     gpuSupport?: boolean
     maxCrashDumpCount?: number
     kernel?: string
+    kernelModules?: string
     kernelCommandLine?: string
+    kernelDebugPort?: number
+    systemDistro?: string
+    virtiofs?: boolean
+    virtio?: boolean
+    hostFileSystemAccess?: boolean
+    telemetry?: boolean
+    debugConsoleLogFile?: string
+    kernelBootTimeout?: number
+    distributionStartTimeout?: number
+    mountDeviceTimeout?: number
+    crashDumpFolder?: string
+    loadDefaultKernelModules?: boolean
+    loadKernelModules?: string
+    isolateDistroCgroup?: boolean
   }
   general: {
     instanceIdleTimeout?: number
@@ -235,6 +250,128 @@ export const WSL_CONFIG_FIELDS: readonly WslConfigField[] = [
     label: '内核命令行',
     hint: 'wsl2.kernelCommandLine — 追加的内核启动参数',
     placeholder: 'vsyscall=emulate',
+  },
+  {
+    section: 'wsl2',
+    key: 'kernelModules',
+    type: 'string',
+    label: '内核模块 VHD',
+    hint: 'wsl2.kernelModules — 绝对 Windows 路径；需与 kernel 版本匹配',
+    placeholder: 'C:\\Temp\\modules.vhdx',
+  },
+  {
+    section: 'wsl2',
+    key: 'kernelDebugPort',
+    type: 'number',
+    label: '内核调试端口',
+    hint: 'wsl2.kernelDebugPort — 0 禁用；启用后可用于内核调试',
+    placeholder: '0',
+    min: 0,
+    max: 65535,
+  },
+  {
+    section: 'wsl2',
+    key: 'systemDistro',
+    type: 'string',
+    label: '系统发行版镜像',
+    hint: 'wsl2.systemDistro — 自定义 WSLg 系统发行版（.img/.vhd 绝对路径）',
+    placeholder: 'C:\\Program Files\\WSL\\system.vhd',
+  },
+  {
+    section: 'wsl2',
+    key: 'virtiofs',
+    type: 'boolean',
+    label: 'VirtioFS 文件共享',
+    hint: 'wsl2.virtiofs — 实验特性；需同时启用 virtio 与 hostFileSystemAccess',
+  },
+  {
+    section: 'wsl2',
+    key: 'virtio',
+    type: 'boolean',
+    label: 'Virtio 支持',
+    hint: 'wsl2.virtio — VirtioFS 依赖项（实验）',
+  },
+  {
+    section: 'wsl2',
+    key: 'hostFileSystemAccess',
+    type: 'boolean',
+    label: '宿主文件系统访问',
+    hint: 'wsl2.hostFileSystemAccess — VirtioFS 依赖项（实验）',
+  },
+  {
+    section: 'wsl2',
+    key: 'telemetry',
+    type: 'boolean',
+    label: '诊断遥测',
+    hint: 'wsl2.telemetry — 官方构建默认开启；关闭后不发送 WSL 诊断数据',
+  },
+  {
+    section: 'wsl2',
+    key: 'debugConsoleLogFile',
+    type: 'string',
+    label: '调试控制台日志',
+    hint: 'wsl2.debugConsoleLogFile — 内核控制台输出追加到该文件',
+    placeholder: 'D:\\WSL\\kernel.log',
+  },
+  {
+    section: 'wsl2',
+    key: 'kernelBootTimeout',
+    type: 'number',
+    label: '内核启动超时（ms）',
+    hint: 'wsl2.kernelBootTimeout — 默认 30000',
+    placeholder: '30000',
+    min: 1000,
+    max: 600000,
+  },
+  {
+    section: 'wsl2',
+    key: 'distributionStartTimeout',
+    type: 'number',
+    label: '发行版启动超时（ms）',
+    hint: 'wsl2.distributionStartTimeout — 默认 60000',
+    placeholder: '60000',
+    min: 1000,
+    max: 600000,
+  },
+  {
+    section: 'wsl2',
+    key: 'mountDeviceTimeout',
+    type: 'number',
+    label: '挂载设备超时（ms）',
+    hint: 'wsl2.mountDeviceTimeout — 默认 5000',
+    placeholder: '5000',
+    min: 100,
+    max: 600000,
+  },
+  {
+    section: 'wsl2',
+    key: 'crashDumpFolder',
+    type: 'string',
+    label: '崩溃转储目录',
+    hint: 'wsl2.crashDumpFolder — 默认 %Temp%\\wsl-crashes',
+    placeholder: 'D:\\WSL\\crashes',
+  },
+  {
+    section: 'wsl2',
+    key: 'loadDefaultKernelModules',
+    type: 'boolean',
+    label: '加载默认内核模块',
+    hint: 'wsl2.loadDefaultKernelModules — tun / ip_tables / br_netfilter',
+  },
+  {
+    section: 'wsl2',
+    key: 'loadKernelModules',
+    type: 'string',
+    label: '额外内核模块',
+    hint: 'wsl2.loadKernelModules — 逗号分隔，随 VM 启动加载',
+    placeholder: 'dummy,nf_tables',
+  },
+  {
+    section: 'wsl2',
+    key: 'isolateDistroCgroup',
+    type: 'boolean',
+    label: '发行版 cgroup 隔离',
+    hint: 'wsl2.isolateDistroCgroup — 需要 cgroup v2',
   },
   {
     section: 'general',
@@ -471,4 +608,30 @@ export function summarizeWslConfigChanges(changes: WslConfChange[]): string {
   if (sets > 0) parts.push(`${sets} 项修改`)
   if (removes > 0) parts.push(`${removes} 项删除`)
   return parts.join(' · ')
+}
+
+/**
+ * WSL 3 依赖校验（0.2.0）：返回面向用户的警告；不阻塞保存。
+ * - virtiofs 需要 virtio + hostFileSystemAccess
+ * - systemDistro 必须是绝对 Windows 路径（.img/.vhd）
+ * - isolateDistroCgroup 需要 cgroup v2（无法从宿主探测，提示用户在发行版内确认）
+ */
+export function validateWslConfigDependencies(model: WslConfigModel): string[] {
+  const warnings: string[] = []
+  if (model.wsl2.virtiofs === true) {
+    if (model.wsl2.virtio !== true) warnings.push('VirtioFS 需要同时启用 [wsl2] virtio=true')
+    if (model.wsl2.hostFileSystemAccess !== true) {
+      warnings.push('VirtioFS 需要同时启用 [wsl2] hostFileSystemAccess=true')
+    }
+  }
+  const sys = String(model.wsl2.systemDistro ?? '').trim()
+  if (sys && !/^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/.test(sys)) {
+    warnings.push('[wsl2] systemDistro 必须是绝对 Windows 路径')
+  } else if (sys && !/\.(?:img|vhd)$/i.test(sys)) {
+    warnings.push('[wsl2] systemDistro 仅支持 .img / .vhd')
+  }
+  if (model.wsl2.isolateDistroCgroup === true) {
+    warnings.push('[wsl2] isolateDistroCgroup 需要发行版使用 cgroup v2（请在发行版内确认）')
+  }
+  return warnings
 }

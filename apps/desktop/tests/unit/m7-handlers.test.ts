@@ -305,7 +305,7 @@ describe('app 域 0.1.3（WSL 本体生命周期 / 剪贴板）', () => {
     expect(setDefaultVersion).not.toHaveBeenCalled()
   })
 
-  it('clipboard:read / write 走主进程 Electron 剪贴板', () => {
+  it('clipboard:read / write 走主进程 Electron 剪贴板', async () => {
     const handlers = collectWith(
       { getEnv: vi.fn(), update: vi.fn(), setDefaultVersion: vi.fn() },
       {
@@ -314,8 +314,10 @@ describe('app 域 0.1.3（WSL 本体生命周期 / 剪贴板）', () => {
         withLock: vi.fn(async (_k: string, fn: () => Promise<unknown>) => fn()),
       },
     )
-    expect(handlers.get(CH.clipboardRead)!(makeCtx(), undefined)).toBe('clipboard-content')
-    handlers.get(CH.clipboardWrite)!(makeCtx(), 'hello')
+    await expect(handlers.get(CH.clipboardRead)!(makeCtx(), undefined)).resolves.toBe(
+      'clipboard-content',
+    )
+    await handlers.get(CH.clipboardWrite)!(makeCtx(), 'hello')
     expect(clipboard.writeText).toHaveBeenCalledWith('hello')
   })
 })

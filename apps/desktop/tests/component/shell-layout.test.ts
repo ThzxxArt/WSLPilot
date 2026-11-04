@@ -54,7 +54,10 @@ const { useDistrosStore } = await import('../../src/renderer/stores/distros')
 const { useTasksStore } = await import('../../src/renderer/stores/tasks')
 const { useTerminalStore } = await import('../../src/renderer/stores/terminal')
 const { useCommandPalette } = await import('../../src/renderer/composables/useCommandPalette')
+const { useWorkbenchStore } = await import('../../src/renderer/stores/workbench')
+const WorkbenchLayout = (await import('../../src/renderer/layouts/WorkbenchLayout.vue')).default
 const DefaultLayout = (await import('../../src/renderer/layouts/DefaultLayout.vue')).default
+const GlobalHotkeys = (await import('../../src/renderer/components/GlobalHotkeys.vue')).default
 const SidebarNav = (await import('../../src/renderer/layouts/SidebarNav.vue')).default
 const StatusBar = (await import('../../src/renderer/layouts/StatusBar.vue')).default
 const TitleBar = (await import('../../src/renderer/layouts/TitleBar.vue')).default
@@ -73,7 +76,7 @@ describe('SidebarNav', () => {
   it('渲染七个导航项，点击「发行版」路由跳转到 distros', async () => {
     routeMock.name = 'distros'
     const w = mount(SidebarNav, { props: { collapsed: false }, attachTo: document.body })
-    expect(w.findAll('.nav-item')).toHaveLength(7)
+    expect(w.findAll('.nav-item')).toHaveLength(8)
     expect(w.text()).toContain('驾驶舱')
     expect(w.text()).toContain('备份迁移')
     // 高亮跟随当前路由
@@ -381,10 +384,7 @@ describe('DefaultLayout', () => {
   })
 
   it('快捷键 ⌘N 无可用发行版时如实提示，不静默', async () => {
-    mount(DefaultLayout, {
-      attachTo: document.body,
-      global: { stubs: { 'router-view': true } },
-    })
+    mount(GlobalHotkeys, { attachTo: document.body })
     await flushPromises()
     keydown(window, 'n', { ctrlKey: true })
     await flushPromises()
@@ -395,10 +395,7 @@ describe('DefaultLayout', () => {
   it('快捷键 ⌘N 建终端成功后跳转终端页；失败走错误提示', async () => {
     // 终端只服务运行中发行版（review 状态门禁）：夹具 Running 才能建会话
     useDistrosStore().items = [distro({ state: 'Running' })]
-    mount(DefaultLayout, {
-      attachTo: document.body,
-      global: { stubs: { 'router-view': true } },
-    })
+    mount(GlobalHotkeys, { attachTo: document.body })
     await flushPromises()
     keydown(window, 'n', { ctrlKey: true })
     await flushPromises()
@@ -426,10 +423,7 @@ describe('DefaultLayout', () => {
     terminal.activeId = 'p1'
     terminal.activeTabId = 'p1'
     expect(terminal.canCreate).toBe(false)
-    mount(DefaultLayout, {
-      attachTo: document.body,
-      global: { stubs: { 'router-view': true } },
-    })
+    mount(GlobalHotkeys, { attachTo: document.body })
     await flushPromises()
     keydown(window, 'n', { ctrlKey: true })
     await flushPromises()
@@ -438,10 +432,7 @@ describe('DefaultLayout', () => {
   })
 
   it('快捷键 ⌘R 按路由分发：终端页不冒充刷新，其他页刷新发行版（review 0.1.2）', async () => {
-    mount(DefaultLayout, {
-      attachTo: document.body,
-      global: { stubs: { 'router-view': true } },
-    })
+    mount(GlobalHotkeys, { attachTo: document.body })
     await flushPromises()
     const refreshSpy = vi.spyOn(useDistrosStore(), 'refresh').mockResolvedValue()
 
@@ -539,5 +530,104 @@ describe('DefaultLayout', () => {
     expect(unmounted).not.toHaveBeenCalled()
     // 只有 TerminalView 在 include 列表：其他路由必须正常卸载，不能被 KeepAlive 缓存
     expect(otherUnmounted).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('WorkbenchLayout（0.2.0 终端全出血壳）', () => {
+  it('不渲染全局 TitleBar/StatusBar，导航轨固定折叠', async () => {
+    routeMock.name = 'terminal'
+    const w = mount(WorkbenchLayout, {
+      global: {
+        stubs: {
+          TerminalView: true,
+          RouterView: { name: 'RouterView', template: '<div class="wb-router" />' },
+          TitleBar: { name: 'TitleBar', template: '<header class="titlebar-stub" />' },
+          StatusBar: { name: 'StatusBar', template: '<footer class="statusbar-stub" />' },
+        },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    expect(w.find('.titlebar-stub').exists()).toBe(false)
+    expect(w.find('.statusbar-stub').exists()).toBe(false)
+    expect(w.find('.workbench').exists()).toBe(true)
+    expect(w.findAll('.nav-item')).toHaveLength(8)
+    const nav = w.findComponent({ name: 'SidebarNav' })
+    expect(nav.props('collapsed')).toBe(true)
+    expect(nav.props('locked')).toBe(true)
+  })
+
+  it('专注模式隐藏导航轨，退出按钮可见并可退出', async () => {
+    routeMock.name = 'terminal'
+    const workbench = useWorkbenchStore()
+    const w = mount(WorkbenchLayout, {
+      global: {
+        stubs: { TerminalView: true, RouterView: { name: 'RouterView', template: '<div />' } },
+      },
+      attachTo: document.body,
+    })
+    expect(w.findAll('.nav-item')).toHaveLength(8)
+    workbench.toggleFocus()
+    await nextTick()
+    expect(w.findAll('.nav-item')).toHaveLength(0)
+    expect(w.text()).toContain('退出专注模式')
+    await w.find('.focus-exit').trigger('click')
+    expect(workbench.focusMode).toBe(false)
+    await nextTick()
+    expect(w.findAll('.nav-item')).toHaveLength(8)
+  })
+
+  it('跳到终端 skip link 指向主内容区', async () => {
+    routeMock.name = 'terminal'
+    const w = mount(WorkbenchLayout, {
+      global: {
+        stubs: { TerminalView: true, RouterView: { name: 'RouterView', template: '<div />' } },
+      },
+      attachTo: document.body,
+    })
+    const link = w.find('a.skip-link')
+    expect(link.attributes('href')).toBe('#terminal-main')
+    expect(w.find('#terminal-main').exists()).toBe(true)
+  })
+})
+
+describe('GlobalHotkeys（0.2.0 全局接线）', () => {
+  it('Ctrl+K / Ctrl+, / Ctrl+1 / Ctrl+Shift+P 在非终端页按预期分发', async () => {
+    routeMock.name = 'dashboard'
+    mount(GlobalHotkeys, { attachTo: document.body })
+    await flushPromises()
+    const { useCommandPalette, __resetUseCommandPaletteForTest } =
+      await import('../../src/renderer/composables/useCommandPalette')
+    __resetUseCommandPaletteForTest()
+    keydown(window, 'k', { ctrlKey: true })
+    expect(useCommandPalette().open.value).toBe(true)
+    __resetUseCommandPaletteForTest()
+
+    keydown(window, ',', { ctrlKey: true })
+    await flushPromises()
+    expect(routerMock.push).toHaveBeenCalledWith('/settings')
+
+    const settings = useSettingsStore()
+    const before = settings.showRawCommand
+    keydown(window, 'p', { ctrlKey: true, shiftKey: true })
+    await flushPromises()
+    expect(settings.showRawCommand).toBe(!before)
+
+    const terminal = useTerminalStore()
+    terminal.tabs = [{ id: 't1', title: 't', layout: { kind: 'leaf', ptyId: 'p1' }, createdAt: 1 }]
+    keydown(window, '1', { ctrlKey: true })
+    await flushPromises()
+    expect(routerMock.push).toHaveBeenCalledWith('/terminal')
+  })
+
+  it('终端页 Ctrl+Shift+P 不触发全局 rawCommand（留给工作台工具栏）', async () => {
+    routeMock.name = 'terminal'
+    mount(GlobalHotkeys, { attachTo: document.body })
+    await flushPromises()
+    const settings = useSettingsStore()
+    settings.showRawCommand = false
+    keydown(window, 'p', { ctrlKey: true, shiftKey: true })
+    await flushPromises()
+    expect(settings.showRawCommand).toBe(false)
   })
 })

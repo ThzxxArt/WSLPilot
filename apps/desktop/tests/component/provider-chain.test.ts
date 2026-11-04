@@ -26,11 +26,15 @@ describe('生产壳 provider 链（真 naive-ui）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     ;(globalThis as any).window.wslAPI = wslAPI
-    ;(globalThis as any).localStorage = {
-      getItem: () => null,
-      setItem: () => {},
-      removeItem: () => {},
-    }
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        clear: () => {},
+      },
+    })
   })
 
   it('App 壳 + 真实 NetworkView：useNotification 三提供齐全（缺 provider 即红）', async () => {

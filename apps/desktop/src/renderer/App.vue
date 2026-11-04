@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed, onErrorCaptured, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import {
+  computed,
+  defineAsyncComponent,
+  onErrorCaptured,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+} from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NConfigProvider,
   NMessageProvider,
@@ -13,6 +21,8 @@ import {
   dateEnUS,
 } from 'naive-ui'
 import DefaultLayout from './layouts/DefaultLayout.vue'
+const WorkbenchLayout = defineAsyncComponent(() => import('./layouts/WorkbenchLayout.vue'))
+import GlobalHotkeys from './components/GlobalHotkeys.vue'
 import ConflictResolver from './features/config/ConflictResolver.vue'
 import CommandPalette from './features/command/CommandPalette.vue'
 import { useSettingsStore } from './stores/settings'
@@ -24,6 +34,31 @@ import type { AccentName } from '@wslpilot/ui'
 
 const settings = useSettingsStore()
 const router = useRouter()
+const route = useRoute()
+const isWorkbench = computed(() => route.meta?.layout === 'workbench')
+/** 首次进入终端才加载工作台（xterm 大依赖不在驾驶舱启动时加载），之后常驻保活 */
+const workbenchVisited = ref(route.name === 'terminal')
+watch(
+  () => route.name,
+  (name) => {
+    if (name === 'terminal') workbenchVisited.value = true
+  },
+)
+const LAST_ROUTE_KEY = 'wslpilot:last-route'
+
+// 记录最近业务路由（设置页不参与，避免「上次在设置」每次启动都跳设置）
+watch(
+  () => route.fullPath,
+  (path) => {
+    // 启动阶段不写入：initial /dashboard 会覆盖上一次会话的 last 路径
+    if (!ready.value || !path || path === '/' || path.startsWith('/settings')) return
+    try {
+      localStorage.setItem(LAST_ROUTE_KEY, path)
+    } catch {
+      /* 存储不可用不影响导航 */
+    }
+  },
+)
 const accent = computed(() => settings.accent as AccentName)
 const { themeOverrides } = useNaiveTheme(accent)
 
@@ -113,6 +148,23 @@ onMounted(async () => {
     ready.value = true
   }
 
+  // 启动页（workbench.defaultRoute）：dashboard | terminal | last
+  try {
+    if (route.name === 'dashboard') {
+      const configured = settings.workbenchDefaultRoute
+      const last = localStorage.getItem(LAST_ROUTE_KEY)
+      const target =
+        configured === 'terminal'
+          ? '/terminal'
+          : configured === 'last' && last && !last.startsWith('/settings')
+            ? last
+            : ''
+      if (target && target !== route.fullPath) await router.push(target)
+    }
+  } catch {
+    /* 启动页跳转失败不阻断应用 */
+  }
+
   unsubConfig = window.wslAPI?.config.onChanged(({ fileKey }) => {
     if (fileKey === 'settings') void settings.load()
   })
@@ -187,7 +239,10 @@ onUnmounted(() => {
             <ConflictResolver />
             <CommandPalette />
             <div v-if="ready" class="pilot-shell">
-              <DefaultLayout />
+              <!-- WorkbenchLayout 常驻（v-show）：TerminalView 跨路由保活，xterm 与 TUI 现场不丢 -->
+              <WorkbenchLayout v-if="workbenchVisited" v-show="isWorkbench" />
+              <DefaultLayout v-if="!isWorkbench" />
+              <GlobalHotkeys />
             </div>
             <div v-else class="loading-screen">
               <n-spin size="large" />
@@ -200,6 +255,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.pilot-shell {
+  height: 100%;
+  min-height: 0;
+}
+
 .loading-screen {
   height: 100%;
   display: flex;
@@ -252,7 +312,7 @@ onUnmounted(() => {
   font-size: 13px;
   line-height: 1.7;
   color: var(--color-text-secondary);
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .fatal-actions {

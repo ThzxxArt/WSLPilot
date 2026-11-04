@@ -26,7 +26,32 @@ export const TERMINAL_LIGHT_THEME = {
   brightWhite: '#F8FAFC',
 } as const satisfies ITheme
 
-/** 高对比浅色（terminal.theme = custom）— 满足正文 ≥ 4.5:1 对比度 */
+/** 终端独立深色（应用仍浅色；只作用于 xterm 与终端容器） */
+export const TERMINAL_DARK_THEME = {
+  background: '#0B1220',
+  foreground: '#E2E8F0',
+  cursor: '#22D3EE',
+  cursorAccent: '#0B1220',
+  selectionBackground: 'rgba(99, 102, 241, 0.35)',
+  black: '#0B1220',
+  red: '#F87171',
+  green: '#4ADE80',
+  yellow: '#FBBF24',
+  blue: '#60A5FA',
+  magenta: '#C084FC',
+  cyan: '#22D3EE',
+  white: '#E2E8F0',
+  brightBlack: '#64748B',
+  brightRed: '#FCA5A5',
+  brightGreen: '#86EFAC',
+  brightYellow: '#FDE68A',
+  brightBlue: '#93C5FD',
+  brightMagenta: '#E9D5FF',
+  brightCyan: '#A5F3FC',
+  brightWhite: '#F8FAFC',
+} as const satisfies ITheme
+
+/** 高对比浅色（terminal.theme = high-contrast）— 满足正文 ≥ 4.5:1 对比度 */
 export const TERMINAL_CONTRAST_THEME = {
   background: '#FFFFFF',
   foreground: '#0B1220',
@@ -55,9 +80,13 @@ export interface TerminalFontPrefs {
   fontFamily: string
   fontSize: number
   lineHeight: number
+  letterSpacing: number
   cursorStyle: 'block' | 'underline' | 'bar'
   cursorBlink: boolean
+  cursorInactiveStyle: 'outline' | 'block' | 'bar' | 'underline' | 'none'
   scrollback: number
+  minimumContrastRatio: number
+  smoothScroll: boolean
 }
 
 /** 默认终端偏好唯一事实源：settings.jsonc schema 默认值（禁止第三份手抄 — review） */
@@ -66,9 +95,13 @@ export const DEFAULT_TERMINAL_PREFS: TerminalFontPrefs = {
   fontFamily: _defaults.fontFamily,
   fontSize: _defaults.fontSize,
   lineHeight: _defaults.lineHeight,
+  letterSpacing: _defaults.letterSpacing,
   cursorStyle: _defaults.cursorStyle,
   cursorBlink: _defaults.cursorBlink,
+  cursorInactiveStyle: _defaults.cursorInactiveStyle,
   scrollback: _defaults.scrollback,
+  minimumContrastRatio: _defaults.minimumContrastRatio,
+  smoothScroll: _defaults.smoothScroll,
 }
 
 /**
@@ -94,26 +127,32 @@ export function hexToRgba(hex: string, alpha: number): string {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim())
   if (!m) return `rgba(99, 102, 241, ${alpha})`
   let h = m[1]!
-  // #rgb → #rrggbb（每一位复制成两位）
   if (h.length === 3) h = h.replace(/./g, (c) => c + c)
   const n = Number.parseInt(h, 16)
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
 /**
- * 终端主题解析（settings.terminal.theme）：
- * - auto：内置浅色（默认）
- * - follow-app：内置浅色 + 当前强调色光标/选区
- * - custom：高对比浅色
+ * 终端主题解析：
+ * - light：内置浅色（默认）
+ * - dark：独立深色（应用仍浅色）
+ * - follow-app：浅色 + 当前强调色光标/选区
+ * - high-contrast：高对比浅色
  */
 export function resolveTerminalTheme(
   mode: TerminalTheme,
   accent: AccentName = 'aurora',
 ): Record<string, string> {
-  if (mode === 'custom') return { ...TERMINAL_CONTRAST_THEME }
+  if (mode === 'dark') return { ...TERMINAL_DARK_THEME }
+  if (mode === 'high-contrast') return { ...TERMINAL_CONTRAST_THEME }
   if (mode === 'follow-app') {
     const color = ACCENT_MAPS[accent]?.accent ?? ACCENT_MAPS.aurora.accent
     return { ...TERMINAL_LIGHT_THEME, cursor: color, selectionBackground: hexToRgba(color, 0.25) }
   }
   return { ...TERMINAL_LIGHT_THEME }
+}
+
+/** 终端容器/宿主背景（与 xterm 主题一致） */
+export function terminalBackground(mode: TerminalTheme): string {
+  return resolveTerminalTheme(mode).background ?? '#FBFCFE'
 }

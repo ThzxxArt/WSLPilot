@@ -4,7 +4,10 @@ import {
   createAppError,
   isAppError,
   MAX_PTY_SESSIONS,
+  assertEnvKey,
+  assertEnvValue,
   assertSafeDistroName,
+  shellIntegrationLaunchArgs,
 } from '@wslpilot/shared'
 import type { Logger } from '@wslpilot/kit'
 
@@ -13,10 +16,35 @@ const req = createRequire(__filename)
 // eslint-disable-next-line no-control-regex -- 有意匹配控制字符作为非法输入
 const SHELL_CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
+/** profile 环境变量 → argv 对（键名白名单、值长度上限；不猜 shell 变量语义） */
+function envPairs(env: Record<string, string> | undefined): string[] {
+  if (!env) return []
+  const out: string[] = []
+  for (const [key, value] of Object.entries(env)) {
+    try {
+      out.push(`${assertEnvKey(key)}=${assertEnvValue(value)}`)
+    } catch (e) {
+      throw isAppError(e) ? e : createAppError('INVALID_ARGUMENT', { message: String(e) })
+    }
+  }
+  return out
+}
+
 export interface PtyCreateOptions {
   distro: string
+  /** 0.2.0：容器内会话（wslc exec -it）；提供时 distro 仅作展示/元数据 */
+  containerId?: string
   shell?: string
   cwd?: string
+  user?: string
+  /**
+   * Shell 集成（0.2.0）：主进程已探测 home 后传入；渲染层不可指定。
+   * 仅在 bash/zsh 生效，其他 shell 忽略。
+   */
+  shellIntegration?: boolean
+  homeDir?: string
+  /** profile 环境变量（渲染层不能经 pty:create 传入；仅主进程 profile 链路使用） */
+  env?: Record<string, string>
   cols: number
   rows: number
 }
@@ -28,6 +56,7 @@ export interface PtyCommandOptions {
   args: string[]
   user?: string
   cwd?: string
+  env?: Record<string, string>
   cols?: number
   rows?: number
 }
@@ -45,6 +74,8 @@ export interface PtyProcessLike {
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
+  pause?(): void
+  resume?(): void
   onData(listener: (data: string) => void): { dispose(): void }
   onExit(listener: (e: { exitCode: number; signal?: number }) => void): { dispose(): void }
   pid: number
@@ -79,6 +110,8 @@ export interface PtyManager {
   createCommand(opts: PtyCommandOptions): PtySessionInfo
   input(ptyId: string, data: string): void
   resize(ptyId: string, cols: number, rows: number): void
+  /** 渲染层已消费的字节数（流控 ACK）；超过水位暂停 PTY，回落后续读 */
+  ack(ptyId: string, bytes: number): void
   kill(ptyId: string): void
   killAll(): void
   list(): PtySessionInfo[]
@@ -89,7 +122,10 @@ export interface PtyManager {
 }
 
 function getOrThrow(
-  sessions: Map<string, { proc: PtyProcessLike; info: PtySessionInfo }>,
+  sessions: Map<
+    string,
+    { proc: PtyProcessLike; info: PtySessionInfo; unacked: number; paused: boolean }
+  >,
   id: string,
 ) {
   const s = sessions.get(id)
@@ -112,7 +148,18 @@ export function createPtyManager(
   spawnFn?: PtySpawnFn,
   options?: PtyManagerOptions,
 ): PtyManager {
-  const sessions = new Map<string, { proc: PtyProcessLike; info: PtySessionInfo }>()
+  const sessions = new Map<
+    string,
+    {
+      proc: PtyProcessLike
+      info: PtySessionInfo
+      unacked: number
+      paused: boolean
+    }
+  >()
+  /** 流控水位：超过高水位暂停 PTY，ACK 回落到低水位再恢复 */
+  const FLOW_HIGH_WATER = 1024 * 1024
+  const FLOW_LOW_WATER = 256 * 1024
 
   // 默认 spawn：createRequire 加载 node-pty（asarUnpack 后路径稳定）
   const spawn: PtySpawnFn =
@@ -169,6 +216,7 @@ export function createPtyManager(
   }
 
   function spawnSession(
+    program: string,
     args: string[],
     meta: { distro: string; shell: string; cwd?: string; cols: number; rows: number },
   ): PtySessionInfo {
@@ -179,7 +227,7 @@ export function createPtyManager(
     // 直接穿透 IPC 会被 UNKNOWN 兜底吞成「发生未知错误」——在此如实映射（review 根治）
     let proc: PtyProcessLike
     try {
-      proc = spawn('wsl.exe', args, {
+      proc = spawn(program, args, {
         name: 'xterm-256color',
         cols,
         rows,
@@ -205,9 +253,21 @@ export function createPtyManager(
       cwd: meta.cwd,
       createdAt: Date.now(),
     }
-    sessions.set(id, { proc, info })
+    sessions.set(id, { proc, info, unacked: 0, paused: false })
 
     proc.onData((chunk) => {
+      const entry = sessions.get(id)
+      if (entry) {
+        entry.unacked += Buffer.byteLength(chunk, 'utf8')
+        if (!entry.paused && entry.unacked > FLOW_HIGH_WATER) {
+          try {
+            proc.pause?.()
+            entry.paused = true
+          } catch {
+            /* 平台不支持 pause：退化为无流控 */
+          }
+        }
+      }
       events.onData(id, chunk)
     })
     proc.onExit(({ exitCode }) => {
@@ -234,7 +294,7 @@ export function createPtyManager(
         })
       }
       const distro = assertSafeDistroName(opts.distro)
-      const shell = opts.shell?.trim() || defaultShell()
+      const shell = opts.shell?.trim() || (opts.containerId ? '/bin/sh' : defaultShell())
       // shell 走 -e 分界，仅作为程序路径；拒绝逃逸/控制字符/伪参数（review M22）
       if (
         !shell ||
@@ -245,14 +305,53 @@ export function createPtyManager(
         throw createAppError('TASK_FAILED', { message: `非法的 shell：${shell}` })
       }
 
+      const user = opts.user?.trim()
+      if (user && (user.startsWith('-') || SHELL_CONTROL_CHARS.test(user) || user.includes('..'))) {
+        throw createAppError('TASK_FAILED', { message: `非法的执行用户：${user}` })
+      }
+
+      if (opts.containerId) {
+        // wslc exec -it [-u user] <container> [env ...] <shell>；参数数组，不经 shell
+        if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$/.test(opts.containerId)) {
+          throw createAppError('TASK_FAILED', { message: `非法的容器 id：${opts.containerId}` })
+        }
+        const pairs = envPairs(opts.env)
+        const args = [
+          'exec',
+          '-it',
+          ...(user ? ['-u', user] : []),
+          opts.containerId,
+          ...(pairs.length ? ['env', ...pairs] : []),
+          shell,
+        ]
+        return spawnSession('wslc.exe', args, {
+          distro,
+          shell,
+          cwd: opts.cwd,
+          cols: opts.cols,
+          rows: opts.rows,
+        })
+      }
+
       const args = ['-d', distro]
       if (opts.cwd && opts.cwd.trim()) {
         // --cd 路径不进 shell；用数组传参
         args.push('--cd', opts.cwd.trim())
       }
-      args.push('-e', shell)
+      if (user) args.push('-u', user)
+      // Shell 集成：bash --rcfile / zsh ZDOTDIR；失败/未安装不阻塞启动。
+      // profile 环境变量通过 `wsl -e env K=V ...` 传入（argv，不经 shell）。
+      const pairs = envPairs(opts.env)
+      if (opts.shellIntegration && opts.homeDir) {
+        const launch = shellIntegrationLaunchArgs(shell, opts.homeDir, opts.env)
+        args.push(...launch.args)
+      } else if (pairs.length) {
+        args.push('-e', 'env', ...pairs, shell)
+      } else {
+        args.push('-e', shell)
+      }
 
-      return spawnSession(args, {
+      return spawnSession('wsl.exe', args, {
         distro,
         shell,
         cwd: opts.cwd,
@@ -303,9 +402,11 @@ export function createPtyManager(
         }
         argv.push('--cd', cwd)
       }
-      argv.push('-e', program, ...args)
+      const pairs = envPairs(opts.env)
+      if (pairs.length) argv.push('-e', 'env', ...pairs, program, ...args)
+      else argv.push('-e', program, ...args)
 
-      return spawnSession(argv, {
+      return spawnSession('wsl.exe', argv, {
         distro,
         shell: program,
         cwd: opts.cwd,
@@ -327,6 +428,22 @@ export function createPtyManager(
       const c = Math.max(2, Math.min(500, Number.isFinite(cn) ? Math.floor(cn) : 80))
       const r = Math.max(1, Math.min(200, Number.isFinite(rn) ? Math.floor(rn) : 24))
       s.proc.resize(c, r)
+    },
+
+    ack(ptyId, bytes) {
+      const s = sessions.get(ptyId)
+      if (!s) return
+      const n = Number(bytes)
+      if (!Number.isFinite(n) || n <= 0) return
+      s.unacked = Math.max(0, s.unacked - Math.floor(n))
+      if (s.paused && s.unacked <= FLOW_LOW_WATER) {
+        try {
+          s.proc.resume?.()
+          s.paused = false
+        } catch {
+          /* 平台不支持 resume：保持暂停，下一次输出不会再累加 */
+        }
+      }
     },
 
     kill(ptyId) {

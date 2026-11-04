@@ -19,6 +19,8 @@ import { createActionRunner } from './services/action-runner'
 import { createFsBridge } from './services/fs-bridge'
 import { createNetworkService } from './services/network-service'
 import { createUsbipdService } from './services/usbipd-service'
+import { createWslcService } from './services/wslc-service'
+import { createShellIntegrationService } from './services/shell-integration-service'
 import { createDiagnosticsService } from './services/diagnostics-service'
 import { createSignatureService } from './services/signature-service'
 import { createElevationClient } from './elevation/client'
@@ -217,6 +219,58 @@ async function bootstrap() {
   // M6：端口转发 / 镜像模式 / 代理 + usbipd 设备（M7 提权接线）
   const network = createNetworkService({ logger, configService, elevation })
   const devices = createUsbipdService({ logger, elevation })
+  const wslc = createWslcService({ logger })
+  const shellIntegration = createShellIntegrationService({ logger })
+  /**
+   * wslc 事件流：仅安装且支持 events 时启动；断开后指数退避重连
+   * （1s/2s/5s/10s/30s）。退出应用时必须停止，避免残留子进程。
+   */
+  let stopWslcEvents: (() => void) | null = null
+  let wslcEventsRetry: NodeJS.Timeout | null = null
+  let wslcEventsAttempt = 0
+  let wslcEventsStopped = false
+  const clearWslcRetry = () => {
+    if (wslcEventsRetry) {
+      clearTimeout(wslcEventsRetry)
+      wslcEventsRetry = null
+    }
+  }
+  const scheduleWslcEvents = (delayMs: number) => {
+    if (wslcEventsStopped || wslcEventsRetry) return
+    wslcEventsRetry = setTimeout(() => {
+      wslcEventsRetry = null
+      void startWslcEvents()
+    }, delayMs)
+  }
+  const startWslcEvents = async (): Promise<void> => {
+    if (wslcEventsStopped || stopWslcEvents) return
+    try {
+      const caps = await wslc.capabilities()
+      if (wslcEventsStopped || !caps.installed || !caps.events) return
+      const handle = wslc.events(
+        () => {
+          // 有真实事件说明流健康：重连退避归零
+          wslcEventsAttempt = 0
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(CH.containersChanged, { at: Date.now() })
+          }
+        },
+        () => {
+          stopWslcEvents = null
+          const delays = [1000, 2000, 5000, 10_000, 30_000]
+          const delay = delays[Math.min(wslcEventsAttempt, delays.length - 1)]!
+          wslcEventsAttempt += 1
+          logger.warn('wslc events exited; reconnecting', { delay, attempt: wslcEventsAttempt })
+          scheduleWslcEvents(delay)
+        },
+      )
+      stopWslcEvents = handle.stop
+    } catch (e) {
+      logger.warn('wslc events unavailable', { error: String(e) })
+      scheduleWslcEvents(5000)
+    }
+  }
+  void startWslcEvents()
 
   // M7：诊断包 / 签名状态 / 自动更新
   const diagnostics = createDiagnosticsService({
@@ -253,7 +307,21 @@ async function bootstrap() {
       signature,
       updater,
     },
-    { wsl, registry, pty, io, tasks, wslconf, wslconfig, runner, fsBridge, network, devices },
+    {
+      wsl,
+      registry,
+      pty,
+      io,
+      tasks,
+      wslconf,
+      wslconfig,
+      runner,
+      fsBridge,
+      network,
+      devices,
+      wslc,
+      shell: shellIntegration,
+    },
   )
 
   /**
@@ -266,6 +334,10 @@ async function bootstrap() {
     // 先同步取消任务与终端，再等待写队列/日志落盘（review M25）
     e.preventDefault()
     logger.info('will-quit: flush start')
+    wslcEventsStopped = true
+    clearWslcRetry()
+    stopWslcEvents?.()
+    stopWslcEvents = null
     tasks.dispose()
     pty.killAll()
     void Promise.allSettled([configService.flush(), logger.flush?.() ?? Promise.resolve()]).finally(

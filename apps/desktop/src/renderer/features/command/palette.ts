@@ -4,7 +4,7 @@
  */
 import { filterRanked } from '@wslpilot/shared'
 
-export type PaletteGroup = '导航' | '发行版' | '动作' | '设置'
+export type PaletteGroup = '导航' | '发行版' | '终端' | '动作' | '设置'
 
 export interface PaletteItem {
   id: string
@@ -36,7 +36,7 @@ export function parsePaletteQuery(query: string): { prefix: PalettePrefix; text:
 }
 
 const PREFIX_GROUPS: Record<Exclude<PalettePrefix, null>, PaletteGroup[]> = {
-  '>': ['动作', '导航'],
+  '>': ['动作', '终端', '导航'],
   '@': ['发行版'],
   '#': ['设置'],
 }
@@ -55,7 +55,7 @@ export function filterPaletteItems(items: PaletteItem[], query: string): Palette
 export function groupPaletteItems(
   items: PaletteItem[],
 ): Array<{ group: PaletteGroup; items: PaletteItem[] }> {
-  const order: PaletteGroup[] = ['动作', '发行版', '导航', '设置']
+  const order: PaletteGroup[] = ['动作', '发行版', '终端', '导航', '设置']
   const map = new Map<PaletteGroup, PaletteItem[]>()
   for (const i of items) {
     const list = map.get(i.group) ?? []

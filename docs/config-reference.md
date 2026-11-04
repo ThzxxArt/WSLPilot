@@ -4,53 +4,79 @@
 
 ## settings.jsonc — 应用偏好
 
-| 字段                                 | 类型                              | 默认                        | 说明                                   |
-| ------------------------------------ | --------------------------------- | --------------------------- | -------------------------------------- |
-| `general.autoRefreshOnStart`         | boolean                           | `true`                      | 启动时自动刷新                         |
-| `general.pollIntervalMs`             | number                            | `5000`                      | 轮询间隔（1000–60000）                 |
-| `general.locale`                     | `system\|zh-CN\|en-US`            | `system`                    | 组件语言（界面文案暂仅中文）           |
-| `general.accent`                     | `aurora\|sunset\|ocean\|forest`   | `aurora`                    | 强调色（浅色为唯一主题，不提供深色）   |
-| `general.closeBehavior`              | `minimizeToTray\|quit`            | `minimizeToTray`            | 关闭行为                               |
-| `general.launchAtLogin`              | boolean                           | `false`                     | 开机自启（与托盘菜单同步）             |
-| `general.reduceMotion`               | boolean                           | `false`                     | 减弱动效                               |
-| `wsl.defaultShell`                   | string                            | `""`                        | 默认 Shell（空 = `/bin/bash`）         |
-| `wsl.autoShutdownAfterConfigChange`  | boolean                           | `false`                     | 配置变更后自动关机使生效               |
-| `terminal.fontFamily`                | string                            | Cascadia Mono…              | 终端字体                               |
-| `terminal.fontSize`                  | number                            | `14`                        | 字号（8–32）                           |
-| `terminal.lineHeight`                | number                            | `1.2`                       | 行高（1–2.5）                          |
-| `terminal.cursorStyle`               | `block\|underline\|bar`           | `block`                     | 光标样式                               |
-| `terminal.cursorBlink`               | boolean                           | `true`                      | 光标闪烁                               |
-| `terminal.scrollback`                | number                            | `5000`                      | 回滚缓冲行数                           |
-| `terminal.copyOnSelect`              | boolean                           | `false`                     | 选中即复制                             |
-| `terminal.theme`                     | `auto\|follow-app\|custom`        | `auto`                      | 终端配色                               |
-| `backup.defaultDir`                  | string                            | `%USERPROFILE%\WSL-Backups` | 备份目录（支持环境变量）               |
-| `backup.format`                      | `tar\|tar.gz\|vhd`                | `tar`                       | 备份格式（tar.gz 需 WSL 2.4.4+）       |
-| `backup.keepRecent`                  | number                            | `5`                         | 保留份数（1–50，自动轮转）             |
-| `backup.autoBackupBeforeDestructive` | boolean                           | `true`                      | 迁移等破坏性操作前自动备份             |
-| `advanced.showRawCommand`            | boolean                           | `false`                     | 显示等价命令                           |
-| `advanced.confirmDestructive`        | boolean                           | `true`                      | 破坏性确认                             |
-| `advanced.logLevel`                  | `trace\|debug\|info\|warn\|error` | `info`                      | 日志级别                               |
-| `advanced.hardwareAcceleration`      | boolean                           | `true`                      | 硬件加速（重启应用生效）               |
-| `advanced.autoUpdate`                | boolean                           | `true`                      | 启动时后台检查更新（M7，下次启动生效） |
+| 字段                                 | 类型                                     | 默认                        | 说明                                         |
+| ------------------------------------ | ---------------------------------------- | --------------------------- | -------------------------------------------- |
+| `general.autoRefreshOnStart`         | boolean                                  | `true`                      | 启动时自动刷新                               |
+| `general.pollIntervalMs`             | number                                   | `5000`                      | 轮询间隔（1000–60000）                       |
+| `general.locale`                     | `system\|zh-CN\|en-US`                   | `system`                    | 组件语言（界面文案暂仅中文）                 |
+| `general.accent`                     | `aurora\|sunset\|ocean\|forest`          | `aurora`                    | 强调色（浅色为唯一主题，不提供深色）         |
+| `general.closeBehavior`              | `minimizeToTray\|quit`                   | `minimizeToTray`            | 关闭行为                                     |
+| `general.launchAtLogin`              | boolean                                  | `false`                     | 开机自启（与托盘菜单同步）                   |
+| `general.reduceMotion`               | boolean                                  | `false`                     | 减弱动效                                     |
+| `wsl.defaultShell`                   | string                                   | `""`                        | 默认 Shell（空 = `/bin/bash`）               |
+| `wsl.autoShutdownAfterConfigChange`  | boolean                                  | `false`                     | 配置变更后自动关机使生效                     |
+| `terminal.fontFamily`                | string                                   | Cascadia Mono…              | 终端字体                                     |
+| `terminal.fontSize`                  | number                                   | `14`                        | 字号（8–32）                                 |
+| `terminal.lineHeight`                | number                                   | `1.25`                      | 行高（1–2.5）                                |
+| `terminal.cursorStyle`               | `block\|underline\|bar`                  | `bar`                       | 光标样式                                     |
+| `terminal.cursorBlink`               | boolean                                  | `true`                      | 光标闪烁                                     |
+| `terminal.scrollback`                | number                                   | `10000`                     | 回滚缓冲行数（100–100000）                   |
+| `terminal.copyOnSelect`              | boolean                                  | `false`                     | 选中即复制                                   |
+| `terminal.letterSpacing`             | number                                   | `0`                         | 字距（-2–4）                                 |
+| `terminal.theme`                     | `light\|dark\|follow-app\|high-contrast` | `light`                     | 终端配色（应用仍浅色，终端可独立深色）       |
+| `terminal.rightClickBehavior`        | `contextMenu\|paste\|selectWord`         | `contextMenu`               | 右键行为                                     |
+| `terminal.pasteWarning`              | `always\|multiline\|never`               | `multiline`                 | 多行粘贴确认                                 |
+| `terminal.bell`                      | `none\|visual\|sound`                    | `none`                      | 响铃行为                                     |
+| `terminal.webgl`                     | `auto\|on\|off`                          | `auto`                      | WebGL 渲染（失败自动回退 DOM）               |
+| `terminal.shellIntegration`          | `off\|prompt\|on`                        | `off`                       | Shell 集成（显式安装）                       |
+| `terminal.profiles`                  | array                                    | `[]`                        | 终端启动 Profile（distro/container/command） |
+| `workbench.defaultRoute`             | `dashboard\|terminal\|last`              | `dashboard`                 | 启动默认页面                                 |
+| `workbench.autoCollapseSidebar`      | boolean                                  | `true`                      | 终端页自动收起导航轨                         |
+| `workbench.tabPosition`              | `top\|left`                              | `top`                       | 标签栏位置                                   |
+| `workbench.density`                  | `comfortable\|compact`                   | `comfortable`               | 工作台密度                                   |
+| `workbench.showStatusLine`           | boolean                                  | `true`                      | 显示 20px 终端状态行                         |
+| `workbench.showPaneHeaders`          | `auto\|always\|never`                    | `auto`                      | 分屏面板标题                                 |
+| `workbench.sessionRailWidth`         | number                                   | `240`                       | 会话侧栏宽度（180–360）                      |
+| `workbench.confirmClosePane`         | boolean                                  | `true`                      | 关闭运行中面板确认                           |
+| `containers.pollIntervalMs`          | number                                   | `3000`                      | 容器列表轮询间隔                             |
+| `containers.statsIntervalMs`         | number                                   | `1000`                      | 容器统计采样间隔                             |
+| `containers.confirmPrune`            | boolean                                  | `true`                      | 清理前确认                                   |
+| `containers.confirmRemoveRunning`    | boolean                                  | `true`                      | 删除运行中容器确认                           |
+| `containers.defaultStopTimeoutSec`   | number                                   | `10`                        | 停止容器默认超时                             |
+| `containers.maskEnvValues`           | boolean                                  | `true`                      | 详情页遮挡环境变量值                         |
+| `containers.lastImage`               | string                                   | `ubuntu:latest`             | 运行向导默认镜像                             |
+| `backup.defaultDir`                  | string                                   | `%USERPROFILE%\WSL-Backups` | 备份目录（支持环境变量）                     |
+| `backup.format`                      | `tar\|tar.gz\|vhd`                       | `tar`                       | 备份格式（tar.gz 需 WSL 2.4.4+）             |
+| `backup.keepRecent`                  | number                                   | `5`                         | 保留份数（1–50，自动轮转）                   |
+| `backup.autoBackupBeforeDestructive` | boolean                                  | `true`                      | 迁移等破坏性操作前自动备份                   |
+| `advanced.showRawCommand`            | boolean                                  | `false`                     | 显示等价命令                                 |
+| `advanced.confirmDestructive`        | boolean                                  | `true`                      | 破坏性确认                                   |
+| `advanced.logLevel`                  | `trace\|debug\|info\|warn\|error`        | `info`                      | 日志级别                                     |
+| `advanced.hardwareAcceleration`      | boolean                                  | `true`                      | 硬件加速（重启应用生效）                     |
+| `advanced.autoUpdate`                | boolean                                  | `true`                      | 启动时后台检查更新（M7，下次启动生效）       |
 
 ## distros.jsonc — 发行版元数据
 
 只保存「系统里没有、属于本工具」的信息。真实状态每次由 `wsl.exe` 实时查询。
 
-| 字段           | 说明                 |
-| -------------- | -------------------- |
-| `name`         | 注册表名称（稳定键） |
-| `alias`        | 显示别名             |
-| `tags`         | 标签列表             |
-| `color`        | 品牌色               |
-| `icon`         | 图标名               |
-| `note`         | 备注                 |
-| `startupCwd`   | 终端启动目录         |
-| `pinned`       | 是否置顶             |
-| `quickActions` | 快捷动作 id 列表     |
+| 字段                | 说明                                      |
+| ------------------- | ----------------------------------------- |
+| `name`              | 注册表名称（稳定键）                      |
+| `alias`             | 显示别名                                  |
+| `tags`              | 标签列表                                  |
+| `color`             | 品牌色                                    |
+| `icon`              | 图标名                                    |
+| `note`              | 备注                                      |
+| `startupCwd`        | 终端启动目录                              |
+| `pinned`            | 是否置顶                                  |
+| `quickActions`      | 快捷动作 id 列表                          |
+| `terminalProfileId` | 终端 Profile id（空 = 默认启动方式）      |
+| `hidden`            | 从驾驶舱/终端/列表默认隐藏（内部发行版）  |
+| `defaultShell`      | 发行版级默认 Shell（覆盖全局，空 = 跟随） |
 
-`distros.jsonc` 当前为 v2：`tags` 最多 20 个、每个 ≤64 字符；`quickActions` 最多 20 个、
-每个动作 id ≤100 字符。v1 超限数据在迁移时截断（不交给 sanitize 静默丢弃）。
+`distros.jsonc` 当前为 v3：新增 `terminalProfileId` / `hidden` / `defaultShell`。`tags` 最多 20 个、
+每个 ≤64 字符；`quickActions` 最多 20 个、每个动作 id ≤100 字符。v1/v2 超限数据在迁移时截断
+或补默认值（不交给 sanitize 静默丢弃）。
 
 ## actions.jsonc — 自定义动作
 
@@ -126,7 +152,7 @@
 - **代理落点**：`/etc/profile.d/wslpilot-proxy.sh`（写入走 `wsl -d <name> -u root -e tee` + stdin，
   内容不经 shell）。脚本仅导出 `http_proxy/https_proxy/no_proxy` 等环境变量，可随时「清除」或手工编辑。
 
-## `.wslconfig`（全局配置 — 0.1.4）
+## `.wslconfig`（全局配置 — 0.2.0）
 
 路径 `%UserProfile%\.wslconfig`（**Windows 宿主文件**，非发行版内；影响所有发行版与 WSL 虚拟机）。
 「网络」页的「WSL 全局配置（.wslconfig）」面板提供**可视化表单 + 原始文本 + Diff 预览**：
@@ -135,19 +161,36 @@
   （`nat`/`mirrored`/`none`/`consomme`/`bridged`，允许自定义）/ `dnsTunneling` / `firewall` /
   `autoProxy` / `localhostForwarding` / `safeMode` / `guiApplications` / `nestedVirtualization` /
   `vmIdleTimeout` / `dnsProxy` / `defaultVhdSize` / `gpuSupport` / `maxCrashDumpCount` /
-  `kernel` / `kernelCommandLine`；`[general]` 的 `instanceIdleTimeout` / `distributionInstallPath`；
+  `kernel` / `kernelCommandLine` / `kernelModules` / `systemDistro` / `virtiofs` / `virtio` /
+  `hostFileSystemAccess` / `telemetry` / `kernelBootTimeout` / `distributionStartTimeout` /
+  `mountDeviceTimeout` / `crashDumpFolder` / `loadDefaultKernelModules` / `loadKernelModules` /
+  `isolateDistroCgroup`；`[general]` 的 `instanceIdleTimeout` / `distributionInstallPath`；
   `[experimental]` 的 `autoMemoryReclaim`（读兼容 `dropcache`；仅用户修改时写规范
   `dropCache`，加载不置 dirty；允许自定义）/
   `sparseVhd` / `bestEffortDnsParsing` / `ignoredPorts` / `hostAddressLoopback`
 - 逐键最小编辑（保留行内注释、键写法、等号旁空白与未知键）；容量字段校验 WSL
   `ParseMemorySize` 语法（整数 + `B|K|KB|M|MB|G|GB|T|TB`，大小写敏感、无小数）
 - 未知 enum 值**不阻塞保存**（WSL 对其有回退语义），面板标注“当前值不在推荐列表”
+- WSL 3 依赖提示：`virtiofs` 需同时开启 `virtio` 与 `hostFileSystemAccess`；`systemDistro` 必须是
+  绝对 Windows 路径且为 `.img/.vhd`；`isolateDistroCgroup` 需 cgroup v2（面板给出警告，不阻塞保存）
 - 保存：语法守卫 → 备份轮转（保留 3 份）→ 原子写；**无需 UAC**（纯宿主文件）
 - 生效：执行面板内「立即重启 WSL（`wsl --shutdown`）」，或完全停止所有发行版后约 8 秒
 - 镜像模式（`[wsl2] networkingMode`）的读取与面板编辑共用同一解析器
 
+## containers.jsonc — 容器配方（v1）
+
+只保存「用户意图」，不保存实时状态。容器列表/统计每次从 `wslc` 查询。
+
+| 字段           | 说明                                                                                                       |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| `recipes`      | 容器运行配方数组（`id/label/image/name/command/ports/mounts/env/network/detach/rm/stopTimeoutSec/health`） |
+| `recentImages` | 最近使用的镜像引用（最多 30）                                                                              |
+
+安全约束：镜像引用、容器名、主机/容器挂载路径、端口、环境变量名均由
+`packages/shared/src/containers.ts` 统一校验；不符合的配方在加载清洗时丢弃，运行前再次校验。
+
 ## ui-state.jsonc / state.jsonc
 
 界面状态与运行态缓存，一般不手工编辑。`state.jsonc` 的 `lastTaskResult` 记录最近一次长任务
-（导出/导入/迁移/安装/更新/磁盘管理/克隆/注销等）的结果；`ui-state.jsonc` 的
-`terminalLayout` 保存终端分屏布局（窗口重载后恢复标签与分屏结构）。
+（导出/导入/迁移/安装/更新/磁盘管理/克隆/注销/容器等）的结果；`ui-state.jsonc` v2 的
+`workbench` 保存工作台标签/分屏布局，旧 `terminalLayout` 仅迁移期读取（不跨重启恢复旧会话）。

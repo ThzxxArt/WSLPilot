@@ -209,3 +209,165 @@ describe('pty IPC handlers', () => {
     expect(deps.pty.create).not.toHaveBeenCalled()
   })
 })
+
+describe('pty:createProfile（0.2.0 终端 Profile）', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function ctxWithProfiles(profiles: unknown[]) {
+    const ctx = makeCtx()
+    ;(ctx.configService as any).loadSync = vi.fn(() => ({
+      $schemaVersion: 3,
+      terminal: { theme: 'light', profiles },
+    }))
+    return ctx
+  }
+
+  it('profile 不存在 → INVALID_ARGUMENT', async () => {
+    const { wrapped } = register(ctxWithProfiles([]))
+    await expect(
+      wrapped.get(CH.ptyCreateProfile)({}, { profileId: 'nope', cols: 80, rows: 24 }),
+    ).rejects.toThrow(/INVALID_ARGUMENT/)
+  })
+
+  it('distro profile：过运行门禁并按 profile 参数创建会话', async () => {
+    const { wrapped, deps } = register(
+      ctxWithProfiles([
+        {
+          id: 'dev',
+          label: '开发',
+          launch: {
+            kind: 'distro',
+            distro: 'Ubuntu',
+            shell: '/bin/zsh',
+            cwd: '/work',
+            env: { A: '1' },
+          },
+        },
+      ]),
+    )
+    const info = await wrapped.get(CH.ptyCreateProfile)(
+      {},
+      { profileId: 'dev', cols: 100, rows: 30 },
+    )
+    expect(deps.wsl.assertRunning).toHaveBeenCalledWith('Ubuntu')
+    expect(deps.pty.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distro: 'Ubuntu',
+        shell: '/bin/zsh',
+        cwd: '/work',
+        env: { A: '1' },
+        cols: 100,
+        rows: 30,
+        shellIntegration: false,
+      }),
+    )
+    expect(info.ptyId).toBe('p1')
+  })
+
+  it('container profile：不检查发行版状态，直接走 wslc exec 参数', async () => {
+    const { wrapped, deps } = register(
+      ctxWithProfiles([
+        {
+          id: 'box',
+          label: '容器',
+          launch: { kind: 'container', containerId: 'web', shell: '/bin/sh' },
+        },
+      ]),
+    )
+    await wrapped.get(CH.ptyCreateProfile)({}, { profileId: 'box', cols: 80, rows: 24 })
+    expect(deps.wsl.assertRunning).not.toHaveBeenCalled()
+    expect(deps.pty.create).toHaveBeenCalledWith(
+      expect.objectContaining({ containerId: 'web', shell: '/bin/sh', distro: 'web' }),
+    )
+  })
+
+  it('command profile：走 createCommand（argv 由 profile 原文提供）', async () => {
+    const { wrapped, deps } = register(
+      ctxWithProfiles([
+        {
+          id: 'cmd',
+          label: '命令',
+          launch: {
+            kind: 'command',
+            distro: 'Ubuntu',
+            program: '/usr/bin/top',
+            args: ['-b'],
+            cwd: '/tmp',
+          },
+        },
+      ]),
+    )
+    await wrapped.get(CH.ptyCreateProfile)({}, { profileId: 'cmd', cols: 80, rows: 24 })
+    expect(deps.wsl.assertRunning).toHaveBeenCalledWith('Ubuntu')
+    expect(deps.pty.createCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distro: 'Ubuntu',
+        program: '/usr/bin/top',
+        args: ['-b'],
+        cwd: '/tmp',
+      }),
+    )
+  })
+})
+
+describe('pty:create Shell 集成 / 容器分支', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('shellIntegration=true：主进程探测 home 后传给 pty；探测失败降级', async () => {
+    const deps = makeDeps()
+    ;(deps as any).shell = {
+      homeDir: vi.fn(async () => '/home/me'),
+      status: vi.fn(async () => ({ state: 'installed' })),
+    }
+    const { wrapped } = register(makeCtx(), deps)
+    await wrapped.get(CH.ptyCreate)(
+      {},
+      {
+        distro: 'Ubuntu',
+        shellIntegration: true,
+        cols: 80,
+        rows: 24,
+      },
+    )
+    expect((deps as any).shell.homeDir).toHaveBeenCalledWith('Ubuntu')
+    expect(deps.pty.create).toHaveBeenCalledWith(
+      expect.objectContaining({ shellIntegration: true, homeDir: '/home/me' }),
+    )
+
+    const deps2 = makeDeps()
+    ;(deps2 as any).shell = {
+      homeDir: vi.fn(async () => Promise.reject(new Error('probe'))),
+      status: vi.fn(async () => ({ state: 'installed' })),
+    }
+    const r2 = register(makeCtx(), deps2)
+    await r2.wrapped.get(CH.ptyCreate)(
+      {},
+      {
+        distro: 'Ubuntu',
+        shellIntegration: true,
+        cols: 80,
+        rows: 24,
+      },
+    )
+    expect(deps2.pty.create).toHaveBeenCalledWith(
+      expect.objectContaining({ shellIntegration: false }),
+    )
+  })
+
+  it('容器会话跳过发行版运行门禁，直接带 containerId', async () => {
+    const { wrapped, deps } = register(makeCtx())
+    await wrapped.get(CH.ptyCreate)(
+      {},
+      {
+        distro: 'web',
+        containerId: 'web',
+        cols: 80,
+        rows: 24,
+      },
+    )
+    expect(deps.wsl.assertRunning).not.toHaveBeenCalled()
+    expect(deps.pty.create).toHaveBeenCalledWith(
+      expect.objectContaining({ containerId: 'web', distro: 'web' }),
+    )
+  })
+})

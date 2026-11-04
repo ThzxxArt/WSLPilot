@@ -33,8 +33,11 @@ export function configGetImpl() {
   }
 }
 
+/** window.wslAPI 全量 mock 的公开类型（测试内可自由覆写任意命名空间） */
+export type WslAPIMock = Record<string, any>
+
 /** window.wslAPI 全量 mock：默认全部成功 / 空数据，用例内按需覆写 */
-export function createWslAPI() {
+export function createWslAPI(): WslAPIMock {
   return {
     app: {
       getVersion: vi.fn(async () => '0.1.0'),
@@ -146,6 +149,12 @@ export function createWslAPI() {
       run: vi.fn(async () => ({ taskId: 'a' })),
     },
     terminal: {
+      createProfile: vi.fn(async (opts: { profileId?: string }) => ({
+        ptyId: `profile-${opts?.profileId ?? 'p'}`,
+        distro: 'Ubuntu',
+        shell: '/bin/bash',
+        createdAt: Date.now(),
+      })),
       create: vi.fn(async () => ({ ptyId: 'p1', distro: 'Ubuntu', createdAt: Date.now() })),
       input: vi.fn(async () => {}),
       resize: vi.fn(async () => {}),
@@ -179,6 +188,103 @@ export function createWslAPI() {
     clipboard: {
       read: vi.fn(async () => ''),
       write: vi.fn(async () => {}),
+    },
+    /** Shell 集成（0.2.0） */
+    shellIntegration: {
+      status: vi.fn(async (distro: string) => ({
+        distro,
+        shell: 'bash',
+        state: 'installed',
+        supported: true,
+        version: '1',
+        expectedVersion: '1',
+        path: '/home/me/.wslpilot/shell-integration',
+        files: { bashrc: true, zshrc: true },
+      })),
+      install: vi.fn(async (distro: string) => ({
+        distro,
+        shell: 'bash',
+        state: 'installed',
+        supported: true,
+        version: '1',
+        expectedVersion: '1',
+        path: '/home/me/.wslpilot/shell-integration',
+        files: { bashrc: true, zshrc: true },
+      })),
+      remove: vi.fn(async (distro: string) => ({
+        distro,
+        shell: 'bash',
+        state: 'missing',
+        supported: true,
+        version: '',
+        expectedVersion: '1',
+        path: '/home/me/.wslpilot/shell-integration',
+        files: { bashrc: false, zshrc: false },
+      })),
+    },
+    /** WSL 3 容器（0.2.0） */
+    containers: {
+      status: vi.fn(async () => ({
+        installed: true,
+        version: '2.9.3',
+        jsonLists: true,
+        jsonStats: true,
+        events: true,
+        health: true,
+        copy: true,
+        restart: true,
+        systemInfo: true,
+        session: true,
+        mount: true,
+        gpu: true,
+        networks: true,
+        volumes: true,
+        settingsFile: true,
+      })),
+      list: vi.fn(async () => []),
+      inspect: vi.fn(async () => null),
+      run: vi.fn(async () => ({ taskId: 'c-run' })),
+      start: vi.fn(async () => ({ taskId: 'c-start' })),
+      stop: vi.fn(async () => ({ taskId: 'c-stop' })),
+      restart: vi.fn(async () => ({ taskId: 'c-restart' })),
+      remove: vi.fn(async () => ({ taskId: 'c-remove' })),
+      prune: vi.fn(async () => ({ taskId: 'c-prune' })),
+      logs: vi.fn(async () => ({ taskId: 'c-logs' })),
+      stats: vi.fn(async () => []),
+      copy: vi.fn(async () => {}),
+      systemInfo: vi.fn(async () => ({ version: '2.9.3' })),
+      sessionList: vi.fn(async () => []),
+      sessionTerminate: vi.fn(async () => ({ taskId: 'c-session' })),
+      settingsRead: vi.fn(async () => ({
+        path: '%LOCALAPPDATA%\\wslc\\settings.yaml',
+        exists: false,
+        content: '',
+        model: { session: {} },
+      })),
+      settingsWrite: vi.fn(async () => ({ path: 'settings.yaml' })),
+      settingsReset: vi.fn(async () => {}),
+      onChanged: vi.fn(() => vi.fn()),
+    },
+    images: {
+      list: vi.fn(async () => []),
+      pull: vi.fn(async () => ({ taskId: 'i-pull' })),
+      build: vi.fn(async () => ({ taskId: 'i-build' })),
+      remove: vi.fn(async () => {}),
+      prune: vi.fn(async () => ({ taskId: 'i-prune' })),
+    },
+    networks: {
+      list: vi.fn(async () => []),
+      create: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+      connect: vi.fn(async () => {}),
+      disconnect: vi.fn(async () => {}),
+      prune: vi.fn(async () => ({ taskId: 'n-prune' })),
+    },
+    volumes: {
+      list: vi.fn(async () => []),
+      create: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+      prune: vi.fn(async () => ({ taskId: 'v-prune' })),
     },
     /** 网络（真实 preload 契约有该命名空间；此前缺失导致 NetworkView 用例全在错误态下跑） */
     network: {
@@ -251,8 +357,6 @@ export function createWslAPI() {
     },
   }
 }
-
-export type WslAPIMock = ReturnType<typeof createWslAPI>
 
 export function distro(over: Partial<DistroView> = {}): DistroView {
   return {

@@ -35,11 +35,38 @@ function initialState() {
     terminalFontFamily: cfg.terminal.fontFamily as string,
     terminalFontSize: cfg.terminal.fontSize as number,
     terminalLineHeight: cfg.terminal.lineHeight as number,
+    terminalLetterSpacing: cfg.terminal.letterSpacing as number,
     terminalCursorStyle: cfg.terminal.cursorStyle as 'block' | 'underline' | 'bar',
     terminalCursorBlink: cfg.terminal.cursorBlink as boolean,
+    terminalCursorInactiveStyle: cfg.terminal.cursorInactiveStyle,
+    terminalSmoothScroll: cfg.terminal.smoothScroll as boolean,
     terminalScrollback: cfg.terminal.scrollback as number,
     terminalCopyOnSelect: cfg.terminal.copyOnSelect as boolean,
     terminalTheme: cfg.terminal.theme as TerminalTheme,
+    terminalRightClickBehavior: cfg.terminal.rightClickBehavior,
+    terminalPasteWarning: cfg.terminal.pasteWarning,
+    terminalShellIntegration: cfg.terminal.shellIntegration,
+    terminalConfirmCloseWithRunningProcess: cfg.terminal.confirmCloseWithRunningProcess as boolean,
+    terminalDefaultProfileId: cfg.terminal.defaultProfileId as string,
+    terminalProfiles: cfg.terminal.profiles,
+    terminalWebgl: cfg.terminal.webgl,
+    terminalBell: cfg.terminal.bell,
+    terminalMinimumContrastRatio: cfg.terminal.minimumContrastRatio,
+    workbenchDefaultRoute: cfg.workbench.defaultRoute,
+    workbenchAutoCollapseSidebar: cfg.workbench.autoCollapseSidebar as boolean,
+    workbenchDensity: cfg.workbench.density,
+    workbenchTabPosition: cfg.workbench.tabPosition,
+    workbenchShowStatusLine: cfg.workbench.showStatusLine as boolean,
+    workbenchShowPaneHeaders: cfg.workbench.showPaneHeaders,
+    workbenchSessionRailWidth: cfg.workbench.sessionRailWidth as number,
+    workbenchConfirmClosePane: cfg.workbench.confirmClosePane as boolean,
+    containersPollIntervalMs: cfg.containers.pollIntervalMs as number,
+    containersStatsIntervalMs: cfg.containers.statsIntervalMs as number,
+    containersConfirmPrune: cfg.containers.confirmPrune as boolean,
+    containersConfirmRemoveRunning: cfg.containers.confirmRemoveRunning as boolean,
+    containersDefaultStopTimeoutSec: cfg.containers.defaultStopTimeoutSec as number,
+    containersMaskEnvValues: cfg.containers.maskEnvValues as boolean,
+    containersLastImage: cfg.containers.lastImage as string,
     backupDefaultDir: cfg.backup.defaultDir as string,
     backupFormat: cfg.backup.format as BackupFormat,
     backupKeepRecent: cfg.backup.keepRecent as number,
@@ -93,11 +120,38 @@ export const useSettingsStore = defineStore('settings', {
         this.terminalFontFamily = s.terminal.fontFamily
         this.terminalFontSize = s.terminal.fontSize
         this.terminalLineHeight = s.terminal.lineHeight
+        this.terminalLetterSpacing = s.terminal.letterSpacing
         this.terminalCursorStyle = s.terminal.cursorStyle
         this.terminalCursorBlink = s.terminal.cursorBlink
+        this.terminalCursorInactiveStyle = s.terminal.cursorInactiveStyle
+        this.terminalSmoothScroll = s.terminal.smoothScroll
         this.terminalScrollback = s.terminal.scrollback
         this.terminalCopyOnSelect = s.terminal.copyOnSelect
         this.terminalTheme = s.terminal.theme
+        this.terminalRightClickBehavior = s.terminal.rightClickBehavior
+        this.terminalPasteWarning = s.terminal.pasteWarning
+        this.terminalShellIntegration = s.terminal.shellIntegration
+        this.terminalConfirmCloseWithRunningProcess = s.terminal.confirmCloseWithRunningProcess
+        this.terminalDefaultProfileId = s.terminal.defaultProfileId
+        this.terminalProfiles = s.terminal.profiles
+        this.terminalWebgl = s.terminal.webgl
+        this.terminalBell = s.terminal.bell
+        this.terminalMinimumContrastRatio = s.terminal.minimumContrastRatio
+        this.workbenchDefaultRoute = s.workbench.defaultRoute
+        this.workbenchAutoCollapseSidebar = s.workbench.autoCollapseSidebar
+        this.workbenchDensity = s.workbench.density
+        this.workbenchTabPosition = s.workbench.tabPosition
+        this.workbenchShowStatusLine = s.workbench.showStatusLine
+        this.workbenchShowPaneHeaders = s.workbench.showPaneHeaders
+        this.workbenchSessionRailWidth = s.workbench.sessionRailWidth
+        this.workbenchConfirmClosePane = s.workbench.confirmClosePane
+        this.containersPollIntervalMs = s.containers.pollIntervalMs
+        this.containersStatsIntervalMs = s.containers.statsIntervalMs
+        this.containersConfirmPrune = s.containers.confirmPrune
+        this.containersConfirmRemoveRunning = s.containers.confirmRemoveRunning
+        this.containersDefaultStopTimeoutSec = s.containers.defaultStopTimeoutSec
+        this.containersMaskEnvValues = s.containers.maskEnvValues
+        this.containersLastImage = s.containers.lastImage
         this.backupDefaultDir = s.backup.defaultDir
         this.backupFormat = s.backup.format
         this.backupKeepRecent = s.backup.keepRecent
@@ -243,6 +297,32 @@ export const useSettingsStore = defineStore('settings', {
       })
     },
 
+    async setTerminalCursorInactiveStyle(
+      cursorInactiveStyle: 'outline' | 'block' | 'bar' | 'underline' | 'none',
+    ) {
+      return this.persistField('terminalCursorInactiveStyle', cursorInactiveStyle, {
+        terminal: { cursorInactiveStyle },
+      })
+    },
+
+    async setTerminalSmoothScroll(smoothScroll: boolean) {
+      return this.persistField('terminalSmoothScroll', smoothScroll, {
+        terminal: { smoothScroll },
+      })
+    },
+
+    async setTerminalConfirmCloseWithRunningProcess(confirm: boolean) {
+      return this.persistField('terminalConfirmCloseWithRunningProcess', confirm, {
+        terminal: { confirmCloseWithRunningProcess: confirm },
+      })
+    },
+
+    async setTerminalDefaultProfileId(profileId: string) {
+      return this.persistField('terminalDefaultProfileId', profileId, {
+        terminal: { defaultProfileId: profileId },
+      })
+    },
+
     async setTerminalScrollback(scrollback: number) {
       return this.persistField('terminalScrollback', scrollback, { terminal: { scrollback } })
     },
@@ -255,6 +335,132 @@ export const useSettingsStore = defineStore('settings', {
 
     async setTerminalTheme(theme: TerminalTheme) {
       return this.persistField('terminalTheme', theme, { terminal: { theme } })
+    },
+
+    async setTerminalLetterSpacing(letterSpacing: number) {
+      return this.persistField('terminalLetterSpacing', letterSpacing, {
+        terminal: { letterSpacing },
+      })
+    },
+
+    async setTerminalRightClickBehavior(
+      rightClickBehavior: 'contextMenu' | 'paste' | 'selectWord',
+    ) {
+      return this.persistField('terminalRightClickBehavior', rightClickBehavior, {
+        terminal: { rightClickBehavior },
+      })
+    },
+
+    async setTerminalPasteWarning(pasteWarning: 'always' | 'multiline' | 'never') {
+      return this.persistField('terminalPasteWarning', pasteWarning, {
+        terminal: { pasteWarning },
+      })
+    },
+
+    async setTerminalShellIntegration(shellIntegration: 'off' | 'prompt' | 'on') {
+      return this.persistField('terminalShellIntegration', shellIntegration, {
+        terminal: { shellIntegration },
+      })
+    },
+
+    async setTerminalWebgl(webgl: 'auto' | 'on' | 'off') {
+      return this.persistField('terminalWebgl', webgl, { terminal: { webgl } })
+    },
+
+    async setTerminalBell(bell: 'none' | 'visual' | 'sound') {
+      return this.persistField('terminalBell', bell, { terminal: { bell } })
+    },
+
+    async setTerminalMinimumContrastRatio(minimumContrastRatio: number) {
+      return this.persistField('terminalMinimumContrastRatio', minimumContrastRatio, {
+        terminal: { minimumContrastRatio },
+      })
+    },
+
+    async setWorkbenchDefaultRoute(defaultRoute: 'dashboard' | 'terminal' | 'last') {
+      return this.persistField('workbenchDefaultRoute', defaultRoute, {
+        workbench: { defaultRoute },
+      })
+    },
+
+    async setWorkbenchConfirmClosePane(confirmClosePane: boolean) {
+      return this.persistField('workbenchConfirmClosePane', confirmClosePane, {
+        workbench: { confirmClosePane },
+      })
+    },
+
+    async setWorkbenchAutoCollapseSidebar(autoCollapseSidebar: boolean) {
+      return this.persistField('workbenchAutoCollapseSidebar', autoCollapseSidebar, {
+        workbench: { autoCollapseSidebar },
+      })
+    },
+
+    async setWorkbenchDensity(density: 'comfortable' | 'compact') {
+      return this.persistField('workbenchDensity', density, { workbench: { density } })
+    },
+
+    async setWorkbenchTabPosition(tabPosition: 'top' | 'left') {
+      return this.persistField('workbenchTabPosition', tabPosition, { workbench: { tabPosition } })
+    },
+
+    async setWorkbenchShowStatusLine(showStatusLine: boolean) {
+      return this.persistField('workbenchShowStatusLine', showStatusLine, {
+        workbench: { showStatusLine },
+      })
+    },
+
+    async setWorkbenchShowPaneHeaders(showPaneHeaders: 'auto' | 'always' | 'never') {
+      return this.persistField('workbenchShowPaneHeaders', showPaneHeaders, {
+        workbench: { showPaneHeaders },
+      })
+    },
+
+    async setWorkbenchSessionRailWidth(sessionRailWidth: number) {
+      return this.persistField('workbenchSessionRailWidth', sessionRailWidth, {
+        workbench: { sessionRailWidth },
+      })
+    },
+
+    async setContainersPollIntervalMs(pollIntervalMs: number) {
+      return this.persistField('containersPollIntervalMs', pollIntervalMs, {
+        containers: { pollIntervalMs },
+      })
+    },
+
+    async setContainersStatsIntervalMs(statsIntervalMs: number) {
+      return this.persistField('containersStatsIntervalMs', statsIntervalMs, {
+        containers: { statsIntervalMs },
+      })
+    },
+
+    async setContainersConfirmRemoveRunning(confirmRemoveRunning: boolean) {
+      return this.persistField('containersConfirmRemoveRunning', confirmRemoveRunning, {
+        containers: { confirmRemoveRunning },
+      })
+    },
+
+    async setContainersDefaultStopTimeoutSec(defaultStopTimeoutSec: number) {
+      return this.persistField('containersDefaultStopTimeoutSec', defaultStopTimeoutSec, {
+        containers: { defaultStopTimeoutSec },
+      })
+    },
+
+    async setContainersLastImage(lastImage: string) {
+      return this.persistField('containersLastImage', lastImage, {
+        containers: { lastImage },
+      })
+    },
+
+    async setContainersConfirmPrune(confirmPrune: boolean) {
+      return this.persistField('containersConfirmPrune', confirmPrune, {
+        containers: { confirmPrune },
+      })
+    },
+
+    async setContainersMaskEnvValues(maskEnvValues: boolean) {
+      return this.persistField('containersMaskEnvValues', maskEnvValues, {
+        containers: { maskEnvValues },
+      })
     },
 
     async setBackupDefaultDir(defaultDir: string) {

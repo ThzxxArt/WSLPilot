@@ -118,12 +118,19 @@ const editTags = ref('')
 const editIcon = ref('')
 const editColor = ref('')
 const editStartupCwd = ref('')
+const editDefaultShell = ref('')
+const editTerminalProfileId = ref<string | null>('')
+const editHidden = ref(false)
 const editPinned = ref(false)
 const editQuickActions = ref<string[]>([])
 
 /** 快捷动作可选项（来自 actions.jsonc 白名单） */
 const quickActionOptions = computed(() =>
   actionsStore.items.map((a) => ({ label: a.label, value: a.id })),
+)
+
+const profileOptions = computed(() =>
+  settings.terminalProfiles.map((p) => ({ label: p.label, value: p.id })),
 )
 
 /** 复位编辑态（review 0.1.2 根治：切换发行版后不得沿用上一发行版的编辑值写回） */
@@ -135,6 +142,9 @@ function resetEditing() {
   editIcon.value = ''
   editColor.value = ''
   editStartupCwd.value = ''
+  editDefaultShell.value = ''
+  editTerminalProfileId.value = ''
+  editHidden.value = false
   editPinned.value = false
   editQuickActions.value = []
 }
@@ -734,6 +744,9 @@ async function startEdit() {
   editIcon.value = m?.icon ?? ''
   editColor.value = m?.color ?? ''
   editStartupCwd.value = m?.startupCwd ?? '~'
+  editDefaultShell.value = m?.defaultShell ?? ''
+  editTerminalProfileId.value = m?.terminalProfileId ?? ''
+  editHidden.value = m?.hidden === true
   editPinned.value = !!m?.pinned
   editQuickActions.value = [...(m?.quickActions ?? [])]
   editing.value = true
@@ -766,6 +779,9 @@ async function saveMeta() {
       icon: editIcon.value.trim(),
       note: editNote.value.trim(),
       startupCwd: editStartupCwd.value.trim() || '~',
+      defaultShell: editDefaultShell.value.trim(),
+      terminalProfileId: editTerminalProfileId.value ?? '',
+      hidden: editHidden.value,
       pinned: editPinned.value,
       quickActions: [...editQuickActions.value],
     })
@@ -1032,6 +1048,33 @@ async function saveMeta() {
               placeholder="~ 或 /home/me/project"
               :input-props="{ 'aria-label': '终端启动目录' }"
             />
+          </div>
+          <div class="field">
+            <div class="label">默认 Shell（覆盖全局）</div>
+            <NInput
+              v-model:value="editDefaultShell"
+              size="small"
+              placeholder="/bin/bash（留空跟随全局）"
+              :input-props="{ 'aria-label': '默认 Shell' }"
+            />
+          </div>
+          <div class="field">
+            <div class="label">终端 Profile</div>
+            <NSelect
+              v-model:value="editTerminalProfileId"
+              size="small"
+              clearable
+              :options="profileOptions"
+              placeholder="跟随默认启动方式"
+              aria-label="终端 Profile"
+            />
+          </div>
+          <div class="field field-row">
+            <div>
+              <div class="label">隐藏</div>
+              <div class="hint">从驾驶舱/终端/列表默认隐藏（docker-desktop 等内部发行版）</div>
+            </div>
+            <NSwitch v-model:value="editHidden" size="small" aria-label="隐藏发行版" />
           </div>
           <div class="field">
             <div class="label">快捷动作（动作卡片上的直达项）</div>

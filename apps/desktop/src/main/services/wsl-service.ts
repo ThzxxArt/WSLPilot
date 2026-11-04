@@ -59,7 +59,7 @@ export function listContainsDistro(stdout: string, target: string): boolean {
     .trim()
     .toLowerCase()
   if (!lower) return false
-  if (parseDistroList(stdout).some((d) => d.name.toLowerCase() === lower)) return true
+  if (parseDistroList(String(stdout ?? '')).some((d) => d.name.toLowerCase() === lower)) return true
   // 简单列表形态兜底（原实现用整段子串匹配，既有前缀误判又依赖输出形态；此处逐行精确比对）
   for (const rawLine of String(stdout ?? '').split(/\r?\n/)) {
     let line = rawLine.replace(/^\uFEFF/, '').trim()
