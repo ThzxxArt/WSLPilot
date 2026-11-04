@@ -119,6 +119,54 @@ describe('useDistrosStore', () => {
     expect(s.items.map((d) => d.name)).toEqual(['B'])
   })
 
+  it('普通刷新切换 loading；silent 轮询不切换（空列表不闪骨架屏）', async () => {
+    let resolveManual!: (v: unknown) => void
+    wslAPI.distros.list.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveManual = r
+      }),
+    )
+    const s = useDistrosStore()
+    const manual = s.refresh()
+    expect(s.loading).toBe(true)
+    resolveManual([])
+    await manual
+    expect(s.loading).toBe(false)
+
+    let resolveSilent!: (v: unknown) => void
+    wslAPI.distros.list.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveSilent = r
+      }),
+    )
+    const silent = s.refresh({ silent: true })
+    expect(s.loading).toBe(false)
+    resolveSilent([])
+    await silent
+    expect(s.loading).toBe(false)
+    expect(s.items).toEqual([])
+  })
+
+  it('刷新失败保留原错误直到成功（轮询不周期性清空错误横幅）', async () => {
+    wslAPI.distros.list.mockRejectedValueOnce(new Error('服务暂时不可用'))
+    const s = useDistrosStore()
+    await s.refresh()
+    expect(s.lastError?.message).toContain('服务暂时不可用')
+
+    let resolveRetry!: (v: unknown) => void
+    wslAPI.distros.list.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveRetry = r
+      }),
+    )
+    const retry = s.refresh({ silent: true })
+    // 在途期间旧错误仍在，横幅不会被移除再插回
+    expect(s.lastError?.message).toContain('服务暂时不可用')
+    resolveRetry([])
+    await retry
+    expect(s.lastError).toBeNull()
+  })
+
   it('busy key / byName 大小写归一（WSL 名不区分大小写 — review 0.1.2）', async () => {
     wslAPI.distros.list.mockResolvedValue([
       { name: 'Ubuntu', state: 'Stopped', version: 2, isDefault: false },
@@ -461,6 +509,36 @@ describe('useMetricsStore', () => {
       perDistro: {},
     })
     await p
+    expect(s.lastError).toBeNull()
+  })
+
+  it('sample 在途保留旧错误，成功后才清除（避免轮询横幅闪烁）', async () => {
+    const s = useMetricsStore()
+    wslAPI.metrics.sampleOverview.mockRejectedValueOnce(new Error('采样失败'))
+    await s.sample()
+    expect(s.lastError).toBeTruthy()
+
+    let resolveRetry!: (v: unknown) => void
+    wslAPI.metrics.sampleOverview.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveRetry = r
+      }),
+    )
+    const retry = s.sample()
+    // 请求在途：旧错误仍保留，错误横幅不会被移除再插回
+    expect(s.lastError).toBeTruthy()
+    resolveRetry({
+      runningCount: 0,
+      totalCount: 0,
+      memUsedKB: 0,
+      memTotalKB: 0,
+      diskUsedKB: 0,
+      diskTotalKB: 0,
+      cpuPercent: 0,
+      sampledAt: 't',
+      perDistro: {},
+    })
+    await retry
     expect(s.lastError).toBeNull()
   })
 

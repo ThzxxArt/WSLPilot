@@ -90,6 +90,11 @@ async function refreshAll() {
   await Promise.all([distros.refresh(), metrics.sample()])
 }
 
+/** 轮询刷新：静默更新数据，不切骨架屏 / 不闪按钮，避免空列表下周期性抖动 */
+async function pollRefresh() {
+  await Promise.all([distros.refresh({ silent: true }), metrics.sample()])
+}
+
 onMounted(() => {
   // 每次路由进入重算问候语（跨天/长时间挂起后语义正确）
   greeting.value = greetingText()
@@ -115,7 +120,7 @@ onMounted(() => {
   })()
 })
 
-const { start: startPolling, stop: stopPolling } = usePolling(() => void refreshAll(), {
+const { start: startPolling, stop: stopPolling } = usePolling(() => void pollRefresh(), {
   intervalMs: pollInterval,
 })
 // settings.general.autoRefreshOnStart 必须真正关掉轮询：
@@ -306,7 +311,10 @@ function onDetailTerminal(name: string) {
         <n-button text type="primary" @click="router.push('/distros')"> 全部 → </n-button>
       </div>
 
-      <div v-if="distros.loading && distros.items.length === 0" class="skeleton-cards">
+      <div
+        v-if="distros.loading && distros.items.length === 0 && !distros.lastError"
+        class="skeleton-cards"
+      >
         <Skeleton v-for="i in 3" :key="i" height="132px" radius="16px" />
       </div>
 

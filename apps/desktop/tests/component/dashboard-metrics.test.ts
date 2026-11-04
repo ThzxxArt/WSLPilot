@@ -125,4 +125,43 @@ describe('DashboardView 指标概览（采样成功/失败/轮询开关）', () 
     expect(wslAPI.metrics.sampleOverview).toHaveBeenCalledTimes(1)
     expect(intervalSpy).toHaveBeenCalled()
   })
+
+  it('空列表轮询走静默刷新：不切骨架屏、不闪「刷新」按钮（抖动回归）', async () => {
+    useSettingsStore().autoRefreshOnStart = true
+    useSettingsStore().pollIntervalMs = 1000
+    // 捕获 usePolling 建立的定时回调；不真正等待 5 秒
+    const intervals: Array<() => void> = []
+    vi.spyOn(window, 'setInterval').mockImplementation(((fn: () => void) => {
+      intervals.push(fn)
+      return 1
+    }) as never)
+    vi.spyOn(window, 'clearInterval').mockImplementation((() => {}) as never)
+
+    const w = mount(DashboardView, { attachTo: document.body, global: { stubs: dashStubs } })
+    await flushPromises()
+
+    // 首屏空状态渲染完成
+    expect(w.find('.skeleton-cards').exists()).toBe(false)
+    expect(w.text()).toContain('还没有发行版，去安装一个')
+    expect(intervals).toHaveLength(1)
+
+    // 下一次轮询在途：静默模式不得把 loading 置真
+    let resolveNext!: (v: unknown) => void
+    wslAPI.distros.list.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveNext = r
+      }),
+    )
+    intervals[0]!()
+    await flushPromises()
+
+    expect(wslAPI.distros.list).toHaveBeenCalledTimes(2)
+    expect(w.find('.skeleton-cards').exists()).toBe(false)
+    expect(w.find('.n-button--loading').exists()).toBe(false)
+    expect(w.text()).toContain('还没有发行版，去安装一个')
+
+    resolveNext([])
+    await flushPromises()
+    expect(w.find('.skeleton-cards').exists()).toBe(false)
+  })
 })

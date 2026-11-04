@@ -11,8 +11,9 @@ vi.mock('@wslpilot/kit', async (importOriginal) => {
 
 import {
   createWslService,
-  normalizeState,
+  isNoDistroOutput,
   listContainsDistro,
+  normalizeState,
 } from '../../src/main/services/wsl-service'
 import { runWsl, spawnWsl } from '@wslpilot/kit'
 
@@ -126,6 +127,50 @@ describe('WslService', () => {
     it('throws TASK_FAILED for other errors', async () => {
       ;(runWsl as any).mockResolvedValue({ stdout: '', stderr: 'boom', code: 3 })
       await expect(svc.list()).rejects.toMatchObject({ code: 'TASK_FAILED' })
+    })
+
+    it('无发行版（WSL 3 中文错误码）返回空列表，而不是「读取失败」', async () => {
+      // WSL 3.0.3 真机输出：--list --verbose 在空列表时非零退出
+      ;(runWsl as any).mockResolvedValue({
+        stdout: '',
+        stderr:
+          '适用于 Linux 的 Windows 子系统没有已安装的分发。\r\n' +
+          '使用“wsl.exe --list --online”列出可用的分发\r\n' +
+          'Error code: Wsl/Service/WSL_E_DEFAULT_DISTRO_NOT_FOUND\r\n',
+        code: -1,
+      })
+      await expect(svc.list()).resolves.toEqual([])
+    })
+
+    it('无发行版（英文提示）同样返回空列表', async () => {
+      ;(runWsl as any).mockResolvedValue({
+        stdout: '',
+        stderr:
+          'Windows Subsystem for Linux has no installed distributions.\n' +
+          "Use 'wsl.exe --list --online' to list available distributions\n",
+        code: 1,
+      })
+      await expect(svc.list()).resolves.toEqual([])
+    })
+
+    it('无发行版（仅 HRESULT 符号名，任意系统语言）返回空列表', async () => {
+      ;(runWsl as any).mockResolvedValue({
+        stdout: '',
+        stderr: 'Error code: Wsl/Service/WSL_E_DEFAULT_DISTRO_NOT_FOUND',
+        code: 1,
+      })
+      await expect(svc.list()).resolves.toEqual([])
+    })
+
+    it('无发行版：中文简体 / 繁体 / 英文识别器正反例', () => {
+      expect(isNoDistroOutput('适用于 Linux 的 Windows 子系统没有已安装的分发。')).toBe(true)
+      expect(isNoDistroOutput('Windows 子系統 Linux 版 沒有已安裝的發佈。')).toBe(true)
+      expect(isNoDistroOutput('Windows Subsystem for Linux has no installed distributions.')).toBe(
+        true,
+      )
+      expect(isNoDistroOutput('适用于 Linux 的 Windows 子系统分发版:\r\nUbuntu')).toBe(false)
+      expect(isNoDistroOutput("'wsl.exe' is not recognized")).toBe(false)
+      expect(isNoDistroOutput('boom')).toBe(false)
     })
   })
 

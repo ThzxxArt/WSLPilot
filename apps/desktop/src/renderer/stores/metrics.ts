@@ -33,7 +33,8 @@ export const useMetricsStore = defineStore('metrics', {
   actions: {
     async sample() {
       const gen = ++this.sampleGen
-      this.lastError = null
+      // 不在请求前清空 lastError：轮询失败时错误横幅保持稳定，
+      // 避免每 5 秒「消失 → 重现」造成驾驶舱布局抖动；成功路径再自愈。
       try {
         const raw = (await window.wslAPI.metrics.sampleOverview()) as OverviewMetrics
         if (gen !== this.sampleGen) return

@@ -56,9 +56,12 @@ const pollInterval = computed(() => {
   return typeof ms === 'number' && ms >= 1000 ? ms : DEFAULT_POLL_INTERVAL_MS
 })
 
-const { start: startPolling, stop: stopPolling } = usePolling(() => void distros.refresh(), {
-  intervalMs: pollInterval,
-})
+const { start: startPolling, stop: stopPolling } = usePolling(
+  () => void distros.refresh({ silent: true }),
+  {
+    intervalMs: pollInterval,
+  },
+)
 // settings.general.autoRefreshOnStart 必须真正关掉轮询（review M-2 根治）
 watch(
   () => settings.autoRefreshOnStart,
@@ -211,14 +214,18 @@ function onDetailTerminal(name: string) {
       <span v-if="distros.lastError.suggestion"> — {{ distros.lastError.suggestion }}</span>
     </p>
 
-    <!-- 首次加载：骨架屏（§12.8 流光扫过，而非转圈） -->
-    <div v-if="distros.loading && distros.items.length === 0" class="grid" aria-busy="true">
+    <!-- 首次加载：骨架屏（§12.8 流光扫过，而非转圈）；已有错误时保持错误/空状态稳定 -->
+    <div
+      v-if="distros.loading && distros.items.length === 0 && !distros.lastError"
+      class="grid"
+      aria-busy="true"
+    >
       <Skeleton v-for="i in 6" :key="i" height="132px" radius="16px" />
     </div>
 
     <template v-else>
       <EmptyState
-        v-if="filtered.length === 0 && !distros.loading"
+        v-if="filtered.length === 0 && (!distros.loading || !!distros.lastError)"
         :description="search || tagFilter ? '没有匹配的发行版，换个关键词试试' : '尚未检测到发行版'"
         :illustration="search || tagFilter ? '🔍' : '🐧'"
       >

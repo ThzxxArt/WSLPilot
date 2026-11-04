@@ -31,6 +31,21 @@ import type { TaskControl } from './task-runner'
 import { spawnWslTask } from './spawn-task'
 import { probeWslCapabilities } from './wsl-capabilities'
 
+/**
+ * `wsl --list --verbose` 在「一个发行版都没装」时不是返回空表，而是以
+ * `WSL_E_DEFAULT_DISTRO_NOT_FOUND` 非零退出（WSL 3.0.3 真机确认；中英文提示
+ * 均可能因系统语言不同而变化）。这属于正常的空状态，不是服务异常：
+ * 必须识别为 `[]`，否则驾驶舱会显示「读取发行版列表失败」并让状态栏永久「服务异常」。
+ *
+ * HRESULT 符号名是跨语言稳定的兜底；其余文案覆盖中/英/繁/日/韩常见输出。
+ */
+const NO_DISTRO_OUTPUT_RE =
+  /WSL_E_DEFAULT_DISTRO_NOT_FOUND|has no installed distributions|没有已安装的(?:分发|发行版)|沒有已安裝的(?:發佈|發行版)|インストールされているディストリビューションはありません|설치된 배포판이 없습니다/i
+
+export function isNoDistroOutput(text: string): boolean {
+  return NO_DISTRO_OUTPUT_RE.test(String(text ?? ''))
+}
+
 /** wsl 状态字符串 → 规范化 WslState */
 export function normalizeState(raw: string): WslState {
   const s = raw.trim().toLowerCase()
@@ -267,8 +282,11 @@ export function createWslService(logger: Logger, opts: WslServiceOptions = {}): 
   }
   async function list(): Promise<DistroRuntime[]> {
     const r = await runWsl(['--list', '--verbose'])
+    const text = `${r.stderr}\n${r.stdout}`
+    // 空状态优先于错误映射：WSL 无发行版时以 WSL_E_DEFAULT_DISTRO_NOT_FOUND 非零退出
+    // （中文提示「没有已安装的分发」）。这是正常空列表，不是 wsl.exe 缺失 / WSL 未安装。
+    if (r.code !== 0 && isNoDistroOutput(text)) return []
     if (r.code !== 0) {
-      const text = `${r.stderr}\n${r.stdout}`
       // spawn 级错误（wsl.exe 缺失）与未启用 WSL 都要映射到可行动的错误码（review M6）
       if (/ENOENT|not recognized|找不到|not found|spawn/i.test(text)) {
         throw createAppError('WSL_NOT_FOUND', {

@@ -34,15 +34,22 @@ export const useDistrosStore = defineStore('distros', {
   },
 
   actions: {
-    async refresh() {
+    /**
+     * 读取发行版列表。
+     *
+     * `silent` 用于轮询：不切换全局 `loading`，否则空列表下每 5 秒都会
+     * 「骨架屏 → 空状态」闪一次，页面持续抖动。错误也不在请求前清空，
+     * 只在成功时清除；这样轮询失败期间错误横幅保持稳定，不会周期性消失/重现。
+     */
+    async refresh(opts: { silent?: boolean } = {}) {
       const gen = ++this.loadGen
-      this.loading = true
-      this.lastError = null
+      if (opts.silent !== true) this.loading = true
       try {
         const list = await window.wslAPI.distros.list()
         if (gen !== this.loadGen) return
         // meta.pinned = 置顶（设计书 §6.4）：固定排在最前（此前该字段能写不能看 — 幽灵字段根治）
         this.items = [...list].sort((a, b) => Number(!!b.meta?.pinned) - Number(!!a.meta?.pinned))
+        this.lastError = null
       } catch (e) {
         if (gen !== this.loadGen) return
         this.lastError = toAppError(e)
